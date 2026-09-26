@@ -54,7 +54,6 @@ def test_fit_sets_normalized_feature_importances(separable_data):
 @pytest.mark.parametrize(
     ("parameters", "name"),
     [
-        ({"verbose": 1}, "verbose"),
         ({"ccp_alpha": 0.1}, "ccp_alpha"),
         ({"monotonic_cst": [1]}, "monotonic_cst"),
     ],
@@ -219,6 +218,14 @@ def test_max_leaf_nodes_limits_each_tree_to_a_leaf(separable_data):
     ).fit(x, y)
 
     np.testing.assert_allclose(classifier.feature_importances_, 0.0)
+
+
+def test_verbose_reports_tree_construction(separable_data, capsys):
+    x, y = separable_data
+
+    BankaiRandomForestClassifier(n_estimators=3, verbose=1, random_state=42).fit(x, y)
+
+    assert "building 3 trees" in capsys.readouterr().out
 
 
 def test_integer_sample_weight_matches_repeated_training_rows():

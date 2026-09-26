@@ -95,11 +95,11 @@ interface.
       `balanced_subsample`.
   - [x] `sample_weight`, `class_weight`, and `balanced`.
   - [ ] `balanced_subsample`.
-- [ ] State: `random_state`, deterministic `n_jobs`, `verbose`, and
+- [x] State: `random_state`, deterministic `n_jobs`, `verbose`, and
       `warm_start`.
   - [x] `random_state` and deterministic `n_jobs`.
   - [x] `warm_start`.
-  - [ ] `verbose`.
+  - [x] `verbose`.
 - [ ] Structural controls: `ccp_alpha` and valid binary `monotonic_cst`.
 
 ### v0.4.0: Robustness and Data Boundaries
@@ -144,3 +144,4 @@ interface.
 | 2026-09-25 | v0.3.0 | Impurity threshold complete | Rejects candidate splits below `min_impurity_decrease`. |
 | 2026-09-25 | v0.3.0 | Tree limits complete | Added structural `max_leaf_nodes` enforcement. |
 | 2026-09-25 | v0.4.0 | Data boundaries in progress | Added explicit multioutput rejection and DataFrame feature-name coverage. |
+| 2026-09-25 | v0.3.0 | State controls complete | Added validated verbose construction reporting. |
