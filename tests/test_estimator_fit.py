@@ -323,6 +323,18 @@ def test_float_transfer_telemetry_records_casts(separable_data):
     assert float64_model.copy_telemetry_["cast_to_float64"] is False
 
 
+def test_random_state_reproduces_predictions_probabilities_and_importances():
+    rng = np.random.RandomState(42)
+    x = rng.normal(size=(50, 4))
+    y = (x[:, 0] > 0.0).astype(int)
+    first = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(x, y)
+    second = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(x, y)
+
+    np.testing.assert_array_equal(first.predict(x), second.predict(x))
+    np.testing.assert_allclose(first.predict_proba(x), second.predict_proba(x))
+    np.testing.assert_allclose(first.feature_importances_, second.feature_importances_)
+
+
 def test_predict_rejects_mismatched_feature_count(separable_data):
     x, y = separable_data
     classifier = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(x, y)

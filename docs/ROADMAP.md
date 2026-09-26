@@ -109,7 +109,7 @@ interface.
   - [x] Sparse and multioutput rejection; DataFrame feature-name preservation.
   - [x] NaN, dimensionality, dtype, and feature-name error coverage.
 - [x] Float32/float64 transfer tests with copy telemetry.
-- [ ] Deterministic trees, predictions, serialization, and thread counts.
+- [x] Deterministic trees, predictions, serialization, and thread counts.
 
 ### v0.5.0: Benchmark and Distribution
 
@@ -148,3 +148,4 @@ interface.
 | 2026-09-25 | v0.4.0 | Input boundary coverage complete | Added NaN, float32, feature-count, and feature-name mismatch tests. |
 | 2026-09-25 | v0.4.0 | Imbalance suite complete | Added a noisy DataFrame 99:1 balanced-weight classifier suite. |
 | 2026-09-25 | v0.4.0 | Transfer telemetry complete | Records input/core dtypes, contiguity, and float64 casts. |
+| 2026-09-25 | v0.4.0 | Reproducibility complete | Seeded predictions, probabilities, and importances are reproducible. |
