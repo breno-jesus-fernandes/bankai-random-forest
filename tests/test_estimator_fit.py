@@ -310,6 +310,19 @@ def test_accepts_float32_features(separable_data):
     np.testing.assert_array_equal(classifier.predict(x.astype(np.float32)), y)
 
 
+def test_float_transfer_telemetry_records_casts(separable_data):
+    x, y = separable_data
+    float32_model = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(
+        x.astype(np.float32), y
+    )
+    float64_model = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(x, y)
+
+    assert float32_model.copy_telemetry_["input_dtype"] == "float32"
+    assert float32_model.copy_telemetry_["core_dtype"] == "float64"
+    assert float32_model.copy_telemetry_["cast_to_float64"] is True
+    assert float64_model.copy_telemetry_["cast_to_float64"] is False
+
+
 def test_predict_rejects_mismatched_feature_count(separable_data):
     x, y = separable_data
     classifier = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(x, y)

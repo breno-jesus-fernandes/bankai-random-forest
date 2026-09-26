@@ -65,6 +65,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         elif y_array.ndim != 1:
             raise ValueError("multioutput targets are not supported")
 
+        raw_x = np.asarray(X)
         warm_refit = self.warm_start and hasattr(self, "_forest")
         if warm_refit and self.n_estimators < self._fitted_n_estimators:
             raise ValueError(
@@ -74,6 +75,12 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         X, y = validate_data(
             self, X, y, dtype=np.float64, ensure_2d=True, reset=not warm_refit
         )
+        self.copy_telemetry_ = {
+            "input_dtype": str(raw_x.dtype),
+            "core_dtype": str(X.dtype),
+            "input_c_contiguous": bool(raw_x.flags.c_contiguous),
+            "cast_to_float64": raw_x.dtype != np.dtype(np.float64),
+        }
         target_type = type_of_target(y)
         if target_type.startswith("continuous"):
             raise ValueError(f"Unknown label type: {target_type}")
