@@ -9,6 +9,8 @@ def test_default_constructor_matches_sklearn_random_forest_classifier():
 
     assert isinstance(estimator, ClassifierMixin)
     assert isinstance(estimator, BaseEstimator)
-    assert estimator.get_params(deep=False) == RandomForestClassifier().get_params(
+    bankai_params = estimator.get_params(deep=False)
+    assert bankai_params.pop("permutation_importance") is False
+    assert bankai_params == RandomForestClassifier().get_params(
         deep=False
     )

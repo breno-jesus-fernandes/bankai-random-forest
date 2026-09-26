@@ -30,7 +30,7 @@ impl NativeForest {
         self.forest.is_some()
     }
 
-    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, n_jobs=1))]
+    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1))]
     fn fit(
         &mut self,
         x: PyReadonlyArray2<'_, f64>,
@@ -49,6 +49,7 @@ impl NativeForest {
         bootstrap: bool,
         max_samples: Option<usize>,
         oob: bool,
+        permutation_importance: bool,
         n_jobs: usize,
     ) -> PyResult<()> {
         if n_estimators == 0 {
@@ -99,17 +100,36 @@ impl NativeForest {
             min_samples_leaf,
             min_impurity_decrease,
         )
-            .map_err(PyValueError::new_err)?;
+        .map_err(PyValueError::new_err)?;
 
         self.forest = Some(if n_jobs == 1 {
             Forest::new_with_settings(
-                &input, n_estimators, max_features, true, false, oob, random_state,
-                max_depth, max_leaves.unwrap_or(usize::MAX), bootstrap, max_samples,
+                &input,
+                n_estimators,
+                max_features,
+                true,
+                permutation_importance,
+                oob,
+                random_state,
+                max_depth,
+                max_leaves.unwrap_or(usize::MAX),
+                bootstrap,
+                max_samples,
             )
         } else {
             Forest::new_parallel_with_settings(
-                &input, n_estimators, max_features, true, false, oob, random_state, n_jobs,
-                max_depth, max_leaves.unwrap_or(usize::MAX), bootstrap, max_samples,
+                &input,
+                n_estimators,
+                max_features,
+                true,
+                permutation_importance,
+                oob,
+                random_state,
+                n_jobs,
+                max_depth,
+                max_leaves.unwrap_or(usize::MAX),
+                bootstrap,
+                max_samples,
             )
         });
         self.n_classes = n_classes;
@@ -183,13 +203,27 @@ impl NativeForest {
         Ok(importances)
     }
 
+    fn permutation_importances(&self) -> PyResult<Vec<f64>> {
+        let forest = self
+            .forest
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("forest is not fitted"))?;
+        let mut importances = vec![0.0; self.n_features];
+        for (feature, importance) in forest.importance() {
+            importances[feature] = importance;
+        }
+        Ok(importances)
+    }
+
     fn oob_predict_proba(&self) -> PyResult<Vec<Vec<f64>>> {
         let forest = self
             .forest
             .as_ref()
             .ok_or_else(|| PyRuntimeError::new_err("forest is not fitted"))?;
         if !forest.has_oob() {
-            return Err(PyRuntimeError::new_err("out-of-bag predictions are unavailable"));
+            return Err(PyRuntimeError::new_err(
+                "out-of-bag predictions are unavailable",
+            ));
         }
         let mut probabilities = vec![vec![0.0; self.n_classes]; self.n_samples];
         for (row, votes) in forest.oob() {

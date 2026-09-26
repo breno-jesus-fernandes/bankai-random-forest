@@ -51,6 +51,45 @@ def test_fit_sets_normalized_feature_importances(separable_data):
     np.testing.assert_allclose(classifier.feature_importances_.sum(), 1.0)
 
 
+def test_permutation_importance_exposes_native_oob_accuracy_decrease():
+    rng = np.random.RandomState(42)
+    x = rng.normal(size=(200, 2))
+    y = (x[:, 0] > 0.0).astype(int)
+
+    classifier = BankaiRandomForestClassifier(
+        n_estimators=50, permutation_importance=True, random_state=42
+    ).fit(x, y)
+
+    assert classifier.permutation_importances_.shape == (2,)
+    assert classifier.permutation_importances_[0] > classifier.permutation_importances_[1]
+
+
+def test_permutation_importance_requires_bootstrap(separable_data):
+    x, y = separable_data
+
+    with pytest.raises(ValueError, match="permutation_importance requires bootstrap=True"):
+        BankaiRandomForestClassifier(
+            permutation_importance=True, bootstrap=False
+        ).fit(x, y)
+
+
+def test_permutation_importance_is_deterministic_across_thread_counts():
+    rng = np.random.RandomState(42)
+    x = rng.normal(size=(200, 3))
+    y = (x[:, 0] + x[:, 1] > 0.0).astype(int)
+
+    sequential = BankaiRandomForestClassifier(
+        n_estimators=50, n_jobs=1, permutation_importance=True, random_state=42
+    ).fit(x, y)
+    parallel = BankaiRandomForestClassifier(
+        n_estimators=50, n_jobs=2, permutation_importance=True, random_state=42
+    ).fit(x, y)
+
+    np.testing.assert_allclose(
+        sequential.permutation_importances_, parallel.permutation_importances_
+    )
+
+
 @pytest.mark.parametrize(
     ("parameters", "name"),
     [

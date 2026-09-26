@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use xrf::{
     AccuracyDecreaseAggregator, DecisionSlice, FairBest, FeatureSampler, Mask, RfInput, RfRng,
     VoteAggregator,
@@ -322,8 +323,7 @@ fn best_split(
         }
         let child_impurity = (left_weight / total_weight)
             * impurity(input.criterion, &left, left_weight)
-            + (right_weight / total_weight)
-                * impurity(input.criterion, &right, right_weight);
+            + (right_weight / total_weight) * impurity(input.criterion, &right, right_weight);
         let gain = parent_impurity - child_impurity;
         if gain < input.min_impurity_decrease {
             continue;
@@ -342,23 +342,60 @@ fn best_split(
     best
 }
 
-pub struct NoImportance;
+pub struct PermutationImportance {
+    direct: Vec<Option<usize>>,
+    drops: HashMap<usize, isize>,
+    n: usize,
+    true_labels: Vec<usize>,
+}
 
-impl AccuracyDecreaseAggregator<DenseInput> for NoImportance {
-    fn new(_: &DenseInput, _: &Mask, _: usize) -> Self {
-        Self
+impl AccuracyDecreaseAggregator<DenseInput> for PermutationImportance {
+    fn new(input: &DenseInput, on: &Mask, n: usize) -> Self {
+        Self {
+            direct: vec![None; n],
+            drops: HashMap::new(),
+            n: on.len(),
+            true_labels: input.labels().to_vec(),
+        }
     }
 
-    fn ingest(&mut self, _: Option<usize>, _: &Mask, _: &usize) {
-        unreachable!("importance is disabled for the baseline backend")
+    fn ingest(&mut self, permuted: Option<usize>, mask: &Mask, vote: &usize) {
+        if let Some(feature) = permuted {
+            let difference = mask
+                .iter()
+                .map(|&row| {
+                    let direct = self.direct[row]
+                        .expect("direct OOB votes must be collected before permutation");
+                    if direct == *vote {
+                        return 0;
+                    }
+                    match (
+                        self.true_labels[row] == *vote,
+                        self.true_labels[row] == direct,
+                    ) {
+                        (true, false) => -1,
+                        (false, true) => 1,
+                        (false, false) => 0,
+                        (true, true) => unreachable!("identical predictions cannot differ"),
+                    }
+                })
+                .sum::<isize>();
+            *self.drops.entry(feature).or_insert(0) += difference;
+        } else {
+            for &row in mask.iter() {
+                self.direct[row] = Some(*vote);
+            }
+        }
     }
 
     fn mda_iter(&self) -> impl Iterator<Item = (usize, f64)> {
-        std::iter::empty()
+        self.drops
+            .iter()
+            .map(|(&feature, &drop)| (feature, drop as f64 / self.n as f64))
     }
 
-    fn get_direct_vote(&self, _: usize) -> usize {
-        unreachable!("importance is disabled for the baseline backend")
+    fn get_direct_vote(&self, row: usize) -> usize {
+        self.direct[row].expect("direct OOB vote must be available")
     }
 }
 
@@ -382,7 +419,7 @@ impl RfInput for DenseInput {
     type Vote = usize;
     type VoteAggregator = ClassVotes;
     type DecisionSlice = DenseDecisionSlice;
-    type AccuracyDecreaseAggregator = NoImportance;
+    type AccuracyDecreaseAggregator = PermutationImportance;
     type FeatureSampler = UniformFeatureSampler;
 
     fn observation_count(&self) -> usize {

@@ -162,3 +162,4 @@ loads the PyO3 wrapper.
 | 2026-09-25 | v0.5.0 | Comparative runner complete | Added sklearn/PyO3/Rust comparison with CSV and Markdown report export. |
 | 2026-09-25 | v0.5.0 | Benchmark matrix complete | Ran optimized 10k and 100k comparisons for sklearn, PyO3, and Rust CLI. |
 | 2026-09-25 | v0.5.0 | Hyperparameter matrix complete | Ran the optimized 10k-row matrix across criterion, feature count, depth, leaf size, bootstrap sampling, and balanced weights; reports live in `benchmarks/results-hyperparameters-10k/`. |
+| 2026-09-26 | v0.3.0 | Permutation importance complete | Added optional native XRF OOB mean-decrease-in-accuracy importances through `permutation_importance=True`. |
