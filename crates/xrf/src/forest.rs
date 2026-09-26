@@ -115,8 +115,10 @@ impl<I: RfInput> Forest<I> {
             } else {
                 (Mask::new_all(input.observation_count()), Mask::new_all(0))
             };
+            let tree_input = input.tree_input(&bag);
+            let tree_input = tree_input.as_ref().unwrap_or(input);
             let tree = Tree::new(
-                input,
+                tree_input,
                 &bag,
                 tries,
                 &mut feature_sampler,
@@ -249,8 +251,10 @@ impl<I: RfInput> Forest<I> {
                             } else {
                                 (Mask::new_all(input.observation_count()), Mask::new_all(0))
                             };
+                            let tree_input = input.tree_input(&bag);
+                            let tree_input = tree_input.as_ref().unwrap_or(input);
                             let tree = Tree::new(
-                                input,
+                                tree_input,
                                 &bag,
                                 tries,
                                 &mut feature_sampler,

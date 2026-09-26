@@ -1,13 +1,15 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use xrf::{
     AccuracyDecreaseAggregator, DecisionSlice, FairBest, FeatureSampler, Mask, RfInput, RfRng,
     VoteAggregator,
 };
 
+#[derive(Clone)]
 pub struct DenseInput {
     values: DenseValues,
-    labels: Option<Vec<usize>>,
-    sample_weights: Option<Vec<f64>>,
+    labels: Option<Arc<Vec<usize>>>,
+    sample_weights: Option<Arc<Vec<f64>>>,
     rows: usize,
     columns: usize,
     n_classes: usize,
@@ -18,13 +20,15 @@ pub struct DenseInput {
     min_impurity_decrease: f64,
     total_weight: f64,
     histogram_bins: Option<usize>,
-    bin_edges: Option<Vec<Vec<f64>>>,
+    bin_edges: Option<Arc<Vec<Vec<f64>>>>,
     active_features: Vec<usize>,
+    balanced_subsample: bool,
 }
 
+#[derive(Clone)]
 enum DenseValues {
-    Exact(Vec<f64>),
-    Binned(Vec<u8>),
+    Exact(Arc<Vec<f64>>),
+    Binned(Arc<Vec<u8>>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -107,14 +111,22 @@ impl DenseInput {
                         (!feature_edges.is_empty()).then_some(feature)
                     })
                     .collect();
-                (DenseValues::Binned(binned), Some(edges), active)
+                (
+                    DenseValues::Binned(Arc::new(binned)),
+                    Some(Arc::new(edges)),
+                    active,
+                )
             }
-            None => (DenseValues::Exact(values), None, (0..columns).collect()),
+            None => (
+                DenseValues::Exact(Arc::new(values)),
+                None,
+                (0..columns).collect(),
+            ),
         };
         Ok(Self {
             values,
-            labels: Some(labels),
-            sample_weights: Some(sample_weights),
+            labels: Some(Arc::new(labels)),
+            sample_weights: Some(Arc::new(sample_weights)),
             rows,
             columns,
             n_classes,
@@ -127,6 +139,7 @@ impl DenseInput {
             histogram_bins: max_bins,
             bin_edges,
             active_features,
+            balanced_subsample: false,
         })
     }
 
@@ -147,9 +160,11 @@ impl DenseInput {
                 if edges.len() != columns {
                     return Err("histogram edges do not match the fitted feature count".to_string());
                 }
-                DenseValues::Binned(apply_histogram_edges(&values, rows, columns, edges))
+                DenseValues::Binned(Arc::new(apply_histogram_edges(
+                    &values, rows, columns, edges,
+                )))
             }
-            None => DenseValues::Exact(values),
+            None => DenseValues::Exact(Arc::new(values)),
         };
 
         Ok(Self {
@@ -168,6 +183,7 @@ impl DenseInput {
             histogram_bins: None,
             bin_edges: None,
             active_features: (0..columns).collect(),
+            balanced_subsample: false,
         })
     }
 
@@ -176,11 +192,62 @@ impl DenseInput {
     }
 
     pub fn bin_edges(&self) -> Option<&[Vec<f64>]> {
-        self.bin_edges.as_deref()
+        self.bin_edges.as_ref().map(|edges| edges.as_slice())
     }
 
     pub fn value_at(&self, row: usize, column: usize) -> f64 {
         self.value(row, column)
+    }
+
+    pub fn with_balanced_subsample(mut self) -> Self {
+        self.balanced_subsample = true;
+        self
+    }
+
+    #[cfg(test)]
+    fn shares_feature_storage_with(&self, other: &Self) -> bool {
+        match (&self.values, &other.values) {
+            (DenseValues::Exact(left), DenseValues::Exact(right)) => Arc::ptr_eq(left, right),
+            (DenseValues::Binned(left), DenseValues::Binned(right)) => Arc::ptr_eq(left, right),
+            _ => false,
+        }
+    }
+
+    fn balanced_tree_view(&self, bag: &Mask) -> Self {
+        let labels = self.labels();
+        let mut class_counts = vec![0usize; self.n_classes];
+        for &row in bag.iter() {
+            class_counts[labels[row]] += 1;
+        }
+        let present_classes = class_counts.iter().filter(|&&count| count > 0).count();
+        let sample_count = bag.len();
+        let mut weights = self
+            .sample_weights
+            .as_ref()
+            .expect("balanced bootstrap requires training weights")
+            .as_ref()
+            .clone();
+        for (row, weight) in weights.iter_mut().enumerate() {
+            let count = class_counts[labels[row]];
+            *weight = if count == 0 {
+                0.0
+            } else {
+                *weight * sample_count as f64 / (present_classes * count) as f64
+            };
+        }
+        let tree_total_weight = bag.iter().map(|&row| weights[row]).sum::<f64>();
+        let min_leaf_fraction = if self.total_weight > 0.0 {
+            self.min_leaf_weight / self.total_weight
+        } else {
+            0.0
+        };
+        Self {
+            sample_weights: Some(Arc::new(weights)),
+            total_weight: tree_total_weight,
+            min_leaf_weight: min_leaf_fraction * tree_total_weight,
+            balanced_subsample: false,
+            ..self.clone()
+        }
     }
 
     fn labels(&self) -> &[usize] {
@@ -690,6 +757,11 @@ impl RfInput for DenseInput {
         self.rows
     }
 
+    fn tree_input(&self, bag: &Mask) -> Option<Self> {
+        self.balanced_subsample
+            .then(|| self.balanced_tree_view(bag))
+    }
+
     fn feature_count(&self) -> usize {
         self.columns
     }
@@ -812,5 +884,34 @@ mod histogram_optimization_tests {
         let direct_right = build_histograms(&input, &right);
 
         assert_eq!(derived_right, direct_right);
+    }
+
+    #[test]
+    fn bootstrap_balancing_weights_each_tree_from_its_bag_without_copying_features() {
+        let bag = Mask::from_vec(vec![0, 0, 1, 2, 2, 0]);
+        for max_bins in [None, Some(4)] {
+            let input = DenseInput::training(
+                vec![0.0, 1.0, 2.0],
+                3,
+                1,
+                vec![0, 0, 1],
+                vec![2.0, 3.0, 5.0],
+                2,
+                0.0,
+                Criterion::Gini,
+                2,
+                1,
+                0.0,
+                max_bins,
+            )
+            .unwrap()
+            .with_balanced_subsample();
+
+            let tree_input = input.tree_input(&bag).unwrap();
+            assert_eq!(tree_input.sample_weight(0), 1.5);
+            assert_eq!(tree_input.sample_weight(1), 2.25);
+            assert_eq!(tree_input.sample_weight(2), 7.5);
+            assert!(input.shares_feature_storage_with(&tree_input));
+        }
     }
 }

@@ -237,6 +237,9 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             permutation_importance=self._fit_importance_type == "permutation",
             n_jobs=self._fit_n_jobs,
             max_bins=self._fit_max_bins,
+            balanced_subsample=(
+                self.class_weight == "balanced_subsample" and self.bootstrap is True
+            ),
         )
         self._forest = forest
         self._shap_estimators_cache = None
@@ -305,6 +308,9 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             permutation_importance=self._fit_importance_type == "permutation",
             n_jobs=self._fit_n_jobs,
             max_bins=self._fit_max_bins,
+            balanced_subsample=(
+                self.class_weight == "balanced_subsample" and self.bootstrap is True
+            ),
         )
         self._forest = forest
         self._shap_estimators_cache = None
@@ -439,16 +445,12 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
 
         if self.class_weight == "balanced_subsample":
             if self.bootstrap:
-                # Per-bootstrap balancing is performed by sklearn's forest;
-                # the native backend currently receives one shared weight vector.
-                # Keep the documented preset usable while preserving base weights.
+                # The native forest computes class factors from each tree's bag.
                 return sample_weight
-            weights = np.ones(len(y), dtype=np.float64) if sample_weight is None else sample_weight.copy()
-            classes, inverse = np.unique(y, return_inverse=True)
-            totals = np.bincount(inverse, weights=weights)
-            factors = weights.sum() / (len(classes) * totals)
-            weights *= factors[inverse]
-            return weights
+            class_weight = compute_sample_weight("balanced", y)
+            if sample_weight is None:
+                return class_weight.astype(np.float64, copy=False)
+            return sample_weight * class_weight
 
         class_weight = compute_sample_weight(self.class_weight, y)
         if sample_weight is None:

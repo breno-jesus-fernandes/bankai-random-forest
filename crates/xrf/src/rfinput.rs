@@ -24,6 +24,11 @@ pub trait RfInput: Sized {
     type SplitCache;
     /// Number of observations, used to generate masks; has to be accurate.
     fn observation_count(&self) -> usize;
+    /// Optional input view with tree-specific weights for the supplied bag.
+    /// Implementations can share immutable feature storage with the original.
+    fn tree_input(&self, _bag: &Mask) -> Option<Self> {
+        None
+    }
     /// Number of features; not actually used by xrf, but usually useful for implementers.
     fn feature_count(&self) -> usize;
     /// Constructor of the DecisionSlice object for elements in the mask.

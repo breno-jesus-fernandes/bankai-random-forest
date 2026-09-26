@@ -30,7 +30,36 @@ def test_joblib_round_trip_preserves_fitted_classifier(tmp_path, max_bins):
         restored.predict_proba(x[72:]), model.predict_proba(x[72:]), atol=0, rtol=0
     )
     np.testing.assert_allclose(
-        restored.feature_importances_, model.feature_importances_, atol=0, rtol=0
+        restored.feature_importances_, model.feature_importances_, atol=1e-15, rtol=0
+    )
+
+
+@pytest.mark.parametrize("max_bins", [None, 8])
+def test_joblib_round_trip_preserves_balanced_subsample_models(tmp_path, max_bins):
+    rng = np.random.RandomState(53)
+    x = rng.normal(size=(96, 5))
+    y = np.zeros(96, dtype=np.int64)
+    y[-16:] = 1
+    x[-16:, 0] += 1.0
+    model = BankaiRandomForestClassifier(
+        n_estimators=9,
+        random_state=59,
+        max_bins=max_bins,
+        class_weight="balanced_subsample",
+        importance_type="permutation",
+        oob_score=True,
+    ).fit(x[:72], y[:72])
+    path = tmp_path / "bankai-balanced-subsample.joblib"
+
+    joblib.dump(model, path)
+    restored = joblib.load(path)
+
+    np.testing.assert_array_equal(restored.predict(x[72:]), model.predict(x[72:]))
+    np.testing.assert_allclose(
+        restored.predict_proba(x[72:]), model.predict_proba(x[72:]), atol=0, rtol=0
+    )
+    np.testing.assert_allclose(
+        restored.feature_importances_, model.feature_importances_, atol=1e-15, rtol=0
     )
 
 

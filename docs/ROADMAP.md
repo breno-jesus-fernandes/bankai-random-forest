@@ -186,9 +186,8 @@ loads the PyO3 wrapper.
 
 - [x] Fix estimator tags so sklearn identifies Bankai as a classifier and
       classifier meta-estimators can use it.
-- [ ] Implement `class_weight="balanced_subsample"` with per-bootstrap-sample
-      weighting. The preset is accepted and its non-bootstrap weighting is
-      implemented; per-tree bootstrap weights still need a Rust-core hook.
+- [x] Implement `class_weight="balanced_subsample"` with per-bootstrap-sample
+      weighting, including sklearn's non-bootstrap behavior.
 - [x] Match sklearn's `max_samples` semantics for fractional and weighted
       samples, including flooring the computed sample count.
 - [x] Support callable `oob_score` functions with sklearn-compatible inputs
@@ -203,11 +202,13 @@ loads the PyO3 wrapper.
 
 ### v1.1.0: Bootstrap Class Weight Parity
 
-- [ ] Add an XRF input hook so each tree computes `balanced_subsample` weights
+- [x] Add an XRF input hook so each tree computes `balanced_subsample` weights
       from its own bootstrap multiplicities without copying the dense matrix.
-- [ ] Verify weighted and unweighted per-tree behavior against sklearn,
+- [x] Verify weighted and unweighted per-tree behavior against sklearn,
       including deterministic sequential and parallel forests.
-- [ ] Preserve OOB predictions and feature importance under per-tree weights.
+- [x] Preserve OOB predictions and feature importance under per-tree weights.
+- [x] Verify exact and histogram behavior, non-bootstrap class weights, full
+      regression tests, estimator checks, and release performance gates.
 
 ### Compatibility Expansion Quality Gates
 
@@ -309,4 +310,5 @@ loads the PyO3 wrapper.
 | 2026-09-26 | v0.9.0 | sklearn compatibility gap audit complete | Documented the sklearn 1.9.1 comparison and priorities in `docs/SKLEARN_COMPATIBILITY.md`. The full suite reports 72 passed and four expected xfails (classifier tags, `balanced_subsample`, fractional `max_samples`, callable OOB scoring); two existing `log(0)` warnings remain. |
 | 2026-09-26 | v1.0.0 | Core sklearn compatibility remediation planned | Correct the four highest-priority v0.9 gaps while keeping backend-heavy pruning/monotonic features and intentional sparse/NaN/multioutput boundaries outside this milestone. |
 | 2026-09-26 | v1.0.0 | Compatibility remediation implemented | Fixed classifier tags, fractional/weighted `max_samples` flooring, and callable OOB scoring. `balanced_subsample` is accepted and handles `bootstrap=False`; exact per-bootstrap weighting is carried into v1.1. Release extension build passed and the full suite reports 76 passed. |
+| 2026-09-26 | v1.1.0 | Bootstrap class weight parity complete | Added per-tree balanced bootstrap weights through shared dense feature storage. Verified non-bootstrap weighting, deterministic sequential/parallel forests, OOB scoring and permutation importance. Release benchmarks on 10k rows stayed within the 5% gate for existing exact and histogram paths; details and raw measurements are in `benchmarks/results-balanced-subsample-10k/`. |
 | 2026-09-26 | v1.2.0-v1.6.0 | Compatibility expansion planned | Added independent pruning, monotonicity, sparse, NaN, and multioutput milestones. Each requires TDD, full compatibility regression coverage, release benchmarks with untimed warmups, and a maximum 5% regression in existing workloads. |

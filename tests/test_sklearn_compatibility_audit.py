@@ -95,12 +95,40 @@ def test_balanced_subsample_without_bootstrap_uses_balanced_weights():
         random_state=14,
     ).fit(x, y, sample_weight=weights)
     classes, inverse = np.unique(y, return_inverse=True)
-    expected = weights.sum() / (len(classes) * np.bincount(inverse, weights=weights))
+    expected = len(y) / (len(classes) * np.bincount(inverse))
     np.testing.assert_allclose(
         np.bincount(model._fit_y, weights=model._fit_sample_weight)
         / np.bincount(inverse, weights=weights),
         expected,
     )
+
+
+def test_balanced_subsample_bootstrap_is_tree_specific_and_parallel_deterministic():
+    rng = np.random.RandomState(84)
+    x = rng.normal(size=(360, 4))
+    y = np.zeros(360, dtype=np.int64)
+    y[-40:] = 1
+    x[-40:, 0] += 1.0
+    params = dict(
+        n_estimators=31,
+        max_features=None,
+        max_depth=5,
+        class_weight="balanced_subsample",
+        random_state=91,
+        oob_score=True,
+        importance_type="permutation",
+    )
+    sequential = BankaiRandomForestClassifier(n_jobs=1, **params).fit(x, y)
+    parallel = BankaiRandomForestClassifier(n_jobs=3, **params).fit(x, y)
+    unweighted = BankaiRandomForestClassifier(
+        n_jobs=1, **{**params, "class_weight": None, "oob_score": False}
+    ).fit(x, y)
+
+    np.testing.assert_array_equal(sequential.predict(x), parallel.predict(x))
+    np.testing.assert_allclose(sequential.predict_proba(x), parallel.predict_proba(x))
+    assert np.isfinite(sequential.oob_score_)
+    assert np.isfinite(sequential.feature_importances_).all()
+    assert not np.array_equal(sequential.predict_proba(x), unweighted.predict_proba(x))
 
 
 def test_oob_score_accepts_a_scoring_callable():

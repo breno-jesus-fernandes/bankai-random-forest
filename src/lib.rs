@@ -42,7 +42,7 @@ impl NativeForest {
         self.forest.is_some()
     }
 
-    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1, max_bins=None))]
+    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1, max_bins=None, balanced_subsample=false))]
     fn fit(
         &mut self,
         x: PyReadonlyArray2<'_, f64>,
@@ -64,6 +64,7 @@ impl NativeForest {
         permutation_importance: bool,
         n_jobs: usize,
         max_bins: Option<usize>,
+        balanced_subsample: bool,
     ) -> PyResult<()> {
         if n_estimators == 0 {
             return Err(PyValueError::new_err("n_estimators must be at least 1"));
@@ -115,6 +116,11 @@ impl NativeForest {
             max_bins,
         )
         .map_err(PyValueError::new_err)?;
+        let input = if balanced_subsample {
+            input.with_balanced_subsample()
+        } else {
+            input
+        };
 
         self.forest = Some(if n_jobs == 1 {
             Forest::new_with_settings(
