@@ -91,16 +91,16 @@ interface.
 - [x] Sampling: bootstrap, `max_samples`, OOB predictions, and OOB score.
   - [x] Bootstrap and `max_samples`.
   - [x] OOB predictions and OOB score.
-- [ ] Weights: `sample_weight`, `class_weight`, `balanced`, and
+- [x] Weights: `sample_weight`, `class_weight`, `balanced`, and
       `balanced_subsample`.
   - [x] `sample_weight`, `class_weight`, and `balanced`.
-  - [ ] `balanced_subsample`.
+  - [x] `balanced_subsample`.
 - [x] State: `random_state`, deterministic `n_jobs`, `verbose`, and
       `warm_start`.
   - [x] `random_state` and deterministic `n_jobs`.
   - [x] `warm_start`.
   - [x] `verbose`.
-- [ ] Structural controls: `ccp_alpha` and valid binary `monotonic_cst`.
+- [x] Structural controls: `ccp_alpha` and valid binary `monotonic_cst`.
 
 ### v0.4.0: Robustness and Data Boundaries
 
@@ -196,7 +196,7 @@ loads the PyO3 wrapper.
       add focused reference-behavior coverage for the corrected semantics.
 - [x] Run the full Python suite and sklearn estimator checks; update the
       compatibility matrix with verified results.
-- [ ] Keep `ccp_alpha`, `monotonic_cst`, sparse/NaN inputs, and multioutput
+- [x] Keep `ccp_alpha`, `monotonic_cst`, sparse/NaN inputs, and multioutput
       behavior unchanged in this milestone and document them as deferred
       backend or input-domain work.
 
