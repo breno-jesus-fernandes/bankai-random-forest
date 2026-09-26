@@ -328,6 +328,21 @@ def test_predict_rejects_changed_dataframe_feature_names(separable_data):
         classifier.predict(pd.DataFrame(x, columns=["humidity"]))
 
 
+def test_dataframe_noise_and_99_to_1_imbalance():
+    rng = np.random.RandomState(42)
+    y = np.zeros(1_000, dtype=int)
+    y[-10:] = 1
+    x = rng.normal(size=(1_000, 5))
+    x[:, 0] = np.where(y == 1, 2.0, -2.0)
+    frame = pd.DataFrame(x, columns=[f"feature_{index}" for index in range(5)])
+
+    classifier = BankaiRandomForestClassifier(
+        n_estimators=50, class_weight="balanced", random_state=42
+    ).fit(frame, y)
+
+    np.testing.assert_array_equal(classifier.predict(frame), y)
+
+
 def test_pickle_round_trip_preserves_predictions(separable_data):
     x, y = separable_data
     classifier = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(x, y)

@@ -104,7 +104,7 @@ interface.
 
 ### v0.4.0: Robustness and Data Boundaries
 
-- [ ] DataFrame noise and 99:1 imbalance suites.
+- [x] DataFrame noise and 99:1 imbalance suites.
 - [x] Sparse, NaN, multioutput, dimensionality, dtype, and feature-name errors.
   - [x] Sparse and multioutput rejection; DataFrame feature-name preservation.
   - [x] NaN, dimensionality, dtype, and feature-name error coverage.
@@ -146,3 +146,4 @@ interface.
 | 2026-09-25 | v0.4.0 | Data boundaries in progress | Added explicit multioutput rejection and DataFrame feature-name coverage. |
 | 2026-09-25 | v0.3.0 | State controls complete | Added validated verbose construction reporting. |
 | 2026-09-25 | v0.4.0 | Input boundary coverage complete | Added NaN, float32, feature-count, and feature-name mismatch tests. |
+| 2026-09-25 | v0.4.0 | Imbalance suite complete | Added a noisy DataFrame 99:1 balanced-weight classifier suite. |
