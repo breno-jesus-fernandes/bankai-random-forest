@@ -115,15 +115,22 @@ def benchmark(rows, features, trees, binary, profile, parameters):
     from bankai_random_forest import BankaiRandomForestClassifier
 
     x, y = generate_dataset(rows, features)
+    estimator_parameters = {
+        "n_estimators": trees,
+        "max_features": "sqrt",
+        "n_jobs": 1,
+        "random_state": 42,
+        **parameters,
+    }
     sklearn_result = measure_python(
         "sklearn",
-        RandomForestClassifier(n_estimators=trees, max_features="sqrt", n_jobs=1, random_state=42, **parameters),
+        RandomForestClassifier(**estimator_parameters),
         x,
         y,
     )
     bankai_result = measure_python(
         "pyO3",
-        BankaiRandomForestClassifier(n_estimators=trees, n_jobs=1, random_state=42, **parameters),
+        BankaiRandomForestClassifier(**estimator_parameters),
         x,
         y,
     )
