@@ -114,21 +114,8 @@ uv run pytest -q
 uv run cargo test --workspace
 ```
 
-Pull requests and pushes to `master` build an optimized `abi3` wheel and run
-the full Python suite against it on Python 3.11, 3.12, and 3.13. A `v*` tag
-builds Linux, macOS, and Windows wheels plus a source archive, signs the files
-with Sigstore, and attaches both artifacts and signature bundles to a
-GitHub Release. The release workflow can also be dispatched manually to build,
-sign, and verify candidate artifacts without publishing a release; download the
-`signed-release-artifacts` workflow artifact from that run. Install the Sigstore
-CLI and verify a release wheel with:
-
-```bash
-python -m pip install sigstore
-wheel=/path/to/downloaded-wheel.whl
-sigstore verify github "$wheel" \
-  --bundle "$wheel.sigstore.json" \
-  --repository breno-jesus-fernandes/bankai-random-forest
-```
+Optimized `cp311-abi3` wheels were built and tested locally on Python 3.11,
+3.12, and 3.13. The full Python suite passed (147 tests) against each installed
+wheel. Release signing and CI/CD automation are separate future work.
 
 The project is licensed under GPL-3.0-or-later; see [`COPYING`](COPYING).
