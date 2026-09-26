@@ -35,7 +35,7 @@ tests are in `tests/test_sklearn_compatibility_audit.py`.
 
 Verification ran against scikit-learn 1.9.1 and Python 3.11.11. The release
 extension build, sklearn estimator checks, Rust tests, and full Python suite
-passed (140 Python tests and 19 Rust tests). NaN coverage exercises learned
+passed (140 Python tests and 20 Rust tests). NaN coverage exercises learned
 routing and fallback for dense/CSR/CSC, exact/histogram, OOB, apply,
 decision_path, TreeSHAP, sklearn parity, and joblib. Sparse coverage checks CSR/CSC
 against dense results, sklearn predictions, OOB, validation, and joblib.
@@ -45,6 +45,7 @@ in exact and histogram modes, and checks joblib and TreeSHAP compatibility.
 Two existing `divide by zero` warnings from `log(0)` remain in
 `predict_log_proba` coverage. Release benchmarks with warmups are documented
 in `benchmarks/results-monotonic-10k/`, `benchmarks/results-sparse-10k/`, and
-`benchmarks/results-nan-10k/`. The NaN implementation is still being optimized:
-several finite-only workloads currently exceed the roadmap's 5% regression
-limit, so v1.5.0 remains open.
+`benchmarks/results-nan-10k/`. The paired NaN release comparison includes
+untimed warmups, native prediction timings, and tree-size diagnostics; all six
+finite-input fit and prediction workloads stayed within the roadmap's 5%
+regression limit after the traversal optimization.

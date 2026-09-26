@@ -19,7 +19,35 @@ nine measured runs; raw CSVs are stored next to this report.
 | Histogram (32 bins) | CSR | 0.488648 | 0.416055 | -14.86% | 0.180450 | 0.191577 | +6.17% |
 | Histogram (32 bins) | CSC | 0.493449 | 0.419849 | -14.92% | 0.184449 | 0.189188 | +2.57% |
 
-The 5% regression gate is not met. In particular, finite dense histogram
-prediction and dense exact prediction need more work before v1.5.0 can close.
-These measurements are an implementation checkpoint, not a completed
-performance result.
+This first comparison was the pre-optimization checkpoint. Profiling isolated
+the prediction slowdown to a third iterator variant: every visited sample
+entered an extra enum dispatch even when the iterator was only buffering
+predictions. The fix removes that variant and buffers split routes only for
+NaN-containing training input. Tree node counts and depths remain unchanged.
+
+## Paired benchmark after traversal optimization
+
+The rerun alternated baseline (`8be8ffe`) and current source order by workload;
+both were rebuilt with `maturin develop --release` and
+`RUSTFLAGS="-C target-cpu=native"`. Each seed had one untimed fit/predict
+warmup followed by three timed repetitions. The workload is 10,000 × 20, 90%
+zeros, 50 trees, `max_features=4`, and seeds 17, 29, and 43. The runner records
+the sklearn-facing prediction time, direct native prediction time, and total
+nodes/depth outside timed sections.
+
+| Mode | Input | Fit change | Estimator predict change | Native predict change |
+| --- | --- | ---: | ---: | ---: |
+| Exact | Dense | -2.98% | -0.11% | -0.75% |
+| Exact | CSR | -1.98% | -0.62% | +0.71% |
+| Exact | CSC | +0.03% | -2.35% | +0.74% |
+| Histogram (32 bins) | Dense | +1.97% | +0.86% | +1.54% |
+| Histogram (32 bins) | CSR | +2.48% | -1.07% | -1.24% |
+| Histogram (32 bins) | CSC | -5.14% | -0.07% | +0.59% |
+
+All finite-input workloads meet the 5% regression ceiling. Node counts and
+maximum depths match exactly for each seed/backend; the largest measured fit
+regression is +2.48%, and the largest prediction regression is +0.86%.
+`paired-optimized/` contains the twelve raw baseline/current CSVs. The
+reproducible runner is `benchmarks/run_sparse_benchmark.py`; it rebuilds the
+selected checkout in release mode and accepts `--project-root` for the
+baseline worktree.

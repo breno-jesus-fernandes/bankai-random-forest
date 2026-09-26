@@ -62,13 +62,6 @@ enum DenseSplitIter<'a> {
         feature: usize,
         pivot: f64,
     },
-    LazyMissing {
-        input: &'a DenseInput,
-        rows: std::slice::Iter<'a, usize>,
-        feature: usize,
-        pivot: f64,
-        missing_left: bool,
-    },
     Buffered(std::vec::IntoIter<bool>),
 }
 
@@ -83,7 +76,6 @@ impl Iterator for DenseSplitIter<'_> {
                 feature,
                 pivot,
             } => rows.next().map(|&row| input.value(row, *feature) > *pivot),
-            Self::LazyMissing { input, rows, feature, pivot, missing_left } => rows.next().map(|&row| input.routes_left(row, *feature, *pivot, *missing_left)),
             Self::Buffered(values) => values.next(),
         }
     }
@@ -1381,7 +1373,12 @@ impl RfInput for DenseInput {
             DenseSplitIter::Buffered(values)
         } else {
             if self.has_missing_values {
-                DenseSplitIter::LazyMissing { input: self, rows: mask.iter(), feature, pivot: *pivot, missing_left }
+                DenseSplitIter::Buffered(
+                    mask.iter()
+                        .map(|&row| self.routes_left(row, feature, *pivot, missing_left))
+                        .collect::<Vec<_>>()
+                        .into_iter(),
+                )
             } else {
                 DenseSplitIter::Lazy { input: self, rows: mask.iter(), feature, pivot: *pivot }
             }
@@ -1436,6 +1433,43 @@ mod histogram_optimization_tests {
         let direct_right = build_histograms(&input, &right);
 
         assert_eq!(derived_right, direct_right);
+    }
+
+    #[test]
+    fn finite_and_nan_training_split_iterators_route_rows() {
+        let make_input = |values| {
+            DenseInput::training(
+                values,
+                3,
+                1,
+                vec![0, 1, 1],
+                vec![1.0; 3],
+                2,
+                0.0,
+                Criterion::Gini,
+                2,
+                1,
+                0.0,
+                None,
+            )
+            .unwrap()
+        };
+        let mask = Mask::new_all(3);
+        let finite = make_input(vec![0.0, 1.0, 2.0]);
+        assert_eq!(
+            finite
+                .split_iter(&mask, 0, &1.0, false)
+                .collect::<Vec<_>>(),
+            vec![false, false, true]
+        );
+
+        let with_nan = make_input(vec![0.0, f64::NAN, 2.0]);
+        assert_eq!(
+            with_nan
+                .split_iter(&mask, 0, &1.0, true)
+                .collect::<Vec<_>>(),
+            vec![false, true, true]
+        );
     }
 
     #[test]
