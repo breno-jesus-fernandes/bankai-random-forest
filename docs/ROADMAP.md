@@ -115,7 +115,7 @@ interface.
 
 - [x] Implement the pure Rust `bankai-xrf-cli` benchmark runner.
 - [x] Benchmark sklearn, CLI, and PyO3 wrapper at 10k and 100k rows.
-- [ ] Benchmark hyperparameter profiles: criterion, feature count, depth, leaf
+- [x] Benchmark hyperparameter profiles: criterion, feature count, depth, leaf
       size, bootstrap sampling, and balanced class weights.
 - [x] Export raw CSV and Markdown reports with timings, peak RSS, FFI overhead,
       F1, probability RMSE, agreement, and environment metadata.
@@ -161,4 +161,4 @@ loads the PyO3 wrapper.
 | 2026-09-25 | v0.5.0 | Rust CLI runner complete | Added deterministic synthetic data, CSV/Markdown output, timings, and F1. |
 | 2026-09-25 | v0.5.0 | Comparative runner complete | Added sklearn/PyO3/Rust comparison with CSV and Markdown report export. |
 | 2026-09-25 | v0.5.0 | Benchmark matrix complete | Ran optimized 10k and 100k comparisons for sklearn, PyO3, and Rust CLI. |
-| 2026-09-25 | v0.5.0 | Hyperparameter matrix in progress | Added comparable profile support to sklearn, PyO3, and the Rust CLI. |
+| 2026-09-25 | v0.5.0 | Hyperparameter matrix complete | Ran the optimized 10k-row matrix across criterion, feature count, depth, leaf size, bootstrap sampling, and balanced weights; reports live in `benchmarks/results-hyperparameters-10k/`. |
