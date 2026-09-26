@@ -118,7 +118,6 @@ interface.
 - [ ] Export raw CSV and Markdown reports with timings, peak RSS, FFI overhead,
       F1, probability RMSE, agreement, and environment metadata.
 - [ ] Build signed release artifacts with Maturin.
-- [ ] Publish first to TestPyPI and then PyPI with `uv publish`.
 
 Benchmark policy: 100k rows is the largest dataset because of the available RAM.
 Every Rust benchmark binary must use the release profile above and be built with
