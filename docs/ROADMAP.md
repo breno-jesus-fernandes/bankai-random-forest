@@ -70,7 +70,8 @@ interface.
 - [x] Red test: `from bankai_random_forest import _core` fails.
 - [x] Green test: empty PyO3 `_core` module imports after `maturin develop`.
 - [x] Vendor the pinned XRF revision with upstream attribution and GPL text.
-- [ ] Build and test a wheel on Python 3.11, 3.12, and 3.13.
+- [x] Build and test a release wheel on Python 3.11, 3.12, and 3.13; all
+      147 Python tests passed against the installed `cp311-abi3` wheel on each.
 
 ### v0.2.0: Estimator Contract
 
@@ -123,6 +124,11 @@ interface.
 - [x] Export raw CSV and Markdown reports with timings, peak RSS, FFI overhead,
       F1, probability RMSE, agreement, and environment metadata.
 - [ ] Build signed release artifacts with Maturin.
+  - [x] Automate optimized Linux/macOS/Windows wheels, an sdist, and GitHub
+        build attestations for tagged releases; allow manual attested candidate
+        builds without publishing.
+  - [ ] Run a tagged release or manual GitHub Actions build and verify its
+        artifact attestations with `gh attestation verify`.
 
 Benchmark policy: 100k rows is the largest dataset because of the available RAM.
 Every Rust benchmark binary must use the release profile above and be built with
@@ -330,3 +336,4 @@ loads the PyO3 wrapper.
 | 2026-09-26 | v1.4.0 | Sparse feature matrices complete | Added CSR/CSC fit and prediction through CSR storage with implicit zeros, with no dense matrix materialization. CSR/CSC exact and histogram tests cover predictions/probabilities, OOB, importances, validation, sklearn label parity, and joblib. Dense release fit change stayed below 2.34% and prediction improved in the 10k×20 warmup benchmark; sparse timings and memory results are in `benchmarks/results-sparse-10k/`. |
 | 2026-09-26 | v1.5.0 | NaN routing and performance gate complete | Added learned missing-value directions for exact and histogram splits, unseen-NaN fallback, dense/CSR/CSC coverage, OOB, sklearn parity, TreeSHAP/apply/decision_path, and joblib. Removed a third iterator variant that added a per-sample dispatch during tree traversal; finite training keeps the lazy route and NaN training buffers only its routed mask. The paired 10k×20 release benchmark reports a worst regression of +2.48% across six fit workloads and +0.86% across six prediction workloads. Python reports 140 passing tests; Rust reports 20. Results and raw measurements are in `benchmarks/results-nan-10k/`. |
 | 2026-09-26 | v1.6.0 | Multioutput classification complete | Added per-output native forests for multiclass-multioutput and multilabel targets, sklearn prediction/probability shapes, per-output classes and class weights, sample weights, OOB, sparse/NaN inputs, and joblib. Full sklearn estimator checks pass. Release multioutput benchmarks show at least 99.61% label agreement and maximum probability RMSE 0.0490 on 10k×20 data. Paired single-output release regressions stayed below 2.42%; all benchmark runs include warmups. Bankai uses independent forests per output, unlike sklearn's shared tree structures; that internal difference is documented in `docs/SKLEARN_COMPATIBILITY.md`. |
+| 2026-09-26 | v0.1.0 | Wheel compatibility matrix complete | Built optimized `cp311-abi3` wheels on Python 3.11, 3.12, and 3.13 and ran the full suite against each installed wheel; all three report 147 passed. Added GitHub Actions automation for this matrix and for multi-platform signed release candidates. The signed release workflow still needs a GitHub run before provenance generation can be checked off. |
