@@ -39,6 +39,7 @@ dev-dependencies = [
     "memory-profiler>=0.61",
     "pytest>=8.3",
     "scipy>=1.14",
+    "shap>=0.51.0",
 ]
 
 [tool.pytest.ini_options]

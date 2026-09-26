@@ -148,6 +148,16 @@ loads the PyO3 wrapper.
 - [x] Exclude globally constant features from histogram-mode split sampling
       while keeping original feature IDs and importance output positions.
 
+### v0.7.0: SHAP Compatibility
+
+- [x] Verify model-agnostic SHAP permutation explanations through
+      `predict_proba`, including binary class output shapes and additivity.
+- [x] Confirm and document the current `TreeExplainer` incompatibility.
+- [ ] Expose or adapt Bankai's native tree structure for SHAP's fast TreeSHAP
+      path without making SHAP a runtime dependency.
+- [ ] Validate binary and multiclass TreeSHAP additivity for exact and
+      histogram-trained forests.
+
 ## Progress Log
 
 | Date | Version | Progress | Notes |
@@ -179,3 +189,4 @@ loads the PyO3 wrapper.
 | 2026-09-26 | v0.6.0 | Histogram mode implemented | Added opt-in `max_bins` preprocessing and histogram split search; exact sorting remains the default when `max_bins=None`. |
 | 2026-09-26 | v0.6.0 | Histogram benchmark complete | Optimized 10k-row/20-feature/100-tree matrix measures fit plus permutation importance (no prediction): `max_bins=16` took 0.628 s vs exact 1.562 s (2.49x faster); LightGBM RF boosting took 0.841 s and sklearn RF 3.443 s. Higher histogram resolutions did not beat exact. Results are in `benchmarks/results-histogram-10k/`. Bankai OOB permutation is included in fit, while sklearn/LightGBM external permutation passes are added to fit; their model algorithms and Bankai's native OOB importance methodology differ. |
 | 2026-09-26 | v0.6.0 | Histogram internals optimized | Added node histogram caching/subtraction, `u8` bin storage, and histogram-mode filtering of globally constant features; original feature indices remain stable. Full Python and Rust suites pass. The optimized run reduced 255-bin time from 2.883 s to 1.616 s and 128-bin time from 1.633 s to 1.073 s; updated report is in `benchmarks/results-histogram-10k/`. |
+| 2026-09-26 | v0.7.0 | SHAP API compatibility assessed | Verified SHAP 0.51.0's model-agnostic permutation explainer with `predict_proba` and additivity; `TreeExplainer` currently raises `InvalidModelError` because Bankai does not export supported tree objects. Details and the passing integration test are in `docs/SHAP_COMPATIBILITY.md` and `tests/test_shap_compatibility.py`. |
