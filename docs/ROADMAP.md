@@ -260,11 +260,13 @@ loads the PyO3 wrapper.
       value routing compatible with sklearn.
 - [x] Test missing-value patterns, features without training NaNs, OOB,
       probabilities, exact and histogram modes, and serialization.
-- [x] Verify finite-only data retains behavior and pass all quality gates.
-      Paired release benchmarks for exact/histogram and dense/CSR/CSC stayed
-      within the 5% regression ceiling after removing an extra iterator variant
-      from the per-row prediction loop. Full medians and raw CSVs are in
-      `benchmarks/results-nan-10k/`.
+- [x] Benchmark release binaries with an untimed warmup; keep every fit and
+      prediction workload within the 5% regression ceiling. The paired
+      exact/histogram and dense/CSR/CSC comparison passed after removing an
+      extra iterator variant from the per-row prediction loop. Full medians
+      and raw CSVs are in `benchmarks/results-nan-10k/`.
+- [x] Verify finite-only behavior and pass the complete Python/Rust quality
+      gates without changing existing functionality.
 
 ### v1.6.0: Multioutput Classification
 
