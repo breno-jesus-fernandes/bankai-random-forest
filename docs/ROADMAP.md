@@ -170,16 +170,16 @@ loads the PyO3 wrapper.
 
 ### v0.9.0: Scikit-learn Compatibility Gap Audit
 
-- [ ] Compare Bankai's public API, parameters, attributes, estimator tags,
+- [x] Compare Bankai's public API, parameters, attributes, estimator tags,
       validation, and prediction behavior with the pinned sklearn
       `RandomForestClassifier` contract.
-- [ ] Inventory each difference as supported, partial, unsupported, or an
+- [x] Inventory each difference as supported, partial, unsupported, or an
       intentional Bankai boundary; add focused compatibility tests for the
       gaps selected for follow-up.
-- [ ] Reassess known gaps: `class_weight="balanced_subsample"`, `ccp_alpha`,
+- [x] Reassess known gaps: `class_weight="balanced_subsample"`, `ccp_alpha`,
       `monotonic_cst`, sparse input, multioutput targets, and sklearn tree
       inspection methods such as `apply` and `decision_path`.
-- [ ] Prioritize implementation work and document explicit non-goals so users
+- [x] Prioritize implementation work and document explicit non-goals so users
       can distinguish intentional boundaries from accidental incompatibility.
 
 ## Progress Log
@@ -220,4 +220,4 @@ loads the PyO3 wrapper.
 | 2026-09-26 | v0.7.0 | Larger sklearn vs Bankai TreeSHAP benchmark complete | Repeated the direct comparison at 10k rows and 40 features, with 100 trees, three seeds, and 100 explained rows. Median calculation times were 4.258 s for sklearn, 4.511 s for Bankai exact, and 4.648 s for Bankai `max_bins=16`; maximum additivity error stayed below `2.2e-12`. Reports are in `benchmarks/results-tree-shap-sklearn-vs-bankai-10k-40f/`. |
 | 2026-09-26 | v0.7.0 | TreeSHAP milestone complete | Direct `TreeExplainer(classifier)` support and binary/multiclass additivity validation pass for exact and histogram forests; the focused suite reports 4 passed. |
 | 2026-09-26 | v0.8.0 | Joblib compatibility complete | Joblib round trips pass for exact and histogram models, preserving estimator parameters, classes, predictions, probabilities, and importances. Uncompressed `mmap_mode="r"` works; compressed files load with joblib's mmap-unavailable warning. Bankai reconstructs the native forest from saved training arrays. Tested with joblib 1.6.0, Python 3.11.11, Bankai 0.1.0, and sklearn 1.9.1; policy is documented in `docs/JOBLIB_COMPATIBILITY.md`. |
-| 2026-09-26 | v0.9.0 | sklearn compatibility gap audit planned | Review the pinned `RandomForestClassifier` contract, including the known parameter, input-domain, multioutput, and tree-inspection gaps; classify each difference and prioritize follow-up work. |
+| 2026-09-26 | v0.9.0 | sklearn compatibility gap audit complete | Documented the sklearn 1.9.1 comparison and priorities in `docs/SKLEARN_COMPATIBILITY.md`. The full suite reports 72 passed and four expected xfails (classifier tags, `balanced_subsample`, fractional `max_samples`, callable OOB scoring); two existing `log(0)` warnings remain. |
