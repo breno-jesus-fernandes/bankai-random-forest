@@ -209,6 +209,65 @@ loads the PyO3 wrapper.
       including deterministic sequential and parallel forests.
 - [ ] Preserve OOB predictions and feature importance under per-tree weights.
 
+### Compatibility Expansion Quality Gates
+
+- Every behavioral change follows the mandatory red/green TDD protocol above;
+  the focused test must fail before implementation, then pass after it.
+- Every milestone runs the full Python and Rust suites plus the applicable
+  sklearn, joblib, TreeSHAP, exact-backend, histogram-backend, importance, and
+  parallelism regression tests. Existing predictions, probabilities, public
+  attributes, serialization, and supported input behavior must remain stable.
+- Every performance comparison uses release binaries and an untimed warmup for
+  each implementation/configuration. Discard the warmup, recreate the model
+  with the same fixed seed, then collect at least three paired measurements
+  over at least three fixed seeds. Record median train and prediction time,
+  peak RSS, environment, and raw CSV results.
+- Compare with the pre-milestone baseline on equivalent data and hardware.
+  A regression greater than 5% in median training time, prediction time, or
+  peak RSS blocks completion. A new feature's own cost is reported separately
+  from regression on existing configurations.
+
+### v1.2.0: Cost-Complexity Pruning
+
+- [ ] Implement sklearn-compatible `ccp_alpha` pruning for positive alpha while
+      preserving the existing unpruned tree behavior at `ccp_alpha=0`.
+- [ ] Add reference and regression tests for pruned structures, predictions,
+      probabilities, importances, `apply`, `decision_path`, TreeSHAP, and joblib.
+- [ ] Verify exact and histogram modes and pass all compatibility quality gates.
+
+### v1.3.0: Monotonic Constraints
+
+- [ ] Implement sklearn-compatible `monotonic_cst` for binary classification.
+- [ ] Test increasing, decreasing, and unconstrained features; invalid
+      constraints; probabilities; exact and histogram modes; TreeSHAP; and joblib.
+- [ ] Verify existing unconstrained models retain behavior and pass all quality
+      gates.
+
+### v1.4.0: Sparse Feature Matrices
+
+- [ ] Support SciPy CSR and CSC inputs in fit and prediction without implicit
+      densification.
+- [ ] Test predictions, probabilities, OOB, importances, validation, and
+      sklearn parity for both formats and supported exact/histogram modes.
+- [ ] Verify dense inputs retain behavior and pass all quality gates.
+
+### v1.5.0: Missing Feature Values
+
+- [ ] Support NaN values in training and prediction with tree-learned missing
+      value routing compatible with sklearn.
+- [ ] Test missing-value patterns, features without training NaNs, OOB,
+      probabilities, exact and histogram modes, and serialization.
+- [ ] Verify finite-only data retains behavior and pass all quality gates.
+
+### v1.6.0: Multioutput Classification
+
+- [ ] Support sklearn RandomForestClassifier multioutput classification for
+      multiclass targets per output and multilabel indicator targets.
+- [ ] Test output shapes and values for `predict` and `predict_proba`, weights,
+      metrics, validation, joblib, and sklearn parity.
+- [ ] Verify single-output classification retains behavior and pass all quality
+      gates.
+
 ## Progress Log
 
 | Date | Version | Progress | Notes |
@@ -250,3 +309,4 @@ loads the PyO3 wrapper.
 | 2026-09-26 | v0.9.0 | sklearn compatibility gap audit complete | Documented the sklearn 1.9.1 comparison and priorities in `docs/SKLEARN_COMPATIBILITY.md`. The full suite reports 72 passed and four expected xfails (classifier tags, `balanced_subsample`, fractional `max_samples`, callable OOB scoring); two existing `log(0)` warnings remain. |
 | 2026-09-26 | v1.0.0 | Core sklearn compatibility remediation planned | Correct the four highest-priority v0.9 gaps while keeping backend-heavy pruning/monotonic features and intentional sparse/NaN/multioutput boundaries outside this milestone. |
 | 2026-09-26 | v1.0.0 | Compatibility remediation implemented | Fixed classifier tags, fractional/weighted `max_samples` flooring, and callable OOB scoring. `balanced_subsample` is accepted and handles `bootstrap=False`; exact per-bootstrap weighting is carried into v1.1. Release extension build passed and the full suite reports 76 passed. |
+| 2026-09-26 | v1.2.0-v1.6.0 | Compatibility expansion planned | Added independent pruning, monotonicity, sparse, NaN, and multioutput milestones. Each requires TDD, full compatibility regression coverage, release benchmarks with untimed warmups, and a maximum 5% regression in existing workloads. |
