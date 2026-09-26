@@ -98,7 +98,8 @@ interface.
 - [ ] State: `random_state`, deterministic `n_jobs`, `verbose`, and
       `warm_start`.
   - [x] `random_state` and deterministic `n_jobs`.
-  - [ ] `verbose` and `warm_start`.
+  - [x] `warm_start`.
+  - [ ] `verbose`.
 - [ ] Structural controls: `ccp_alpha` and valid binary `monotonic_cst`.
 
 ### v0.4.0: Robustness and Data Boundaries
@@ -137,3 +138,4 @@ interface.
 | 2026-09-25 | v0.3.0 | Parameter controls in progress | Added entropy/log-loss, max-features, depth, minimum split/leaf constraints, class weights, bootstrap selection, and `max_samples`; OOB, parallelism, pruning, and monotonic constraints remain. |
 | 2026-09-25 | v0.3.0 | OOB complete | Added `oob_decision_function_` and `oob_score_` for bootstrap training. |
 | 2026-09-25 | v0.3.0 | Parallel training complete | Added deterministic parallel tree construction through `n_jobs`. |
+| 2026-09-25 | v0.3.0 | Warm start complete | Rebuilds the deterministic forest when the tree count increases. |

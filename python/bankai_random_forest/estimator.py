@@ -58,7 +58,15 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         if sparse.issparse(X):
             raise TypeError("sparse input is not supported")
 
-        X, y = validate_data(self, X, y, dtype=np.float64, ensure_2d=True)
+        warm_refit = self.warm_start and hasattr(self, "_forest")
+        if warm_refit and self.n_estimators < self._fitted_n_estimators:
+            raise ValueError(
+                "n_estimators must be greater than or equal to the number of fitted trees "
+                "when warm_start=True"
+            )
+        X, y = validate_data(
+            self, X, y, dtype=np.float64, ensure_2d=True, reset=not warm_refit
+        )
         target_type = type_of_target(y)
         if target_type.startswith("continuous"):
             raise ValueError(f"Unknown label type: {target_type}")
@@ -73,7 +81,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             X, encoded_y, sample_weight
         )
 
-        self._fit_seed = self._next_seed()
+        self._fit_seed = self._fit_seed if warm_refit else self._next_seed()
         self._fit_max_features = self._resolve_max_features()
         self._fit_X = X
         self._fit_y = encoded_y.astype(np.int64, copy=False)
@@ -108,6 +116,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             n_jobs=self._fit_n_jobs,
         )
         self._forest = forest
+        self._fitted_n_estimators = self.n_estimators
         self.feature_importances_ = np.asarray(
             forest.feature_importances(), dtype=np.float64
         )
@@ -186,7 +195,6 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             ("max_leaf_nodes", self.max_leaf_nodes is not None),
             ("min_impurity_decrease", self.min_impurity_decrease != 0.0),
             ("verbose", self.verbose != 0),
-            ("warm_start", self.warm_start is not False),
             ("ccp_alpha", self.ccp_alpha != 0.0),
             ("monotonic_cst", self.monotonic_cst is not None),
         )
