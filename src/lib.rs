@@ -1,4 +1,4 @@
-mod dense;
+pub mod dense;
 
 use dense::{ClassVotes, Criterion, DenseInput};
 use numpy::{PyReadonlyArray1, PyReadonlyArray2};
