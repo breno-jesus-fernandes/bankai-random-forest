@@ -79,6 +79,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         self._fit_y = encoded_y.astype(np.int64, copy=False)
         self._fit_sample_weight = sample_weight
         self._fit_min_leaf_weight = min_leaf_weight
+        self._fit_max_depth = self._resolve_max_depth()
 
         forest = _core.NativeForest()
         forest.fit(
@@ -90,6 +91,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             sample_weight=self._fit_sample_weight,
             min_leaf_weight=self._fit_min_leaf_weight,
             criterion=self.criterion,
+            max_depth=self._fit_max_depth,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -137,6 +139,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             sample_weight=self._fit_sample_weight,
             min_leaf_weight=self._fit_min_leaf_weight,
             criterion=self.criterion,
+            max_depth=self._fit_max_depth,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -149,7 +152,6 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
 
     def _reject_unsupported_baseline_parameters(self, sample_weight):
         unsupported = (
-            ("max_depth", self.max_depth is not None),
             ("min_samples_split", self.min_samples_split != 2),
             ("min_samples_leaf", self.min_samples_leaf != 1),
             ("max_leaf_nodes", self.max_leaf_nodes is not None),
@@ -166,6 +168,13 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         for name, is_unsupported in unsupported:
             if is_unsupported:
                 raise NotImplementedError(f"{name} is not implemented yet")
+
+    def _resolve_max_depth(self):
+        if self.max_depth is None:
+            return 512
+        if isinstance(self.max_depth, (int, np.integer)) and self.max_depth >= 1:
+            return int(self.max_depth)
+        raise ValueError("max_depth must be an integer greater than or equal to 1")
 
     def _resolve_max_features(self):
         max_features = self.max_features

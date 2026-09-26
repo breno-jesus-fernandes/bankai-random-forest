@@ -41,6 +41,21 @@ impl<I: RfInput> Forest<I> {
         oob: bool,
         seed: u64,
     ) -> Self {
+        Self::new_with_max_depth(input, trees, tries, save_forest, importance, oob, seed, 512)
+    }
+
+    /// Train a new model with an explicit maximum tree depth.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_max_depth(
+        input: &I,
+        trees: usize,
+        tries: usize,
+        save_forest: bool,
+        importance: bool,
+        oob: bool,
+        seed: u64,
+        max_depth: usize,
+    ) -> Self {
         let num_trees = trees;
         let mut trees = MaybeVec::new(save_forest);
         let mut importance: Option<HashMap<I::FeatureId, ImportanceAggregator>> = if importance {
@@ -67,7 +82,7 @@ impl<I: RfInput> Forest<I> {
                 &bag,
                 tries,
                 &mut feature_sampler,
-                512,
+                max_depth,
                 &mut mask_cache,
                 &mut rng,
             );

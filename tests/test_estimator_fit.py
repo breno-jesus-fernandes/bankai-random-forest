@@ -54,7 +54,6 @@ def test_fit_sets_normalized_feature_importances(separable_data):
 @pytest.mark.parametrize(
     ("parameters", "name"),
     [
-        ({"max_depth": 2}, "max_depth"),
         ({"min_samples_split": 3}, "min_samples_split"),
         ({"min_samples_leaf": 2}, "min_samples_leaf"),
         ({"max_leaf_nodes": 2}, "max_leaf_nodes"),
@@ -126,6 +125,16 @@ def test_fit_supports_sklearn_max_features_forms(separable_data, max_features):
 
     classifier = BankaiRandomForestClassifier(
         n_estimators=25, max_features=max_features, random_state=42
+    ).fit(x, y)
+
+    np.testing.assert_array_equal(classifier.predict(x), y)
+
+
+def test_fit_supports_a_maximum_tree_depth(separable_data):
+    x, y = separable_data
+
+    classifier = BankaiRandomForestClassifier(
+        n_estimators=25, max_depth=1, random_state=42
     ).fit(x, y)
 
     np.testing.assert_array_equal(classifier.predict(x), y)

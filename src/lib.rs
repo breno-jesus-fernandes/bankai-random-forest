@@ -28,7 +28,7 @@ impl NativeForest {
         self.forest.is_some()
     }
 
-    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini"))]
+    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512))]
     fn fit(
         &mut self,
         x: PyReadonlyArray2<'_, f64>,
@@ -39,6 +39,7 @@ impl NativeForest {
         sample_weight: Option<PyReadonlyArray1<'_, f64>>,
         min_leaf_weight: f64,
         criterion: &str,
+        max_depth: usize,
     ) -> PyResult<()> {
         if n_estimators == 0 {
             return Err(PyValueError::new_err("n_estimators must be at least 1"));
@@ -87,7 +88,7 @@ impl NativeForest {
         )
             .map_err(PyValueError::new_err)?;
 
-        self.forest = Some(Forest::new(
+        self.forest = Some(Forest::new_with_max_depth(
             &input,
             n_estimators,
             max_features,
@@ -95,6 +96,7 @@ impl NativeForest {
             false,
             false,
             random_state,
+            max_depth,
         ));
         self.n_classes = n_classes;
         self.n_features = columns;
