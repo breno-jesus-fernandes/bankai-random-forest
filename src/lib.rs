@@ -30,7 +30,7 @@ impl NativeForest {
         self.forest.is_some()
     }
 
-    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, min_samples_split=2, min_samples_leaf=1, bootstrap=true, max_samples=None, oob=false))]
+    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, min_samples_split=2, min_samples_leaf=1, bootstrap=true, max_samples=None, oob=false, n_jobs=1))]
     fn fit(
         &mut self,
         x: PyReadonlyArray2<'_, f64>,
@@ -47,6 +47,7 @@ impl NativeForest {
         bootstrap: bool,
         max_samples: Option<usize>,
         oob: bool,
+        n_jobs: usize,
     ) -> PyResult<()> {
         if n_estimators == 0 {
             return Err(PyValueError::new_err("n_estimators must be at least 1"));
@@ -97,18 +98,17 @@ impl NativeForest {
         )
             .map_err(PyValueError::new_err)?;
 
-        self.forest = Some(Forest::new_with_settings(
-            &input,
-            n_estimators,
-            max_features,
-            true,
-            false,
-            oob,
-            random_state,
-            max_depth,
-            bootstrap,
-            max_samples,
-        ));
+        self.forest = Some(if n_jobs == 1 {
+            Forest::new_with_settings(
+                &input, n_estimators, max_features, true, false, oob, random_state,
+                max_depth, bootstrap, max_samples,
+            )
+        } else {
+            Forest::new_parallel_with_settings(
+                &input, n_estimators, max_features, true, false, oob, random_state, n_jobs,
+                max_depth, bootstrap, max_samples,
+            )
+        });
         self.n_classes = n_classes;
         self.n_features = columns;
         self.n_samples = rows;

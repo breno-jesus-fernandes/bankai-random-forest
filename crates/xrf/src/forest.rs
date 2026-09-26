@@ -152,6 +152,33 @@ impl<I: RfInput> Forest<I> {
         I::FeatureId: Send + Sync,
         I::VoteAggregator: Send + Sync,
     {
+        Self::new_parallel_with_settings(
+            input, trees, tries, save_forest, importance, oob, seed, threads, 512, true, None,
+        )
+    }
+
+    /// Train a model in parallel with explicit sampling and depth settings.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_parallel_with_settings(
+        input: &I,
+        trees: usize,
+        tries: usize,
+        save_forest: bool,
+        importance: bool,
+        oob: bool,
+        seed: u64,
+        threads: usize,
+        max_depth: usize,
+        bootstrap: bool,
+        sample_size: Option<usize>,
+    ) -> Self
+    where
+        I: Send + Sync,
+        I::Pivot: Send + Sync,
+        I::Vote: Send + Sync,
+        I::FeatureId: Send + Sync,
+        I::VoteAggregator: Send + Sync,
+    {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::mpsc;
@@ -189,13 +216,21 @@ impl<I: RfInput> Forest<I> {
                         let e = tree_idx.fetch_add(1, Ordering::SeqCst);
                         if e < num_trees {
                             let mut rng = RfRng::from_seed(seed, 1 + e as u64);
-                            let (bag, oob) = Mask::new_bag_oob(input.observation_count(), &mut rng);
+                            let (bag, oob) = if bootstrap {
+                                Mask::new_bag_oob_with_size(
+                                    input.observation_count(),
+                                    sample_size.unwrap_or(input.observation_count()),
+                                    &mut rng,
+                                )
+                            } else {
+                                (Mask::new_all(input.observation_count()), Mask::new_all(0))
+                            };
                             let tree = Tree::new(
                                 input,
                                 &bag,
                                 tries,
                                 &mut feature_sampler,
-                                512,
+                                max_depth,
                                 &mut mask_cache,
                                 &mut rng,
                             );

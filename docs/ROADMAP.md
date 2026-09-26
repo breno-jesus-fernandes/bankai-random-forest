@@ -97,6 +97,8 @@ interface.
   - [ ] `balanced_subsample`.
 - [ ] State: `random_state`, deterministic `n_jobs`, `verbose`, and
       `warm_start`.
+  - [x] `random_state` and deterministic `n_jobs`.
+  - [ ] `verbose` and `warm_start`.
 - [ ] Structural controls: `ccp_alpha` and valid binary `monotonic_cst`.
 
 ### v0.4.0: Robustness and Data Boundaries
@@ -134,3 +136,4 @@ interface.
 | 2026-09-25 | v0.2.0 | Estimator contract complete | Probability predictions, feature importances, class weights, and minimum leaf-weight support added; `check_estimator` passes without expected failures. |
 | 2026-09-25 | v0.3.0 | Parameter controls in progress | Added entropy/log-loss, max-features, depth, minimum split/leaf constraints, class weights, bootstrap selection, and `max_samples`; OOB, parallelism, pruning, and monotonic constraints remain. |
 | 2026-09-25 | v0.3.0 | OOB complete | Added `oob_decision_function_` and `oob_score_` for bootstrap training. |
+| 2026-09-25 | v0.3.0 | Parallel training complete | Added deterministic parallel tree construction through `n_jobs`. |

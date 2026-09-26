@@ -87,6 +87,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             self.min_samples_leaf, 1, "min_samples_leaf", X.shape[0]
         )
         self._fit_max_samples = self._resolve_max_samples(X.shape[0])
+        self._fit_n_jobs = self._resolve_n_jobs()
 
         forest = _core.NativeForest()
         forest.fit(
@@ -104,6 +105,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             bootstrap=self.bootstrap,
             max_samples=self._fit_max_samples,
             oob=self.oob_score is True,
+            n_jobs=self._fit_n_jobs,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -168,6 +170,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             bootstrap=self.bootstrap,
             max_samples=self._fit_max_samples,
             oob=self.oob_score is True,
+            n_jobs=self._fit_n_jobs,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -182,7 +185,6 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         unsupported = (
             ("max_leaf_nodes", self.max_leaf_nodes is not None),
             ("min_impurity_decrease", self.min_impurity_decrease != 0.0),
-            ("n_jobs", self.n_jobs is not None),
             ("verbose", self.verbose != 0),
             ("warm_start", self.warm_start is not False),
             ("ccp_alpha", self.ccp_alpha != 0.0),
@@ -243,6 +245,16 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         raise ValueError(
             "max_samples must be an integer in [1, n_samples] or a float in (0, 1]"
         )
+
+    def _resolve_n_jobs(self):
+        if self.n_jobs is None:
+            return 1
+        if not isinstance(self.n_jobs, (int, np.integer)) or isinstance(self.n_jobs, bool):
+            raise ValueError("n_jobs must be an integer or None")
+        if self.n_jobs == 0:
+            raise ValueError("n_jobs == 0 has no meaning")
+        cpu_count = __import__("os").cpu_count() or 1
+        return max(1, self.n_jobs if self.n_jobs > 0 else cpu_count + 1 + self.n_jobs)
 
     def _combine_class_weight(self, y, sample_weight):
         if self.class_weight is None:
