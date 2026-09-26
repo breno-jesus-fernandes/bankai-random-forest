@@ -4,7 +4,7 @@
 
 Build a GPL-3.0-or-later Rust/Python random forest package with a
 scikit-learn-compatible classifier API. The initial backend is a maintained fork
-of XRF. The architecture must leave room for a future histogram-based backend
+of XRF. An optional histogram training mode accelerates continuous features
 without leaking backend-specific types through the Python ABI.
 
 ## Decisions Locked In
@@ -52,7 +52,7 @@ PyO3 extension: bankai_random_forest._core
 bankai_core: parameter validation, data contracts, model state
           |
           +-- XRF fork: exact/sort-based backend
-          +-- future histogram backend
+          +-- optional histogram split path
 ```
 
 The Python layer owns sklearn validation, labels, tags, and public attributes.
@@ -119,7 +119,7 @@ interface.
       size, bootstrap sampling, and balanced class weights.
 - [x] Implement a permutation-importance benchmark category for sklearn, PyO3,
       and the Rust CLI.
-- [ ] Run the optimized permutation-importance benchmark matrix.
+- [x] Run the optimized permutation-importance benchmark matrix.
 - [x] Export raw CSV and Markdown reports with timings, peak RSS, FFI overhead,
       F1, probability RMSE, agreement, and environment metadata.
 - [ ] Build signed release artifacts with Maturin.
@@ -131,13 +131,17 @@ The benchmark runner also installs the Maturin extension with
 `RUSTFLAGS="-C target-cpu=native" uv run maturin develop --release` before it
 loads the PyO3 wrapper.
 
-### Future: Histogram Backend
+### v0.6.0: Histogram-Accelerated Trees
 
-- [ ] Define a backend-neutral Rust trait before adding histogram code.
-- [ ] Preserve the sklearn contract test suite for both backends.
-- [ ] Add binning, histogram caching, split selection, and deterministic merge
-      rules behind the backend boundary.
-- [ ] Benchmark accuracy, memory, and speed against the XRF backend.
+- [x] Add optional `max_bins` parameter; `None` preserves exact split behavior.
+- [x] Pre-bin continuous features once during fit and reuse fitted cut points at
+      prediction time.
+- [x] Select histogram split candidates while preserving tree constraints and
+      native permutation feature importance.
+- [x] Run full sklearn contract and regression suites with the default backend.
+- [x] Benchmark predict plus `feature_importances_` access for permutation
+      importance across exact and histogram modes, with optimized Rust builds.
+- [x] Review model quality and runtime tradeoffs across histogram resolutions.
 
 ## Progress Log
 
@@ -167,3 +171,5 @@ loads the PyO3 wrapper.
 | 2026-09-25 | v0.5.0 | Hyperparameter matrix complete | Ran the optimized 10k-row matrix across criterion, feature count, depth, leaf size, bootstrap sampling, and balanced weights; reports live in `benchmarks/results-hyperparameters-10k/`. |
 | 2026-09-26 | v0.3.0 | Importance type selection complete | Added `importance_type="gain"` (criterion-weighted gain), `"split"` (split frequency), and `"permutation"` (native XRF OOB accuracy decrease) through `feature_importances_`. |
 | 2026-09-26 | v0.5.0 | Feature importance benchmark complete | Compared gain, split frequency, and permutation for sklearn, PyO3, and Rust CLI on 10k training rows; permutation used a separate 10k validation set and five sklearn repeats. Reports are in `benchmarks/results-feature-importance-10k/`. |
+| 2026-09-26 | v0.6.0 | Histogram mode implemented | Added opt-in `max_bins` preprocessing and histogram split search; exact sorting remains the default when `max_bins=None`. |
+| 2026-09-26 | v0.6.0 | Histogram benchmark complete | Optimized 10k-row/20-feature/100-tree matrix: `max_bins=16` fit in 0.619 s vs exact 1.506 s (2.43x), while predict plus importance attribute access was 0.0537 s vs 0.0499 s. Higher resolutions (128/255) did not beat exact. F1 and importance rank tradeoffs are in `benchmarks/results-histogram-10k/`; the benchmark measures Bankai OOB permutation work inside fit and sklearn's external permutation pass separately. |

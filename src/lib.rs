@@ -12,6 +12,7 @@ struct NativeForest {
     n_classes: usize,
     n_features: usize,
     n_samples: usize,
+    histogram_edges: Option<Vec<Vec<f64>>>,
 }
 
 #[pymethods]
@@ -23,6 +24,7 @@ impl NativeForest {
             n_classes: 0,
             n_features: 0,
             n_samples: 0,
+            histogram_edges: None,
         }
     }
 
@@ -30,7 +32,7 @@ impl NativeForest {
         self.forest.is_some()
     }
 
-    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1))]
+    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1, max_bins=None))]
     fn fit(
         &mut self,
         x: PyReadonlyArray2<'_, f64>,
@@ -51,6 +53,7 @@ impl NativeForest {
         oob: bool,
         permutation_importance: bool,
         n_jobs: usize,
+        max_bins: Option<usize>,
     ) -> PyResult<()> {
         if n_estimators == 0 {
             return Err(PyValueError::new_err("n_estimators must be at least 1"));
@@ -99,6 +102,7 @@ impl NativeForest {
             min_samples_split,
             min_samples_leaf,
             min_impurity_decrease,
+            max_bins,
         )
         .map_err(PyValueError::new_err)?;
 
@@ -132,6 +136,7 @@ impl NativeForest {
                 max_samples,
             )
         });
+        self.histogram_edges = input.bin_edges().map(|edges| edges.to_vec());
         self.n_classes = n_classes;
         self.n_features = columns;
         self.n_samples = rows;
@@ -151,8 +156,14 @@ impl NativeForest {
             )));
         }
 
-        let input = DenseInput::prediction(values, rows, columns, self.n_classes)
-            .map_err(PyValueError::new_err)?;
+        let input = DenseInput::prediction(
+            values,
+            rows,
+            columns,
+            self.n_classes,
+            self.histogram_edges.as_deref(),
+        )
+        .map_err(PyValueError::new_err)?;
         let prediction = forest.predict(&input);
         let mut labels = vec![0; input.rows()];
         for (row, votes) in prediction.predictions() {
@@ -174,8 +185,14 @@ impl NativeForest {
             )));
         }
 
-        let input = DenseInput::prediction(values, rows, columns, self.n_classes)
-            .map_err(PyValueError::new_err)?;
+        let input = DenseInput::prediction(
+            values,
+            rows,
+            columns,
+            self.n_classes,
+            self.histogram_edges.as_deref(),
+        )
+        .map_err(PyValueError::new_err)?;
         Ok(forest
             .predict(&input)
             .predictions()

@@ -33,6 +33,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         max_samples=None,
         monotonic_cst=None,
         importance_type="gain",
+        max_bins=None,
     ):
         self.n_estimators = n_estimators
         self.criterion = criterion
@@ -54,6 +55,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         self.max_samples = max_samples
         self.monotonic_cst = monotonic_cst
         self.importance_type = importance_type
+        self.max_bins = max_bins
 
     def fit(self, X, y, sample_weight=None):
         self._reject_unsupported_baseline_parameters(sample_weight)
@@ -116,6 +118,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         self._fit_max_leaves = self._resolve_max_leaf_nodes()
         self._fit_verbose = self._resolve_verbose()
         self._fit_importance_type = self._resolve_importance_type()
+        self._fit_max_bins = self._resolve_max_bins()
         if self._fit_verbose:
             print(
                 f"[BankaiRandomForestClassifier] building {self.n_estimators} trees",
@@ -142,6 +145,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             oob=self.oob_score is True,
             permutation_importance=self._fit_importance_type == "permutation",
             n_jobs=self._fit_n_jobs,
+            max_bins=self._fit_max_bins,
         )
         self._forest = forest
         self._fitted_n_estimators = self.n_estimators
@@ -209,6 +213,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             oob=self.oob_score is True,
             permutation_importance=self._fit_importance_type == "permutation",
             n_jobs=self._fit_n_jobs,
+            max_bins=self._fit_max_bins,
         )
         self._forest = forest
         self.feature_importances_ = self._selected_feature_importances(forest)
@@ -313,6 +318,17 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         if self.importance_type == "permutation" and self.bootstrap is not True:
             raise ValueError("importance_type='permutation' requires bootstrap=True")
         return self.importance_type
+
+    def _resolve_max_bins(self):
+        if self.max_bins is None:
+            return None
+        if (
+            isinstance(self.max_bins, (int, np.integer))
+            and not isinstance(self.max_bins, (bool, np.bool_))
+            and 2 <= self.max_bins <= 255
+        ):
+            return int(self.max_bins)
+        raise ValueError("max_bins must be None or an integer in [2, 255]")
 
     def _selected_feature_importances(self, forest):
         method = (

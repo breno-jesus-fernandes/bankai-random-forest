@@ -64,6 +64,41 @@ def test_gain_importance_ranks_predictive_features_above_noise():
     np.testing.assert_allclose(classifier.feature_importances_.sum(), 1.0)
 
 
+def test_max_bins_enables_histogram_training_and_prediction(separable_data):
+    x, y = separable_data
+
+    classifier = BankaiRandomForestClassifier(
+        n_estimators=25, max_bins=4, random_state=42
+    ).fit(x, y)
+
+    np.testing.assert_array_equal(classifier.predict(x), y)
+    assert classifier.max_bins == 4
+
+
+@pytest.mark.parametrize("max_bins", [1, 256, True, 2.5])
+def test_max_bins_rejects_invalid_histogram_resolution(separable_data, max_bins):
+    x, y = separable_data
+
+    with pytest.raises(ValueError, match="max_bins must be None or an integer in \\[2, 255\\]"):
+        BankaiRandomForestClassifier(max_bins=max_bins).fit(x, y)
+
+
+def test_histogram_backend_preserves_native_permutation_importance():
+    rng = np.random.RandomState(42)
+    x = rng.normal(size=(200, 3))
+    y = (x[:, 0] + x[:, 1] > 0.0).astype(int)
+
+    classifier = BankaiRandomForestClassifier(
+        n_estimators=30,
+        max_bins=16,
+        importance_type="permutation",
+        random_state=42,
+    ).fit(x, y)
+
+    assert classifier.feature_importances_.shape == (3,)
+    assert classifier.feature_importances_[0] > classifier.feature_importances_[2]
+
+
 def test_permutation_importance_type_exposes_native_oob_accuracy_decrease():
     rng = np.random.RandomState(42)
     x = rng.normal(size=(200, 2))

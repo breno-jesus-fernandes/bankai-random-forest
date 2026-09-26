@@ -17,6 +17,8 @@ pub struct DenseInput {
     min_samples_leaf: usize,
     min_impurity_decrease: f64,
     total_weight: f64,
+    histogram_bins: Option<usize>,
+    bin_edges: Option<Vec<Vec<f64>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -38,6 +40,7 @@ impl DenseInput {
         min_samples_split: usize,
         min_samples_leaf: usize,
         min_impurity_decrease: f64,
+        max_bins: Option<usize>,
     ) -> Result<Self, String> {
         validate_matrix(&values, rows, columns)?;
         if labels.len() != rows {
@@ -70,8 +73,18 @@ impl DenseInput {
         if labels.iter().any(|&label| label >= n_classes) {
             return Err("labels must be encoded in 0..n_classes".to_string());
         }
+        if max_bins.is_some_and(|bins| !(2..=255).contains(&bins)) {
+            return Err("max_bins must be None or an integer in [2, 255]".to_string());
+        }
 
         let total_weight = sample_weights.iter().sum();
+        let (values, bin_edges) = match max_bins {
+            Some(max_bins) => {
+                let (binned, edges) = histogramize(&values, rows, columns, max_bins);
+                (binned, Some(edges))
+            }
+            None => (values, None),
+        };
         Ok(Self {
             values,
             labels: Some(labels),
@@ -85,6 +98,8 @@ impl DenseInput {
             min_samples_leaf,
             min_impurity_decrease,
             total_weight,
+            histogram_bins: max_bins,
+            bin_edges,
         })
     }
 
@@ -93,11 +108,22 @@ impl DenseInput {
         rows: usize,
         columns: usize,
         n_classes: usize,
+        bin_edges: Option<&[Vec<f64>]>,
     ) -> Result<Self, String> {
         validate_matrix(&values, rows, columns)?;
         if n_classes == 0 {
             return Err("at least one class is required".to_string());
         }
+
+        let values = match bin_edges {
+            Some(edges) => {
+                if edges.len() != columns {
+                    return Err("histogram edges do not match the fitted feature count".to_string());
+                }
+                apply_histogram_edges(&values, rows, columns, edges)
+            }
+            None => values,
+        };
 
         Ok(Self {
             values,
@@ -112,11 +138,17 @@ impl DenseInput {
             min_samples_leaf: 1,
             min_impurity_decrease: 0.0,
             total_weight: 0.0,
+            histogram_bins: None,
+            bin_edges: None,
         })
     }
 
     pub fn rows(&self) -> usize {
         self.rows
+    }
+
+    pub fn bin_edges(&self) -> Option<&[Vec<f64>]> {
+        self.bin_edges.as_deref()
     }
 
     fn labels(&self) -> &[usize] {
@@ -154,6 +186,67 @@ fn validate_matrix(values: &[f64], rows: usize, columns: usize) -> Result<(), St
     }
 
     Ok(())
+}
+
+fn histogramize(
+    values: &[f64],
+    rows: usize,
+    columns: usize,
+    max_bins: usize,
+) -> (Vec<f64>, Vec<Vec<f64>>) {
+    let mut edges_by_feature = Vec::with_capacity(columns);
+    for feature in 0..columns {
+        let mut sorted: Vec<_> = (0..rows)
+            .map(|row| values[row * columns + feature])
+            .collect();
+        sorted.sort_unstable_by(f64::total_cmp);
+        sorted.dedup_by(|left, right| left.total_cmp(right).is_eq());
+
+        let mut edges = Vec::with_capacity(max_bins.saturating_sub(1));
+        if sorted.len() <= max_bins {
+            for adjacent in sorted.windows(2) {
+                edges.push(midpoint(adjacent[0], adjacent[1]));
+            }
+        } else {
+            for bin in 1..max_bins {
+                let index = bin * sorted.len() / max_bins;
+                if index > 0 && index < sorted.len() {
+                    let edge = midpoint(sorted[index - 1], sorted[index]);
+                    if edges.last().is_none_or(|previous| *previous < edge) {
+                        edges.push(edge);
+                    }
+                }
+            }
+        }
+        edges_by_feature.push(edges);
+    }
+
+    (
+        apply_histogram_edges(values, rows, columns, &edges_by_feature),
+        edges_by_feature,
+    )
+}
+
+fn midpoint(left: f64, right: f64) -> f64 {
+    let midpoint = left * 0.5 + right * 0.5;
+    if midpoint >= right { left } else { midpoint }
+}
+
+fn apply_histogram_edges(
+    values: &[f64],
+    rows: usize,
+    columns: usize,
+    edges_by_feature: &[Vec<f64>],
+) -> Vec<f64> {
+    let mut binned = Vec::with_capacity(values.len());
+    for row in 0..rows {
+        for feature in 0..columns {
+            let value = values[row * columns + feature];
+            let bin = edges_by_feature[feature].partition_point(|edge| value > *edge);
+            binned.push(bin as f64);
+        }
+    }
+    binned
 }
 
 #[derive(Clone)]
@@ -284,6 +377,20 @@ fn best_split(
     feature: usize,
     target: &DenseDecisionSlice,
 ) -> Option<(f64, f64)> {
+    let best = if input.histogram_bins.is_some() {
+        best_split_histogram(input, mask, feature, target)
+    } else {
+        best_split_exact(input, mask, feature, target)
+    }?;
+    Some((best.0, best.1 * target.total_weight / input.total_weight))
+}
+
+fn best_split_exact(
+    input: &DenseInput,
+    mask: &Mask,
+    feature: usize,
+    target: &DenseDecisionSlice,
+) -> Option<(f64, f64)> {
     let mut ranked: Vec<(f64, usize, f64)> = mask
         .iter()
         .zip(&target.labels)
@@ -343,12 +450,73 @@ fn best_split(
         }
     }
 
-    best.map(|(pivot, gain)| {
-        (
-            pivot,
-            gain * target.total_weight / input.total_weight,
-        )
-    })
+    best
+}
+
+fn best_split_histogram(
+    input: &DenseInput,
+    mask: &Mask,
+    feature: usize,
+    target: &DenseDecisionSlice,
+) -> Option<(f64, f64)> {
+    let bin_count = input.bin_edges.as_ref()?[feature].len() + 1;
+    if bin_count < 2 {
+        return None;
+    }
+
+    let mut class_histogram = vec![vec![0.0; input.n_classes]; bin_count];
+    let mut sample_counts = vec![0; bin_count];
+    for &row in mask.iter() {
+        let bin = input.value(row, feature) as usize;
+        class_histogram[bin][input.labels()[row]] += input.sample_weight(row);
+        sample_counts[bin] += 1;
+    }
+
+    let total_weight = target.total_weight;
+    let parent_impurity = impurity(input.criterion, &target.class_weights, total_weight);
+    let mut left = vec![0.0; input.n_classes];
+    let mut right = target.class_weights.clone();
+    let mut left_weight = 0.0;
+    let mut left_count = 0;
+    let mut best: Option<(f64, f64)> = None;
+
+    for bin in 0..(bin_count - 1) {
+        for class in 0..input.n_classes {
+            let weight = class_histogram[bin][class];
+            left[class] += weight;
+            right[class] -= weight;
+            left_weight += weight;
+        }
+        left_count += sample_counts[bin];
+        let right_count = mask.len() - left_count;
+        if left_count < input.min_samples_leaf || right_count < input.min_samples_leaf {
+            continue;
+        }
+
+        let right_weight = total_weight - left_weight;
+        if left_weight == 0.0
+            || right_weight == 0.0
+            || left_weight < input.min_leaf_weight
+            || right_weight < input.min_leaf_weight
+        {
+            continue;
+        }
+        let child_impurity = (left_weight / total_weight)
+            * impurity(input.criterion, &left, left_weight)
+            + (right_weight / total_weight) * impurity(input.criterion, &right, right_weight);
+        let gain = parent_impurity - child_impurity;
+        if gain < input.min_impurity_decrease {
+            continue;
+        }
+        let pivot = bin as f64 + 0.5;
+        if best
+            .as_ref()
+            .is_none_or(|(_, previous_gain)| gain > *previous_gain)
+        {
+            best = Some((pivot, gain));
+        }
+    }
+    best
 }
 
 pub struct PermutationImportance {

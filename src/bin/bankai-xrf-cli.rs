@@ -39,9 +39,17 @@ fn run() -> Result<(), String> {
     let arguments = parse_arguments(env::args().skip(1))?;
     let (values, labels) = generate_dataset(arguments.rows, arguments.features);
     let weights = if arguments.balanced_class_weight {
-        let counts = [labels.iter().filter(|&&label| label == 0).count(), labels.iter().filter(|&&label| label == 1).count()];
-        labels.iter().map(|&label| arguments.rows as f64 / (2 * counts[label]) as f64).collect()
-    } else { vec![1.0; arguments.rows] };
+        let counts = [
+            labels.iter().filter(|&&label| label == 0).count(),
+            labels.iter().filter(|&&label| label == 1).count(),
+        ];
+        labels
+            .iter()
+            .map(|&label| arguments.rows as f64 / (2 * counts[label]) as f64)
+            .collect()
+    } else {
+        vec![1.0; arguments.rows]
+    };
     let training = DenseInput::training(
         values.clone(),
         arguments.rows,
@@ -54,13 +62,16 @@ fn run() -> Result<(), String> {
         2,
         arguments.min_samples_leaf,
         0.0,
+        None,
     )?;
 
     let train_started = Instant::now();
     let forest = Forest::new_with_settings(
         &training,
         arguments.trees,
-        arguments.max_features.unwrap_or_else(|| (arguments.features as f64).sqrt().max(1.0) as usize),
+        arguments
+            .max_features
+            .unwrap_or_else(|| (arguments.features as f64).sqrt().max(1.0) as usize),
         true,
         arguments.permutation_importance,
         false,
@@ -72,7 +83,7 @@ fn run() -> Result<(), String> {
     );
     let train_seconds = train_started.elapsed().as_secs_f64();
 
-    let prediction = DenseInput::prediction(values, arguments.rows, arguments.features, 2)?;
+    let prediction = DenseInput::prediction(values, arguments.rows, arguments.features, 2, None)?;
     let predict_started = Instant::now();
     let probabilities: Vec<_> = forest
         .predict(&prediction)
@@ -82,7 +93,13 @@ fn run() -> Result<(), String> {
     let predict_seconds = predict_started.elapsed().as_secs_f64();
     let predicted: Vec<_> = probabilities
         .iter()
-        .map(|probabilities| if probabilities[1] > probabilities[0] { 1 } else { 0 })
+        .map(|probabilities| {
+            if probabilities[1] > probabilities[0] {
+                1
+            } else {
+                0
+            }
+        })
         .collect();
     let f1 = binary_f1(&labels, &predicted);
 
@@ -138,7 +155,8 @@ fn run() -> Result<(), String> {
 
     if let Some(path) = arguments.predictions {
         let mut contents = String::from("actual,predicted,probability_0,probability_1\n");
-        for ((actual, predicted), probabilities) in labels.iter().zip(&predicted).zip(&probabilities)
+        for ((actual, predicted), probabilities) in
+            labels.iter().zip(&predicted).zip(&probabilities)
         {
             contents.push_str(&format!(
                 "{actual},{predicted},{:.12},{:.12}\n",
@@ -281,7 +299,9 @@ fn generate_dataset(rows: usize, features: usize) -> (Vec<f64>, Vec<usize>) {
     for _ in 0..rows {
         let mut score = 0.0;
         for feature in 0..features {
-            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             let value = ((state >> 11) as f64 / (1_u64 << 53) as f64) * 2.0 - 1.0;
             if feature < 3 {
                 score += value;
@@ -304,5 +324,9 @@ fn binary_f1(actual: &[usize], predicted: &[usize]) -> f64 {
         }
     }
     let denominator = 2 * true_positive + false_positive + false_negative;
-    if denominator == 0 { 0.0 } else { 2.0 * true_positive as f64 / denominator as f64 }
+    if denominator == 0 {
+        0.0
+    } else {
+        2.0 * true_positive as f64 / denominator as f64
+    }
 }

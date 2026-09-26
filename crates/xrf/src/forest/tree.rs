@@ -46,11 +46,7 @@ impl<I: RfInput> Tree<I> {
         rng: &mut RfRng,
     ) -> Self {
         let y = input.decision_slice(mask);
-        if depth_left == 0
-            || y.is_pure()
-            || !input.can_split(mask)
-            || *leaf_count >= max_leaves
-        {
+        if depth_left == 0 || y.is_pure() || !input.can_split(mask) || *leaf_count >= max_leaves {
             Self::Leaf(y.condense(rng))
         } else {
             feature_sampler.reload();
@@ -115,7 +111,13 @@ impl<I: RfInput> Tree<I> {
             Some(Walk::VisitBranch(fid, piv, score)) => {
                 let left = Self::from_walk(iter)?;
                 let right = Self::from_walk(iter)?;
-                Ok(Tree::Branch(fid, piv, score, Box::new(left), Box::new(right)))
+                Ok(Tree::Branch(
+                    fid,
+                    piv,
+                    score,
+                    Box::new(left),
+                    Box::new(right),
+                ))
             }
             None => Err(XrfError::WalkAggregationFailure),
         }

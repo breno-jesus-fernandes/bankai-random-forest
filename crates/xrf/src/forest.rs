@@ -57,7 +57,17 @@ impl<I: RfInput> Forest<I> {
         max_depth: usize,
     ) -> Self {
         Self::new_with_settings(
-            input, trees, tries, save_forest, importance, oob, seed, max_depth, usize::MAX, true, None,
+            input,
+            trees,
+            tries,
+            save_forest,
+            importance,
+            oob,
+            seed,
+            max_depth,
+            usize::MAX,
+            true,
+            None,
         )
     }
 
@@ -155,7 +165,18 @@ impl<I: RfInput> Forest<I> {
         I::VoteAggregator: Send + Sync,
     {
         Self::new_parallel_with_settings(
-            input, trees, tries, save_forest, importance, oob, seed, threads, 512, usize::MAX, true, None,
+            input,
+            trees,
+            tries,
+            save_forest,
+            importance,
+            oob,
+            seed,
+            threads,
+            512,
+            usize::MAX,
+            true,
+            None,
         )
     }
 

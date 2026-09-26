@@ -90,8 +90,14 @@ fn cli_exports_gain_importances() {
     let path = env::temp_dir().join(format!("bankai-gains-{}.csv", std::process::id()));
     let output = Command::new(env!("CARGO_BIN_EXE_bankai-xrf-cli"))
         .args([
-            "--rows", "64", "--features", "3", "--trees", "5",
-            "--gain-importances", path.to_str().expect("temporary path should be UTF-8"),
+            "--rows",
+            "64",
+            "--features",
+            "3",
+            "--trees",
+            "5",
+            "--gain-importances",
+            path.to_str().expect("temporary path should be UTF-8"),
         ])
         .output()
         .expect("benchmark CLI should run");
