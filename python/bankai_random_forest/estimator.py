@@ -103,11 +103,23 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             min_samples_leaf=self._fit_min_samples_leaf,
             bootstrap=self.bootstrap,
             max_samples=self._fit_max_samples,
+            oob=self.oob_score is True,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
             forest.feature_importances(), dtype=np.float64
         )
+        if self.oob_score is True:
+            self.oob_decision_function_ = np.asarray(
+                forest.oob_predict_proba(), dtype=np.float64
+            )
+            valid = self.oob_decision_function_.sum(axis=1) > 0.0
+            self.oob_score_ = float(
+                np.mean(
+                    self.oob_decision_function_[valid].argmax(axis=1)
+                    == self._fit_y[valid]
+                )
+            )
         return self
 
     def predict(self, X):
@@ -155,6 +167,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             min_samples_leaf=self._fit_min_samples_leaf,
             bootstrap=self.bootstrap,
             max_samples=self._fit_max_samples,
+            oob=self.oob_score is True,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -169,7 +182,6 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         unsupported = (
             ("max_leaf_nodes", self.max_leaf_nodes is not None),
             ("min_impurity_decrease", self.min_impurity_decrease != 0.0),
-            ("oob_score", self.oob_score is not False),
             ("n_jobs", self.n_jobs is not None),
             ("verbose", self.verbose != 0),
             ("warm_start", self.warm_start is not False),
@@ -179,6 +191,10 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         for name, is_unsupported in unsupported:
             if is_unsupported:
                 raise NotImplementedError(f"{name} is not implemented yet")
+        if self.oob_score is True and self.bootstrap is not True:
+            raise ValueError("Out of bag estimation only available if bootstrap=True")
+        if self.oob_score not in (False, True):
+            raise ValueError("oob_score must be a boolean")
 
     def _resolve_max_depth(self):
         if self.max_depth is None:

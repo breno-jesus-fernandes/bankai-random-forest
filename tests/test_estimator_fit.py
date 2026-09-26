@@ -56,7 +56,6 @@ def test_fit_sets_normalized_feature_importances(separable_data):
     [
         ({"max_leaf_nodes": 2}, "max_leaf_nodes"),
         ({"min_impurity_decrease": 0.1}, "min_impurity_decrease"),
-        ({"oob_score": True}, "oob_score"),
         ({"n_jobs": 1}, "n_jobs"),
         ({"verbose": 1}, "verbose"),
         ({"warm_start": True}, "warm_start"),
@@ -168,6 +167,17 @@ def test_fit_supports_bootstrap_sample_limits(separable_data, max_samples):
     ).fit(x, y)
 
     np.testing.assert_array_equal(classifier.predict(x), y)
+
+
+def test_fit_exposes_out_of_bag_probabilities_and_score(separable_data):
+    x, y = separable_data
+
+    classifier = BankaiRandomForestClassifier(
+        n_estimators=100, oob_score=True, random_state=42
+    ).fit(x, y)
+
+    assert classifier.oob_decision_function_.shape == (x.shape[0], 2)
+    assert 0.0 <= classifier.oob_score_ <= 1.0
 
 
 def test_integer_sample_weight_matches_repeated_training_rows():
