@@ -122,6 +122,9 @@ interface.
 Benchmark policy: 100k rows is the largest dataset because of the available RAM.
 Every Rust benchmark binary must use the release profile above and be built with
 `RUSTFLAGS="-C target-cpu=native" cargo build --release` on the benchmark host.
+The benchmark runner also installs the Maturin extension with
+`RUSTFLAGS="-C target-cpu=native" uv run maturin develop --release` before it
+loads the PyO3 wrapper.
 
 ### Future: Histogram Backend
 

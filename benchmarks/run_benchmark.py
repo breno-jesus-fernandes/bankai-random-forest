@@ -3,6 +3,7 @@
 
 import argparse
 import csv
+import os
 import platform
 import resource
 import subprocess
@@ -15,9 +16,6 @@ import numpy as np
 import sklearn
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import f1_score
-
-from bankai_random_forest import BankaiRandomForestClassifier
-
 
 def generate_dataset(rows, features):
     state = 42
@@ -88,6 +86,8 @@ def measure_rust(binary, rows, features, trees):
 
 
 def benchmark(rows, features, trees, binary):
+    from bankai_random_forest import BankaiRandomForestClassifier
+
     x, y = generate_dataset(rows, features)
     sklearn_result = measure_python(
         "sklearn",
@@ -156,6 +156,26 @@ def write_reports(rows, directory):
             )
 
 
+def prepare_optimized_binaries(root):
+    environment = os.environ.copy()
+    native_flag = "-C target-cpu=native"
+    environment["RUSTFLAGS"] = " ".join(
+        filter(None, [environment.get("RUSTFLAGS"), native_flag])
+    )
+    subprocess.run(
+        ["uv", "run", "maturin", "develop", "--release"],
+        check=True,
+        cwd=root,
+        env=environment,
+    )
+    subprocess.run(
+        ["cargo", "build", "--release", "--bin", "bankai-xrf-cli"],
+        check=True,
+        cwd=root,
+        env=environment,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--rows", nargs="+", type=int, default=[10_000, 100_000])
@@ -163,7 +183,11 @@ def main():
     parser.add_argument("--trees", type=int, default=100)
     parser.add_argument("--output-dir", type=Path, default=Path("benchmarks/results"))
     parser.add_argument("--rust-binary", type=Path, default=Path("target/release/bankai-xrf-cli"))
+    parser.add_argument("--skip-build", action="store_true")
     arguments = parser.parse_args()
+    root = Path(__file__).parents[1]
+    if not arguments.skip_build:
+        prepare_optimized_binaries(root)
     if not arguments.rust_binary.is_file():
         parser.error("optimized Rust binary missing; run the documented release build first")
     rows = [
