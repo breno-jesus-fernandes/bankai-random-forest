@@ -57,7 +57,7 @@ impl<I: RfInput> Forest<I> {
         max_depth: usize,
     ) -> Self {
         Self::new_with_settings(
-            input, trees, tries, save_forest, importance, oob, seed, max_depth, true, None,
+            input, trees, tries, save_forest, importance, oob, seed, max_depth, usize::MAX, true, None,
         )
     }
 
@@ -72,6 +72,7 @@ impl<I: RfInput> Forest<I> {
         oob: bool,
         seed: u64,
         max_depth: usize,
+        max_leaves: usize,
         bootstrap: bool,
         sample_size: Option<usize>,
     ) -> Self {
@@ -110,6 +111,7 @@ impl<I: RfInput> Forest<I> {
                 tries,
                 &mut feature_sampler,
                 max_depth,
+                max_leaves,
                 &mut mask_cache,
                 &mut rng,
             );
@@ -153,7 +155,7 @@ impl<I: RfInput> Forest<I> {
         I::VoteAggregator: Send + Sync,
     {
         Self::new_parallel_with_settings(
-            input, trees, tries, save_forest, importance, oob, seed, threads, 512, true, None,
+            input, trees, tries, save_forest, importance, oob, seed, threads, 512, usize::MAX, true, None,
         )
     }
 
@@ -169,6 +171,7 @@ impl<I: RfInput> Forest<I> {
         seed: u64,
         threads: usize,
         max_depth: usize,
+        max_leaves: usize,
         bootstrap: bool,
         sample_size: Option<usize>,
     ) -> Self
@@ -231,6 +234,7 @@ impl<I: RfInput> Forest<I> {
                                 tries,
                                 &mut feature_sampler,
                                 max_depth,
+                                max_leaves,
                                 &mut mask_cache,
                                 &mut rng,
                             );

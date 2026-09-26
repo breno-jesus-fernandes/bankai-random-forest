@@ -30,7 +30,7 @@ impl NativeForest {
         self.forest.is_some()
     }
 
-    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, n_jobs=1))]
+    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, n_jobs=1))]
     fn fit(
         &mut self,
         x: PyReadonlyArray2<'_, f64>,
@@ -42,6 +42,7 @@ impl NativeForest {
         min_leaf_weight: f64,
         criterion: &str,
         max_depth: usize,
+        max_leaves: Option<usize>,
         min_samples_split: usize,
         min_samples_leaf: usize,
         min_impurity_decrease: f64,
@@ -103,12 +104,12 @@ impl NativeForest {
         self.forest = Some(if n_jobs == 1 {
             Forest::new_with_settings(
                 &input, n_estimators, max_features, true, false, oob, random_state,
-                max_depth, bootstrap, max_samples,
+                max_depth, max_leaves.unwrap_or(usize::MAX), bootstrap, max_samples,
             )
         } else {
             Forest::new_parallel_with_settings(
                 &input, n_estimators, max_features, true, false, oob, random_state, n_jobs,
-                max_depth, bootstrap, max_samples,
+                max_depth, max_leaves.unwrap_or(usize::MAX), bootstrap, max_samples,
             )
         });
         self.n_classes = n_classes;

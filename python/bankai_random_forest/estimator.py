@@ -97,6 +97,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         self._fit_max_samples = self._resolve_max_samples(X.shape[0])
         self._fit_n_jobs = self._resolve_n_jobs()
         self._fit_min_impurity_decrease = self._resolve_min_impurity_decrease()
+        self._fit_max_leaves = self._resolve_max_leaf_nodes()
 
         forest = _core.NativeForest()
         forest.fit(
@@ -109,6 +110,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             min_leaf_weight=self._fit_min_leaf_weight,
             criterion=self.criterion,
             max_depth=self._fit_max_depth,
+            max_leaves=self._fit_max_leaves,
             min_samples_split=self._fit_min_samples_split,
             min_samples_leaf=self._fit_min_samples_leaf,
             min_impurity_decrease=self._fit_min_impurity_decrease,
@@ -176,6 +178,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             min_leaf_weight=self._fit_min_leaf_weight,
             criterion=self.criterion,
             max_depth=self._fit_max_depth,
+            max_leaves=self._fit_max_leaves,
             min_samples_split=self._fit_min_samples_split,
             min_samples_leaf=self._fit_min_samples_leaf,
             min_impurity_decrease=self._fit_min_impurity_decrease,
@@ -195,7 +198,6 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
 
     def _reject_unsupported_baseline_parameters(self, sample_weight):
         unsupported = (
-            ("max_leaf_nodes", self.max_leaf_nodes is not None),
             ("verbose", self.verbose != 0),
             ("ccp_alpha", self.ccp_alpha != 0.0),
             ("monotonic_cst", self.monotonic_cst is not None),
@@ -272,6 +274,13 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         ):
             return float(self.min_impurity_decrease)
         raise ValueError("min_impurity_decrease must be a non-negative number")
+
+    def _resolve_max_leaf_nodes(self):
+        if self.max_leaf_nodes is None:
+            return None
+        if isinstance(self.max_leaf_nodes, (int, np.integer)) and self.max_leaf_nodes >= 1:
+            return int(self.max_leaf_nodes)
+        raise ValueError("max_leaf_nodes must be an integer greater than or equal to 1")
 
     def _combine_class_weight(self, y, sample_weight):
         if self.class_weight is None:

@@ -54,7 +54,6 @@ def test_fit_sets_normalized_feature_importances(separable_data):
 @pytest.mark.parametrize(
     ("parameters", "name"),
     [
-        ({"max_leaf_nodes": 2}, "max_leaf_nodes"),
         ({"verbose": 1}, "verbose"),
         ({"ccp_alpha": 0.1}, "ccp_alpha"),
         ({"monotonic_cst": [1]}, "monotonic_cst"),
@@ -210,6 +209,16 @@ def test_fit_supports_minimum_impurity_decrease(separable_data):
     ).fit(x, y)
 
     np.testing.assert_array_equal(classifier.predict(x), y)
+
+
+def test_max_leaf_nodes_limits_each_tree_to_a_leaf(separable_data):
+    x, y = separable_data
+
+    classifier = BankaiRandomForestClassifier(
+        n_estimators=25, max_leaf_nodes=1, random_state=42
+    ).fit(x, y)
+
+    np.testing.assert_allclose(classifier.feature_importances_, 0.0)
 
 
 def test_integer_sample_weight_matches_repeated_training_rows():

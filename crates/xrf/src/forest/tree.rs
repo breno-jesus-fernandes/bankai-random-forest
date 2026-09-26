@@ -16,16 +16,20 @@ impl<I: RfInput> Tree<I> {
         tries: usize,
         feature_sampler: &mut I::FeatureSampler,
         max_depth: usize,
+        max_leaves: usize,
         mask_cache: &mut MaskCache,
         rng: &mut RfRng,
     ) -> Self {
         feature_sampler.reset();
+        let mut leaf_count = 1;
         Self::new_rec(
             input,
             bag,
             tries,
             feature_sampler,
             max_depth,
+            max_leaves,
+            &mut leaf_count,
             mask_cache,
             rng,
         )
@@ -36,11 +40,17 @@ impl<I: RfInput> Tree<I> {
         tries: usize,
         feature_sampler: &mut I::FeatureSampler,
         depth_left: usize,
+        max_leaves: usize,
+        leaf_count: &mut usize,
         mask_cache: &mut MaskCache,
         rng: &mut RfRng,
     ) -> Self {
         let y = input.decision_slice(mask);
-        if depth_left == 0 || y.is_pure() || !input.can_split(mask) {
+        if depth_left == 0
+            || y.is_pure()
+            || !input.can_split(mask)
+            || *leaf_count >= max_leaves
+        {
             Self::Leaf(y.condense(rng))
         } else {
             feature_sampler.reload();
@@ -54,6 +64,7 @@ impl<I: RfInput> Tree<I> {
                 })
                 .consume()
                 .map(|best| {
+                    *leaf_count += 1;
                     let (_best_score, (feature, pivot)) = best;
                     let mut left = mask_cache.provide();
                     let mut right = mask_cache.provide();
@@ -71,6 +82,8 @@ impl<I: RfInput> Tree<I> {
                             tries,
                             feature_sampler,
                             depth_left - 1,
+                            max_leaves,
+                            leaf_count,
                             mask_cache,
                             rng,
                         )),
@@ -80,6 +93,8 @@ impl<I: RfInput> Tree<I> {
                             tries,
                             feature_sampler,
                             depth_left - 1,
+                            max_leaves,
+                            leaf_count,
                             mask_cache,
                             rng,
                         )),
@@ -160,6 +175,7 @@ mod tests {
             1,
             &mut feature_sampler,
             512,
+            usize::MAX,
             &mut mask_cache,
             &mut rng,
         );

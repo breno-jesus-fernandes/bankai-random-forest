@@ -165,6 +165,7 @@ mod tests {
             1,
             &mut feature_sampler,
             512,
+            usize::MAX,
             &mut mask_cache,
             &mut rng,
         );

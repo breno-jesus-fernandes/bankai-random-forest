@@ -84,10 +84,10 @@ interface.
 ### v0.3.0: Full Parameter Semantics
 
 - [x] Criteria: Gini, entropy, and log-loss.
-- [ ] Tree limits: depth, split size, leaf size, leaf weight, feature count,
+- [x] Tree limits: depth, split size, leaf size, leaf weight, feature count,
       maximum leaves, and impurity decrease.
   - [x] Depth, split size, leaf size, leaf weight, feature count, and impurity decrease.
-  - [ ] Maximum leaves.
+  - [x] Maximum leaves.
 - [x] Sampling: bootstrap, `max_samples`, OOB predictions, and OOB score.
   - [x] Bootstrap and `max_samples`.
   - [x] OOB predictions and OOB score.
@@ -140,3 +140,4 @@ interface.
 | 2026-09-25 | v0.3.0 | Parallel training complete | Added deterministic parallel tree construction through `n_jobs`. |
 | 2026-09-25 | v0.3.0 | Warm start complete | Rebuilds the deterministic forest when the tree count increases. |
 | 2026-09-25 | v0.3.0 | Impurity threshold complete | Rejects candidate splits below `min_impurity_decrease`. |
+| 2026-09-25 | v0.3.0 | Tree limits complete | Added structural `max_leaf_nodes` enforcement. |
