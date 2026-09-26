@@ -58,7 +58,6 @@ def test_fit_sets_normalized_feature_importances(separable_data):
         ({"max_depth": 2}, "max_depth"),
         ({"min_samples_split": 3}, "min_samples_split"),
         ({"min_samples_leaf": 2}, "min_samples_leaf"),
-        ({"min_weight_fraction_leaf": 0.1}, "min_weight_fraction_leaf"),
         ({"max_features": "log2"}, "max_features"),
         ({"max_leaf_nodes": 2}, "max_leaf_nodes"),
         ({"min_impurity_decrease": 0.1}, "min_impurity_decrease"),
@@ -67,7 +66,6 @@ def test_fit_sets_normalized_feature_importances(separable_data):
         ({"n_jobs": 1}, "n_jobs"),
         ({"verbose": 1}, "verbose"),
         ({"warm_start": True}, "warm_start"),
-        ({"class_weight": "balanced"}, "class_weight"),
         ({"ccp_alpha": 0.1}, "ccp_alpha"),
         ({"max_samples": 0.5}, "max_samples"),
         ({"monotonic_cst": [1]}, "monotonic_cst"),
@@ -98,6 +96,19 @@ def test_fit_accepts_pandas_series_sample_weight(separable_data):
     classifier.fit(x, y, sample_weight=pd.Series(np.ones(x.shape[0])))
 
     np.testing.assert_array_equal(classifier.predict(x), y)
+
+
+def test_class_weight_changes_the_majority_vote():
+    x = np.array([[0.0], [0.0], [0.0], [0.0], [0.0]], dtype=np.float64)
+    y = np.array([0, 0, 0, 0, 1])
+
+    classifier = BankaiRandomForestClassifier(
+        n_estimators=25,
+        class_weight={0: 0.001, 1: 1000.0},
+        random_state=42,
+    ).fit(x, y)
+
+    np.testing.assert_array_equal(classifier.predict([[0.0]]), np.array([1]))
 
 
 def test_integer_sample_weight_matches_repeated_training_rows():

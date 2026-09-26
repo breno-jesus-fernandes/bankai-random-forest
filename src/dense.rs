@@ -10,6 +10,7 @@ pub struct DenseInput {
     rows: usize,
     columns: usize,
     n_classes: usize,
+    min_leaf_weight: f64,
 }
 
 impl DenseInput {
@@ -20,6 +21,7 @@ impl DenseInput {
         labels: Vec<usize>,
         sample_weights: Vec<f64>,
         n_classes: usize,
+        min_leaf_weight: f64,
     ) -> Result<Self, String> {
         validate_matrix(&values, rows, columns)?;
         if labels.len() != rows {
@@ -40,6 +42,9 @@ impl DenseInput {
         if n_classes == 0 {
             return Err("at least one class is required".to_string());
         }
+        if !min_leaf_weight.is_finite() || min_leaf_weight < 0.0 {
+            return Err("min_leaf_weight must be finite and non-negative".to_string());
+        }
         if labels.iter().any(|&label| label >= n_classes) {
             return Err("labels must be encoded in 0..n_classes".to_string());
         }
@@ -51,6 +56,7 @@ impl DenseInput {
             rows,
             columns,
             n_classes,
+            min_leaf_weight,
         })
     }
 
@@ -72,6 +78,7 @@ impl DenseInput {
             rows,
             columns,
             n_classes,
+            min_leaf_weight: 0.0,
         })
     }
 
@@ -264,6 +271,9 @@ fn best_gini_split(
 
         let right_weight = total_weight - left_weight;
         if left_weight == 0.0 || right_weight == 0.0 {
+            continue;
+        }
+        if left_weight < input.min_leaf_weight || right_weight < input.min_leaf_weight {
             continue;
         }
         let child_impurity = (left_weight / total_weight) * gini(&left, left_weight)

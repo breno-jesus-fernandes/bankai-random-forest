@@ -74,12 +74,12 @@ interface.
 
 ### v0.2.0: Estimator Contract
 
-- [ ] Add the full sklearn 1.9.1 constructor signature.
-- [ ] Implement `fit`, `predict`, `predict_proba`, and `predict_log_proba`.
-- [ ] Set `classes_`, `n_classes_`, `n_features_in_`, `feature_names_in_`, and
+- [x] Add the full sklearn 1.9.1 constructor signature.
+- [x] Implement `fit`, `predict`, `predict_proba`, and `predict_log_proba`.
+- [x] Set `classes_`, `n_classes_`, `n_features_in_`, `feature_names_in_`, and
       `feature_importances_`.
-- [ ] Implement fitted-state, labels, validation, serialization, and tags.
-- [ ] Pass `check_estimator` without expected failures.
+- [x] Implement fitted-state, labels, validation, serialization, and tags.
+- [x] Pass `check_estimator` without expected failures.
 
 ### v0.3.0: Full Parameter Semantics
 
@@ -125,3 +125,4 @@ interface.
 | 2026-09-25 | v0.1.0 | Import cycle complete | The empty `cp311-abi3` PyO3 module passed its red/green pytest cycle. |
 | 2026-09-25 | v0.1.0 | XRF vendor complete | Pinned XRF source, upstream attribution, NOTICE, and GPL-3.0 text added. |
 | 2026-09-25 | v0.2.0 | Baseline in progress | Dense Gini fitting, original-label prediction, sample weights, sparse rejection, and pickle reconstruction work. `class_weight` and `min_weight_fraction_leaf` remain required before the sklearn common-check gate can pass. |
+| 2026-09-25 | v0.2.0 | Estimator contract complete | Probability predictions, feature importances, class weights, and minimum leaf-weight support added; `check_estimator` passes without expected failures. |

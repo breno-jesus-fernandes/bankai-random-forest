@@ -1,6 +1,7 @@
 import numpy as np
 from scipy import sparse
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.utils.class_weight import compute_sample_weight
 from sklearn.utils.multiclass import type_of_target
 from sklearn.utils import check_random_state
 from sklearn.utils.validation import check_is_fitted, validate_data
@@ -64,6 +65,10 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         sample_weight = self._validate_sample_weight(sample_weight, X.shape[0])
         self.classes_, encoded_y = np.unique(y, return_inverse=True)
         self.n_classes_ = int(self.classes_.shape[0])
+        sample_weight = self._combine_class_weight(y, sample_weight)
+        min_leaf_weight = self._validate_min_weight_fraction_leaf(
+            sample_weight, X.shape[0]
+        )
         X, encoded_y, sample_weight = self._prepare_training_data(
             X, encoded_y, sample_weight
         )
@@ -73,6 +78,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         self._fit_X = X
         self._fit_y = encoded_y.astype(np.int64, copy=False)
         self._fit_sample_weight = sample_weight
+        self._fit_min_leaf_weight = min_leaf_weight
 
         forest = _core.NativeForest()
         forest.fit(
@@ -82,6 +88,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             max_features=self._fit_max_features,
             random_state=self._fit_seed,
             sample_weight=self._fit_sample_weight,
+            min_leaf_weight=self._fit_min_leaf_weight,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -127,6 +134,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             max_features=self._fit_max_features,
             random_state=self._fit_seed,
             sample_weight=self._fit_sample_weight,
+            min_leaf_weight=self._fit_min_leaf_weight,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -143,10 +151,6 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             ("max_depth", self.max_depth is not None),
             ("min_samples_split", self.min_samples_split != 2),
             ("min_samples_leaf", self.min_samples_leaf != 1),
-            (
-                "min_weight_fraction_leaf",
-                self.min_weight_fraction_leaf != 0.0,
-            ),
             ("max_features", self.max_features != "sqrt"),
             ("max_leaf_nodes", self.max_leaf_nodes is not None),
             ("min_impurity_decrease", self.min_impurity_decrease != 0.0),
@@ -155,7 +159,6 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             ("n_jobs", self.n_jobs is not None),
             ("verbose", self.verbose != 0),
             ("warm_start", self.warm_start is not False),
-            ("class_weight", self.class_weight is not None),
             ("ccp_alpha", self.ccp_alpha != 0.0),
             ("max_samples", self.max_samples is not None),
             ("monotonic_cst", self.monotonic_cst is not None),
@@ -163,6 +166,26 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         for name, is_unsupported in unsupported:
             if is_unsupported:
                 raise NotImplementedError(f"{name} is not implemented yet")
+
+    def _combine_class_weight(self, y, sample_weight):
+        if self.class_weight is None:
+            return sample_weight
+
+        class_weight = compute_sample_weight(self.class_weight, y)
+        if sample_weight is None:
+            return class_weight.astype(np.float64, copy=False)
+        return sample_weight * class_weight
+
+    def _validate_min_weight_fraction_leaf(self, sample_weight, n_samples):
+        fraction = self.min_weight_fraction_leaf
+        if not isinstance(fraction, (float, int, np.floating, np.integer)) or not (
+            0.0 <= fraction <= 0.5
+        ):
+            raise ValueError("min_weight_fraction_leaf must be in [0, 0.5]")
+
+        if sample_weight is None:
+            return float(fraction) * n_samples
+        return float(fraction) * float(sample_weight.sum())
 
     @staticmethod
     def _validate_sample_weight(sample_weight, n_samples):
