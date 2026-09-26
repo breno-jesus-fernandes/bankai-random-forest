@@ -100,6 +100,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             max_depth=self._fit_max_depth,
             min_samples_split=self._fit_min_samples_split,
             min_samples_leaf=self._fit_min_samples_leaf,
+            bootstrap=self.bootstrap,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -150,6 +151,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             max_depth=self._fit_max_depth,
             min_samples_split=self._fit_min_samples_split,
             min_samples_leaf=self._fit_min_samples_leaf,
+            bootstrap=self.bootstrap,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -164,7 +166,6 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         unsupported = (
             ("max_leaf_nodes", self.max_leaf_nodes is not None),
             ("min_impurity_decrease", self.min_impurity_decrease != 0.0),
-            ("bootstrap", self.bootstrap is not True),
             ("oob_score", self.oob_score is not False),
             ("n_jobs", self.n_jobs is not None),
             ("verbose", self.verbose != 0),

@@ -56,7 +56,6 @@ def test_fit_sets_normalized_feature_importances(separable_data):
     [
         ({"max_leaf_nodes": 2}, "max_leaf_nodes"),
         ({"min_impurity_decrease": 0.1}, "min_impurity_decrease"),
-        ({"bootstrap": False}, "bootstrap"),
         ({"oob_score": True}, "oob_score"),
         ({"n_jobs": 1}, "n_jobs"),
         ({"verbose": 1}, "verbose"),
@@ -146,6 +145,16 @@ def test_fit_supports_minimum_sample_controls(separable_data, parameter, value):
 
     classifier = BankaiRandomForestClassifier(
         n_estimators=25, random_state=42, **{parameter: value}
+    ).fit(x, y)
+
+    np.testing.assert_array_equal(classifier.predict(x), y)
+
+
+def test_fit_supports_training_without_bootstrap(separable_data):
+    x, y = separable_data
+
+    classifier = BankaiRandomForestClassifier(
+        n_estimators=25, bootstrap=False, random_state=42
     ).fit(x, y)
 
     np.testing.assert_array_equal(classifier.predict(x), y)

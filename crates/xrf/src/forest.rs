@@ -56,6 +56,24 @@ impl<I: RfInput> Forest<I> {
         seed: u64,
         max_depth: usize,
     ) -> Self {
+        Self::new_with_settings(
+            input, trees, tries, save_forest, importance, oob, seed, max_depth, true,
+        )
+    }
+
+    /// Train a model with explicit depth and bootstrap settings.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_settings(
+        input: &I,
+        trees: usize,
+        tries: usize,
+        save_forest: bool,
+        importance: bool,
+        oob: bool,
+        seed: u64,
+        max_depth: usize,
+        bootstrap: bool,
+    ) -> Self {
         let num_trees = trees;
         let mut trees = MaybeVec::new(save_forest);
         let mut importance: Option<HashMap<I::FeatureId, ImportanceAggregator>> = if importance {
@@ -76,7 +94,11 @@ impl<I: RfInput> Forest<I> {
         let mut feature_sampler = input.feature_sampler();
         for tree_id in 0..num_trees {
             let mut rng = RfRng::from_seed(seed, 1 + tree_id as u64);
-            let (bag, oob) = Mask::new_bag_oob(input.observation_count(), &mut rng);
+            let (bag, oob) = if bootstrap {
+                Mask::new_bag_oob(input.observation_count(), &mut rng)
+            } else {
+                (Mask::new_all(input.observation_count()), Mask::new_all(0))
+            };
             let tree = Tree::new(
                 input,
                 &bag,
