@@ -184,21 +184,30 @@ loads the PyO3 wrapper.
 
 ### v1.0.0: Core Scikit-learn Compatibility Remediation
 
-- [ ] Fix estimator tags so sklearn identifies Bankai as a classifier and
+- [x] Fix estimator tags so sklearn identifies Bankai as a classifier and
       classifier meta-estimators can use it.
 - [ ] Implement `class_weight="balanced_subsample"` with per-bootstrap-sample
-      weighting, including sklearn's non-bootstrap behavior.
-- [ ] Match sklearn's `max_samples` semantics for fractional and weighted
+      weighting. The preset is accepted and its non-bootstrap weighting is
+      implemented; per-tree bootstrap weights still need a Rust-core hook.
+- [x] Match sklearn's `max_samples` semantics for fractional and weighted
       samples, including flooring the computed sample count.
-- [ ] Support callable `oob_score` functions with sklearn-compatible inputs
+- [x] Support callable `oob_score` functions with sklearn-compatible inputs
       and expose the returned score through `oob_score_`.
-- [ ] Turn the four v0.9 `xfail` cases into passing compatibility tests and
+- [x] Turn the four v0.9 `xfail` cases into passing compatibility tests and
       add focused reference-behavior coverage for the corrected semantics.
-- [ ] Run the full Python suite and sklearn estimator checks; update the
+- [x] Run the full Python suite and sklearn estimator checks; update the
       compatibility matrix with verified results.
 - [ ] Keep `ccp_alpha`, `monotonic_cst`, sparse/NaN inputs, and multioutput
       behavior unchanged in this milestone and document them as deferred
       backend or input-domain work.
+
+### v1.1.0: Bootstrap Class Weight Parity
+
+- [ ] Add an XRF input hook so each tree computes `balanced_subsample` weights
+      from its own bootstrap multiplicities without copying the dense matrix.
+- [ ] Verify weighted and unweighted per-tree behavior against sklearn,
+      including deterministic sequential and parallel forests.
+- [ ] Preserve OOB predictions and feature importance under per-tree weights.
 
 ## Progress Log
 
@@ -240,3 +249,4 @@ loads the PyO3 wrapper.
 | 2026-09-26 | v0.8.0 | Joblib compatibility complete | Joblib round trips pass for exact and histogram models, preserving estimator parameters, classes, predictions, probabilities, and importances. Uncompressed `mmap_mode="r"` works; compressed files load with joblib's mmap-unavailable warning. Bankai reconstructs the native forest from saved training arrays. Tested with joblib 1.6.0, Python 3.11.11, Bankai 0.1.0, and sklearn 1.9.1; policy is documented in `docs/JOBLIB_COMPATIBILITY.md`. |
 | 2026-09-26 | v0.9.0 | sklearn compatibility gap audit complete | Documented the sklearn 1.9.1 comparison and priorities in `docs/SKLEARN_COMPATIBILITY.md`. The full suite reports 72 passed and four expected xfails (classifier tags, `balanced_subsample`, fractional `max_samples`, callable OOB scoring); two existing `log(0)` warnings remain. |
 | 2026-09-26 | v1.0.0 | Core sklearn compatibility remediation planned | Correct the four highest-priority v0.9 gaps while keeping backend-heavy pruning/monotonic features and intentional sparse/NaN/multioutput boundaries outside this milestone. |
+| 2026-09-26 | v1.0.0 | Compatibility remediation implemented | Fixed classifier tags, fractional/weighted `max_samples` flooring, and callable OOB scoring. `balanced_subsample` is accepted and handles `bootstrap=False`; exact per-bootstrap weighting is carried into v1.1. Release extension build passed and the full suite reports 76 passed. |

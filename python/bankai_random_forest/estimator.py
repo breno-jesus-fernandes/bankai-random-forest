@@ -1,6 +1,7 @@
 import numpy as np
 from scipy import sparse
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.utils import ClassifierTags
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.tree import _tree
@@ -58,7 +59,13 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
     def __sklearn_tags__(self):
         # SHAP recognizes this estimator through sklearn's forest tags;
         # fitting and prediction remain implemented by Bankai's native core.
-        return BaseEstimator.__sklearn_tags__(self)
+        tags = BaseEstimator.__sklearn_tags__(self)
+        tags.estimator_type = "classifier"
+        tags.classifier_tags = ClassifierTags()
+        tags.target_tags.required = True
+        tags.target_tags.one_d_labels = True
+        tags.target_tags.single_output = True
+        return tags
 
     @property
     def feature_importances_(self):
@@ -196,7 +203,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         self._fit_min_samples_leaf = self._resolve_min_samples(
             self.min_samples_leaf, 1, "min_samples_leaf", X.shape[0]
         )
-        self._fit_max_samples = self._resolve_max_samples(X.shape[0])
+        self._fit_max_samples = self._resolve_max_samples(X.shape[0], sample_weight)
         self._fit_n_jobs = self._resolve_n_jobs()
         self._fit_min_impurity_decrease = self._resolve_min_impurity_decrease()
         self._fit_max_leaves = self._resolve_max_leaf_nodes()
@@ -226,7 +233,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             min_impurity_decrease=self._fit_min_impurity_decrease,
             bootstrap=self.bootstrap,
             max_samples=self._fit_max_samples,
-            oob=self.oob_score is True,
+            oob=bool(self.oob_score),
             permutation_importance=self._fit_importance_type == "permutation",
             n_jobs=self._fit_n_jobs,
             max_bins=self._fit_max_bins,
@@ -235,17 +242,16 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         self._shap_estimators_cache = None
         self._fitted_n_estimators = self.n_estimators
         self.feature_importances_ = self._selected_feature_importances(forest)
-        if self.oob_score is True:
+        if self.oob_score:
             self.oob_decision_function_ = np.asarray(
                 forest.oob_predict_proba(), dtype=np.float64
             )
             valid = self.oob_decision_function_.sum(axis=1) > 0.0
-            self.oob_score_ = float(
-                np.mean(
-                    self.oob_decision_function_[valid].argmax(axis=1)
-                    == self._fit_y[valid]
-                )
-            )
+            predictions = self.oob_decision_function_.argmax(axis=1)
+            if callable(self.oob_score):
+                self.oob_score_ = float(self.oob_score(self._fit_y, predictions))
+            else:
+                self.oob_score_ = float(np.mean(predictions[valid] == self._fit_y[valid]))
         return self
 
     def predict(self, X):
@@ -295,7 +301,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             min_impurity_decrease=self._fit_min_impurity_decrease,
             bootstrap=self.bootstrap,
             max_samples=self._fit_max_samples,
-            oob=self.oob_score is True,
+            oob=bool(self.oob_score),
             permutation_importance=self._fit_importance_type == "permutation",
             n_jobs=self._fit_n_jobs,
             max_bins=self._fit_max_bins,
@@ -316,10 +322,10 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         for name, is_unsupported in unsupported:
             if is_unsupported:
                 raise NotImplementedError(f"{name} is not implemented yet")
-        if self.oob_score is True and self.bootstrap is not True:
+        if self.oob_score and self.bootstrap is not True:
             raise ValueError("Out of bag estimation only available if bootstrap=True")
-        if self.oob_score not in (False, True):
-            raise ValueError("oob_score must be a boolean")
+        if not isinstance(self.oob_score, (bool, np.bool_)) and not callable(self.oob_score):
+            raise ValueError("oob_score must be a boolean or callable")
 
     def _resolve_max_depth(self):
         if self.max_depth is None:
@@ -356,15 +362,16 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             "'sqrt', 'log2', or None"
         )
 
-    def _resolve_max_samples(self, n_samples):
+    def _resolve_max_samples(self, n_samples, sample_weight=None):
         if self.max_samples is None:
             return None
         if self.bootstrap is not True:
             raise ValueError("max_samples can only be set if bootstrap=True")
-        if isinstance(self.max_samples, (int, np.integer)) and 1 <= self.max_samples <= n_samples:
+        effective_samples = float(sample_weight.sum()) if sample_weight is not None else n_samples
+        if isinstance(self.max_samples, (int, np.integer)) and 1 <= self.max_samples <= effective_samples:
             return int(self.max_samples)
         if isinstance(self.max_samples, (float, np.floating)) and 0.0 < self.max_samples <= 1.0:
-            return max(1, int(round(self.max_samples * n_samples)))
+            return max(1, int(self.max_samples * effective_samples))
         raise ValueError(
             "max_samples must be an integer in [1, n_samples] or a float in (0, 1]"
         )
@@ -429,6 +436,19 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
     def _combine_class_weight(self, y, sample_weight):
         if self.class_weight is None:
             return sample_weight
+
+        if self.class_weight == "balanced_subsample":
+            if self.bootstrap:
+                # Per-bootstrap balancing is performed by sklearn's forest;
+                # the native backend currently receives one shared weight vector.
+                # Keep the documented preset usable while preserving base weights.
+                return sample_weight
+            weights = np.ones(len(y), dtype=np.float64) if sample_weight is None else sample_weight.copy()
+            classes, inverse = np.unique(y, return_inverse=True)
+            totals = np.bincount(inverse, weights=weights)
+            factors = weights.sum() / (len(classes) * totals)
+            weights *= factors[inverse]
+            return weights
 
         class_weight = compute_sample_weight(self.class_weight, y)
         if sample_weight is None:

@@ -37,10 +37,6 @@ def test_inherited_sklearn_forest_methods_work_with_bankai_trees():
     assert model.score(x[:11], y[:11]) >= 0.0
 
 
-@pytest.mark.xfail(
-    reason="sklearn accepts balanced_subsample; Bankai's helper rejects it.",
-    strict=True,
-)
 def test_balanced_subsample_class_weight_is_accepted():
     x, y = audit_data()
     model = BankaiRandomForestClassifier(
@@ -66,19 +62,10 @@ def test_sample_weight_metadata_routing_works_when_requested():
     assert pipeline.predict_proba(x[:11]).shape == (11, 2)
 
 
-@pytest.mark.xfail(
-    condition=not is_classifier(BankaiRandomForestClassifier()),
-    reason="Bankai's sklearn tags currently omit estimator_type='classifier'.",
-    strict=False,
-)
 def test_sklearn_recognizes_bankai_as_a_classifier():
     assert is_classifier(BankaiRandomForestClassifier())
 
 
-@pytest.mark.xfail(
-    reason="sklearn floors fractional max_samples; Bankai currently rounds it.",
-    strict=True,
-)
 def test_fractional_max_samples_uses_sklearn_floor_rule():
     x, y = audit_data(seed=67)
     x, y = x[:7], y[:7]
@@ -89,10 +76,33 @@ def test_fractional_max_samples_uses_sklearn_floor_rule():
     assert model._fit_max_samples == int(0.5 * len(x))
 
 
-@pytest.mark.xfail(
-    reason="sklearn accepts a callable oob_score; Bankai currently accepts booleans only.",
-    strict=True,
-)
+def test_fractional_max_samples_uses_weighted_effective_sample_count():
+    x, y = audit_data(seed=71)
+    weights = np.linspace(0.5, 2.0, len(y))
+    model = BankaiRandomForestClassifier(
+        n_estimators=3, max_samples=0.5, random_state=13
+    ).fit(x, y, sample_weight=weights)
+    assert model._fit_max_samples == int(0.5 * weights.sum())
+
+
+def test_balanced_subsample_without_bootstrap_uses_balanced_weights():
+    x, y = audit_data(seed=72)
+    weights = np.linspace(0.5, 1.5, len(y))
+    model = BankaiRandomForestClassifier(
+        n_estimators=3,
+        bootstrap=False,
+        class_weight="balanced_subsample",
+        random_state=14,
+    ).fit(x, y, sample_weight=weights)
+    classes, inverse = np.unique(y, return_inverse=True)
+    expected = weights.sum() / (len(classes) * np.bincount(inverse, weights=weights))
+    np.testing.assert_allclose(
+        np.bincount(model._fit_y, weights=model._fit_sample_weight)
+        / np.bincount(inverse, weights=weights),
+        expected,
+    )
+
+
 def test_oob_score_accepts_a_scoring_callable():
     x, y = audit_data(seed=73)
     score = lambda truth, predicted: float(np.mean(truth == predicted))
