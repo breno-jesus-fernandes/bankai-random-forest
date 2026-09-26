@@ -51,12 +51,12 @@ impl RfInput for DataFrame {
         let feature = &self.x[using];
         scan(&feature, y, on)
     }
-    fn split_iter(
-        &self,
-        on: &Mask,
+    fn split_iter<'a>(
+        &'a self,
+        on: &'a Mask,
         using: Self::FeatureId,
-        by: &Self::Pivot,
-    ) -> impl Iterator<Item = bool> {
+        by: &'a Self::Pivot,
+    ) -> impl Iterator<Item = bool> + 'a {
         let feature = &self.x[using];
         on.iter().map(|&e| feature[e] > *by)
     }

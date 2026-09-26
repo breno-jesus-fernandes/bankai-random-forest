@@ -31,6 +31,14 @@ pub struct DenseInput {
 enum DenseValues {
     Exact(Arc<Vec<f64>>),
     Binned(Arc<Vec<u8>>),
+    Sparse(Arc<CsrValues>),
+}
+
+#[derive(Clone)]
+struct CsrValues {
+    indptr: Vec<usize>,
+    indices: Vec<usize>,
+    data: Vec<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -45,6 +53,32 @@ struct HistogramCache {
 }
 
 pub struct DenseSplitCache(Option<HistogramCache>);
+
+enum DenseSplitIter<'a> {
+    Lazy {
+        input: &'a DenseInput,
+        rows: std::slice::Iter<'a, usize>,
+        feature: usize,
+        pivot: f64,
+    },
+    Buffered(std::vec::IntoIter<bool>),
+}
+
+impl Iterator for DenseSplitIter<'_> {
+    type Item = bool;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Lazy {
+                input,
+                rows,
+                feature,
+                pivot,
+            } => rows.next().map(|&row| input.value(row, *feature) > *pivot),
+            Self::Buffered(values) => values.next(),
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub enum Criterion {
@@ -193,6 +227,122 @@ impl DenseInput {
         })
     }
 
+    pub fn training_csr(
+        indptr: Vec<usize>,
+        indices: Vec<usize>,
+        data: Vec<f64>,
+        rows: usize,
+        columns: usize,
+        labels: Vec<usize>,
+        sample_weights: Vec<f64>,
+        n_classes: usize,
+        min_leaf_weight: f64,
+        criterion: Criterion,
+        min_samples_split: usize,
+        min_samples_leaf: usize,
+        min_impurity_decrease: f64,
+        max_bins: Option<usize>,
+    ) -> Result<Self, String> {
+        let sparse = validate_csr(indptr, indices, data, rows, columns)?;
+        if labels.len() != rows {
+            return Err("y must contain one label per row".into());
+        }
+        if sample_weights.len() != rows {
+            return Err("sample_weight must contain one value per row".into());
+        }
+        if sample_weights.iter().any(|w| !w.is_finite() || *w < 0.0) {
+            return Err("sample_weight must contain finite non-negative values".into());
+        }
+        if sample_weights.iter().all(|w| *w == 0.0) {
+            return Err("sample_weight cannot be all zero".into());
+        }
+        if n_classes == 0 || labels.iter().any(|&label| label >= n_classes) {
+            return Err("labels must be encoded in 0..n_classes".into());
+        }
+        if !min_leaf_weight.is_finite() || min_leaf_weight < 0.0 {
+            return Err("min_leaf_weight must be finite and non-negative".into());
+        }
+        if min_samples_split < 2 || min_samples_leaf == 0 {
+            return Err("invalid minimum sample control".into());
+        }
+        if !min_impurity_decrease.is_finite() || min_impurity_decrease < 0.0 {
+            return Err("min_impurity_decrease must be finite and non-negative".into());
+        }
+        if max_bins.is_some_and(|bins| !(2..=255).contains(&bins)) {
+            return Err("max_bins must be None or an integer in [2, 255]".into());
+        }
+        let total_weight = sample_weights.iter().sum();
+        let bin_edges = max_bins.map(|bins| sparse_histogram_edges(&sparse, rows, columns, bins));
+        let active_features = bin_edges.as_ref().map_or_else(
+            || (0..columns).collect(),
+            |edges| {
+                edges
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, e)| (!e.is_empty()).then_some(i))
+                    .collect()
+            },
+        );
+        Ok(Self {
+            values: DenseValues::Sparse(Arc::new(sparse)),
+            labels: Some(Arc::new(labels)),
+            sample_weights: Some(Arc::new(sample_weights)),
+            rows,
+            columns,
+            n_classes,
+            min_leaf_weight,
+            criterion,
+            min_samples_split,
+            min_samples_leaf,
+            min_impurity_decrease,
+            total_weight,
+            histogram_bins: max_bins,
+            bin_edges: bin_edges.map(Arc::new),
+            active_features,
+            balanced_subsample: false,
+            ccp_alpha: 0.0,
+            monotonic_constraints: None,
+        })
+    }
+
+    pub fn prediction_csr(
+        indptr: Vec<usize>,
+        indices: Vec<usize>,
+        data: Vec<f64>,
+        rows: usize,
+        columns: usize,
+        n_classes: usize,
+        bin_edges: Option<&[Vec<f64>]>,
+    ) -> Result<Self, String> {
+        let sparse = validate_csr(indptr, indices, data, rows, columns)?;
+        if n_classes == 0 {
+            return Err("at least one class is required".into());
+        }
+        if bin_edges.is_some_and(|edges| edges.len() != columns) {
+            return Err("histogram edges do not match the fitted feature count".into());
+        }
+        Ok(Self {
+            values: DenseValues::Sparse(Arc::new(sparse)),
+            labels: None,
+            sample_weights: None,
+            rows,
+            columns,
+            n_classes,
+            min_leaf_weight: 0.0,
+            criterion: Criterion::Gini,
+            min_samples_split: 2,
+            min_samples_leaf: 1,
+            min_impurity_decrease: 0.0,
+            total_weight: 0.0,
+            histogram_bins: None,
+            bin_edges: bin_edges.map(|e| Arc::new(e.to_vec())),
+            active_features: (0..columns).collect(),
+            balanced_subsample: false,
+            ccp_alpha: 0.0,
+            monotonic_constraints: None,
+        })
+    }
+
     pub fn rows(&self) -> usize {
         self.rows
     }
@@ -225,6 +375,7 @@ impl DenseInput {
         match (&self.values, &other.values) {
             (DenseValues::Exact(left), DenseValues::Exact(right)) => Arc::ptr_eq(left, right),
             (DenseValues::Binned(left), DenseValues::Binned(right)) => Arc::ptr_eq(left, right),
+            (DenseValues::Sparse(left), DenseValues::Sparse(right)) => Arc::ptr_eq(left, right),
             _ => false,
         }
     }
@@ -281,19 +432,109 @@ impl DenseInput {
     }
 
     fn value(&self, row: usize, column: usize) -> f64 {
-        let index = row * self.columns + column;
         match &self.values {
-            DenseValues::Exact(values) => values[index],
-            DenseValues::Binned(values) => values[index] as f64,
+            DenseValues::Exact(values) => values[row * self.columns + column],
+            DenseValues::Binned(values) => values[row * self.columns + column] as f64,
+            DenseValues::Sparse(values) => {
+                let value = values.get(row, column);
+                self.bin_edges.as_ref().map_or(value, |edges| {
+                    edges[column].partition_point(|edge| value > *edge) as f64
+                })
+            }
         }
     }
 
     fn bin_value(&self, row: usize, column: usize) -> usize {
         match &self.values {
             DenseValues::Binned(values) => values[row * self.columns + column] as usize,
+            DenseValues::Sparse(values) => self.bin_edges.as_ref().unwrap()[column]
+                .partition_point(|edge| values.get(row, column) > *edge),
             DenseValues::Exact(_) => unreachable!("histograms require binned input"),
         }
     }
+}
+
+impl CsrValues {
+    fn get(&self, row: usize, column: usize) -> f64 {
+        let start = self.indptr[row];
+        let end = self.indptr[row + 1];
+        match self.indices[start..end].binary_search(&column) {
+            Ok(i) => self.data[start + i],
+            Err(_) => 0.0,
+        }
+    }
+}
+
+fn validate_csr(
+    indptr: Vec<usize>,
+    indices: Vec<usize>,
+    data: Vec<f64>,
+    rows: usize,
+    columns: usize,
+) -> Result<CsrValues, String> {
+    if rows == 0 {
+        return Err("X must contain at least one row".into());
+    }
+    if columns == 0 {
+        return Err("X must contain at least one feature".into());
+    }
+    if indptr.len() != rows + 1
+        || indptr.first() != Some(&0)
+        || indptr.last() != Some(&data.len())
+        || indices.len() != data.len()
+        || indptr.windows(2).any(|w| w[0] > w[1])
+    {
+        return Err("invalid CSR matrix structure".into());
+    }
+    if indices.iter().any(|&i| i >= columns)
+        || indptr
+            .windows(2)
+            .any(|w| indices[w[0]..w[1]].windows(2).any(|v| v[0] >= v[1]))
+    {
+        return Err("CSR column indices must be sorted and unique".into());
+    }
+    if data.iter().any(|v| !v.is_finite()) {
+        return Err("X must contain only finite values".into());
+    }
+    Ok(CsrValues {
+        indptr,
+        indices,
+        data,
+    })
+}
+
+fn sparse_histogram_edges(
+    values: &CsrValues,
+    rows: usize,
+    columns: usize,
+    max_bins: usize,
+) -> Vec<Vec<f64>> {
+    (0..columns)
+        .map(|column| {
+            let mut sorted = (0..rows)
+                .map(|row| values.get(row, column))
+                .collect::<Vec<_>>();
+            sorted.sort_unstable_by(f64::total_cmp);
+            sorted.dedup_by(|a, b| a.total_cmp(b).is_eq());
+            let mut edges = Vec::new();
+            if sorted.len() <= max_bins {
+                for pair in sorted.windows(2) {
+                    edges.push(midpoint(pair[0], pair[1]));
+                }
+            } else {
+                for bin in 1..max_bins {
+                    let index = bin * sorted.len() / max_bins;
+                    if index > 0 && index < sorted.len() {
+                        let edge = midpoint(sorted[index - 1], sorted[index]);
+                        if edges.last().is_none_or(|prev| *prev < edge) {
+                            edges.push(edge);
+                        }
+                    }
+                }
+            }
+            edges
+        })
+        .collect()
 }
 
 fn validate_matrix(values: &[f64], rows: usize, columns: usize) -> Result<(), String> {
@@ -357,7 +598,11 @@ fn histogramize(
 
 fn midpoint(left: f64, right: f64) -> f64 {
     let midpoint = left * 0.5 + right * 0.5;
-    if midpoint >= right { left } else { midpoint }
+    if midpoint >= right {
+        left
+    } else {
+        midpoint
+    }
 }
 
 fn apply_histogram_edges(
@@ -392,14 +637,31 @@ fn build_histograms(input: &DenseInput, mask: &Mask) -> HistogramCache {
         })
         .collect::<Vec<_>>();
 
-    for &row in mask.iter() {
-        let label = input.labels()[row];
-        let weight = input.sample_weight(row);
-        for (feature, histogram) in features.iter_mut().enumerate() {
-            let bin = input.bin_value(row, feature);
-            histogram.class_weights[bin * input.n_classes + label] += weight;
-            histogram.sample_counts[bin] += 1;
+    match &input.values {
+        DenseValues::Binned(values) => {
+            for &row in mask.iter() {
+                let label = input.labels()[row];
+                let weight = input.sample_weight(row);
+                let offset = row * input.columns;
+                for (feature, histogram) in features.iter_mut().enumerate() {
+                    let bin = values[offset + feature] as usize;
+                    histogram.class_weights[bin * input.n_classes + label] += weight;
+                    histogram.sample_counts[bin] += 1;
+                }
+            }
         }
+        DenseValues::Sparse(_) => {
+            for &row in mask.iter() {
+                let label = input.labels()[row];
+                let weight = input.sample_weight(row);
+                for (feature, histogram) in features.iter_mut().enumerate() {
+                    let bin = input.bin_value(row, feature);
+                    histogram.class_weights[bin * input.n_classes + label] += weight;
+                    histogram.sample_counts[bin] += 1;
+                }
+            }
+        }
+        DenseValues::Exact(_) => unreachable!("histograms require binned input"),
     }
     HistogramCache { features }
 }
@@ -631,11 +893,35 @@ fn best_split_exact(
     lower_bound: f64,
     upper_bound: f64,
 ) -> Option<(f64, f64)> {
-    let mut ranked: Vec<(f64, usize, f64)> = mask
-        .iter()
-        .zip(&target.labels)
-        .map(|(&row, &label)| (input.value(row, feature), label, input.sample_weight(row)))
-        .collect();
+    let mut ranked: Vec<(f64, usize, f64)> = match &input.values {
+        DenseValues::Exact(values) => mask
+            .iter()
+            .zip(&target.labels)
+            .map(|(&row, &label)| {
+                (
+                    values[row * input.columns + feature],
+                    label,
+                    input.sample_weight(row),
+                )
+            })
+            .collect(),
+        DenseValues::Binned(values) => mask
+            .iter()
+            .zip(&target.labels)
+            .map(|(&row, &label)| {
+                (
+                    values[row * input.columns + feature] as f64,
+                    label,
+                    input.sample_weight(row),
+                )
+            })
+            .collect(),
+        DenseValues::Sparse(values) => mask
+            .iter()
+            .zip(&target.labels)
+            .map(|(&row, &label)| (values.get(row, feature), label, input.sample_weight(row)))
+            .collect(),
+    };
     ranked.sort_unstable_by(|left, right| left.0.total_cmp(&right.0));
 
     if ranked.len() < 2 {
@@ -966,14 +1252,39 @@ impl RfInput for DenseInput {
             .map_or(0, |c| c[feature])
     }
 
-    fn split_iter(
-        &self,
-        mask: &Mask,
+    fn split_iter<'a>(
+        &'a self,
+        mask: &'a Mask,
         feature: Self::FeatureId,
-        pivot: &Self::Pivot,
-    ) -> impl Iterator<Item = bool> {
-        mask.iter()
-            .map(move |&row| self.value(row, feature) > *pivot)
+        pivot: &'a Self::Pivot,
+    ) -> impl Iterator<Item = bool> + 'a {
+        if self.labels.is_none() {
+            let values = match &self.values {
+                DenseValues::Exact(values) => mask
+                    .iter()
+                    .map(|&row| values[row * self.columns + feature] > *pivot)
+                    .collect::<Vec<_>>()
+                    .into_iter(),
+                DenseValues::Binned(values) => mask
+                    .iter()
+                    .map(|&row| values[row * self.columns + feature] as f64 > *pivot)
+                    .collect::<Vec<_>>()
+                    .into_iter(),
+                DenseValues::Sparse(_) => mask
+                    .iter()
+                    .map(|&row| self.value(row, feature) > *pivot)
+                    .collect::<Vec<_>>()
+                    .into_iter(),
+            };
+            DenseSplitIter::Buffered(values)
+        } else {
+            DenseSplitIter::Lazy {
+                input: self,
+                rows: mask.iter(),
+                feature,
+                pivot: *pivot,
+            }
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 import joblib
 import numpy as np
 import pytest
+from scipy import sparse
 
 from bankai_random_forest import BankaiRandomForestClassifier
 
@@ -79,6 +80,21 @@ def test_compressed_joblib_round_trip_preserves_predictions(tmp_path):
     restored = joblib.load(path)
 
     np.testing.assert_array_equal(restored.predict(x), model.predict(x))
+
+
+@pytest.mark.parametrize("sparse_format", [sparse.csr_matrix, sparse.csc_matrix])
+def test_joblib_round_trip_preserves_sparse_training_matrix(tmp_path, sparse_format):
+    x = np.array([[0.0, 2.0], [0.0, 0.0], [1.0, 0.0], [2.0, 1.0]])
+    y = np.array([0, 0, 1, 1])
+    model = BankaiRandomForestClassifier(n_estimators=5, random_state=9).fit(
+        sparse_format(x), y
+    )
+    path = tmp_path / "bankai-sparse.joblib"
+    joblib.dump(model, path)
+    restored = joblib.load(path)
+
+    np.testing.assert_array_equal(restored.predict(sparse.csr_matrix(x)), model.predict(sparse.csr_matrix(x)))
+    np.testing.assert_array_equal(restored.predict_proba(sparse.csc_matrix(x)), model.predict_proba(sparse.csc_matrix(x)))
     np.testing.assert_allclose(restored.predict_proba(x), model.predict_proba(x))
 
 

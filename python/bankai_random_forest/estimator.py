@@ -65,6 +65,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         tags.target_tags.required = True
         tags.target_tags.one_d_labels = True
         tags.target_tags.single_output = True
+        tags.input_tags.sparse = True
         return tags
 
     @property
@@ -150,8 +151,13 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
 
     def fit(self, X, y, sample_weight=None):
         self._reject_unsupported_baseline_parameters(sample_weight)
-        if sparse.issparse(X):
-            raise TypeError("sparse input is not supported")
+        sparse_input = sparse.issparse(X)
+        raw_dtype = X.dtype if sparse_input else np.asarray(X).dtype
+        if sparse_input:
+            X = X.tocsr(copy=True)
+            X.sum_duplicates()
+            X.sort_indices()
+            X.eliminate_zeros()
         if y is None:
             raise ValueError("requires y to be passed, but the target y is None")
         y_array = np.asarray(y)
@@ -160,21 +166,24 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         elif y_array.ndim != 1:
             raise ValueError("multioutput targets are not supported")
 
-        raw_x = np.asarray(X)
         warm_refit = self.warm_start and hasattr(self, "_forest")
         if warm_refit and self.n_estimators < self._fitted_n_estimators:
             raise ValueError(
                 "n_estimators must be greater than or equal to the number of fitted trees "
                 "when warm_start=True"
             )
-        X, y = validate_data(
-            self, X, y, dtype=np.float64, ensure_2d=True, reset=not warm_refit
-        )
+        validation_options = dict(dtype=np.float64, ensure_2d=True, reset=not warm_refit)
+        if sparse_input:
+            validation_options["accept_sparse"] = ("csr", "csc")
+        X, y = validate_data(self, X, y, **validation_options)
+        if sparse_input:
+            X = X.tocsr(copy=False)
         self.copy_telemetry_ = {
-            "input_dtype": str(raw_x.dtype),
+            "input_dtype": str(raw_dtype),
             "core_dtype": str(X.dtype),
-            "input_c_contiguous": bool(raw_x.flags.c_contiguous),
-            "cast_to_float64": raw_x.dtype != np.dtype(np.float64),
+            "input_c_contiguous": bool(X.data.flags.c_contiguous) if sparse_input else bool(X.flags.c_contiguous),
+            "cast_to_float64": raw_dtype != np.dtype(np.float64),
+            "input_sparse": sparse_input,
         }
         target_type = type_of_target(y)
         if target_type.startswith("continuous"):
@@ -262,19 +271,35 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
 
     def predict(self, X):
         check_is_fitted(self, "_forest")
-        if sparse.issparse(X):
-            raise TypeError("sparse input is not supported")
-
-        X = validate_data(self, X, reset=False, dtype=np.float64, ensure_2d=True)
+        sparse_input = sparse.issparse(X)
+        if sparse_input:
+            X = X.tocsr(copy=True)
+            X.sum_duplicates()
+            X.sort_indices()
+            X.eliminate_zeros()
+        validation_options = dict(reset=False, dtype=np.float64, ensure_2d=True)
+        if sparse_input:
+            validation_options["accept_sparse"] = ("csr", "csc")
+        X = validate_data(self, X, **validation_options)
+        if sparse_input:
+            X = X.tocsr(copy=False)
         encoded_y = np.asarray(self._forest.predict(X), dtype=np.intp)
         return self.classes_[encoded_y]
 
     def predict_proba(self, X):
         check_is_fitted(self, "_forest")
-        if sparse.issparse(X):
-            raise TypeError("sparse input is not supported")
-
-        X = validate_data(self, X, reset=False, dtype=np.float64, ensure_2d=True)
+        sparse_input = sparse.issparse(X)
+        if sparse_input:
+            X = X.tocsr(copy=True)
+            X.sum_duplicates()
+            X.sort_indices()
+            X.eliminate_zeros()
+        validation_options = dict(reset=False, dtype=np.float64, ensure_2d=True)
+        if sparse_input:
+            validation_options["accept_sparse"] = ("csr", "csc")
+        X = validate_data(self, X, **validation_options)
+        if sparse_input:
+            X = X.tocsr(copy=False)
         return np.asarray(self._forest.predict_proba(X), dtype=np.float64)
 
     def predict_log_proba(self, X):
@@ -515,12 +540,26 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             sample_weight, np.floor(sample_weight)
         ).all():
             repeats = sample_weight.astype(np.intp, copy=False)
-            X = np.repeat(X, repeats, axis=0)
+            if sparse.issparse(X):
+                X = sparse.vstack([X[index] for index, count in enumerate(repeats) for _ in range(count)], format="csr")
+            else:
+                X = np.repeat(X, repeats, axis=0)
             encoded_y = np.repeat(encoded_y, repeats)
             sample_weight = None
 
-        keys = (encoded_y, *(X[:, index] for index in range(X.shape[1] - 1, -1, -1)))
-        order = np.lexsort(keys)
+        if sparse.issparse(X):
+            order = np.argsort(encoded_y, kind="stable")
+            columns = X.tocsc(copy=False)
+            # Reproduce lexsort's tie ordering with one temporary feature vector
+            # at a time, so sparse input never becomes a dense feature matrix.
+            for feature in range(X.shape[1] - 1, -1, -1):
+                values = np.zeros(X.shape[0], dtype=X.dtype)
+                start, end = columns.indptr[feature : feature + 2]
+                values[columns.indices[start:end]] = columns.data[start:end]
+                order = order[np.argsort(values[order], kind="stable")]
+        else:
+            keys = (encoded_y, *(X[:, index] for index in range(X.shape[1] - 1, -1, -1)))
+            order = np.lexsort(keys)
         if sample_weight is None:
             return X[order], encoded_y[order], None
         return X[order], encoded_y[order], sample_weight[order]

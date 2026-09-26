@@ -1,0 +1,7 @@
+mode,format,fit_median_seconds,fit_vs_baseline_percent,predict_median_seconds,predict_vs_baseline_percent,max_peak_rss_kib
+exact,dense,0.231117,1.09,0.012275,-2.65,177792
+exact,csr,0.355013,,0.059579,,173824
+exact,csc,0.355058,,0.059568,,173424
+hist_32,dense,0.149653,2.34,0.024212,-10.63,181760
+hist_32,csr,0.479296,,0.178385,,179904
+hist_32,csc,0.483698,,0.178430,,180640

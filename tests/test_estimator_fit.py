@@ -3,6 +3,7 @@ import pandas as pd
 import pickle
 import pytest
 from scipy import sparse
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.utils import shuffle
 
 from bankai_random_forest import BankaiRandomForestClassifier
@@ -359,11 +360,83 @@ def test_integer_sample_weight_matches_repetition_with_the_sklearn_check_data():
     np.testing.assert_array_equal(repeated.predict(x), weighted.predict(x))
 
 
-def test_rejects_sparse_input_without_implicit_densification(separable_data):
+@pytest.mark.parametrize("sparse_format", [sparse.csr_matrix, sparse.csc_matrix])
+@pytest.mark.parametrize("max_bins", [None, 8])
+def test_sparse_input_matches_dense_fit_prediction_and_oob(separable_data, sparse_format, max_bins):
     x, y = separable_data
+    options = dict(n_estimators=15, random_state=42, oob_score=True, max_bins=max_bins)
+    dense = BankaiRandomForestClassifier(**options).fit(x, y)
+    sparse_model = BankaiRandomForestClassifier(**options).fit(sparse_format(x), y)
 
-    with pytest.raises(TypeError, match="sparse"):
-        BankaiRandomForestClassifier().fit(sparse.csr_matrix(x), y)
+    np.testing.assert_array_equal(sparse_model.predict(sparse_format(x)), dense.predict(x))
+    np.testing.assert_allclose(sparse_model.predict_proba(sparse_format(x)), dense.predict_proba(x))
+    np.testing.assert_allclose(sparse_model.feature_importances_, dense.feature_importances_)
+    np.testing.assert_allclose(sparse_model.oob_decision_function_, dense.oob_decision_function_)
+    np.testing.assert_allclose(sparse_model.oob_score_, dense.oob_score_)
+
+
+@pytest.mark.parametrize("sparse_format", [sparse.csr_matrix, sparse.csc_matrix])
+def test_sparse_prediction_validation(sparse_format, separable_data):
+    x, y = separable_data
+    model = BankaiRandomForestClassifier(n_estimators=3, random_state=0).fit(x, y)
+    with pytest.raises(ValueError, match="features"):
+        model.predict(sparse_format(np.ones((len(y), x.shape[1] + 1))))
+
+
+@pytest.mark.parametrize("training_format", [sparse.csr_matrix, sparse.csc_matrix])
+def test_sparse_exact_mode_matches_sklearn_predictions(training_format):
+    rng = np.random.RandomState(72)
+    x = rng.normal(size=(80, 6))
+    x[rng.random_sample(x.shape) < 0.7] = 0.0
+    y = (x[:, 0] - x[:, 2] > 0.1).astype(int)
+    x_sparse = training_format(x)
+    options = dict(n_estimators=21, max_features=None, random_state=19)
+    bankai = BankaiRandomForestClassifier(**options).fit(x_sparse, y)
+    sklearn = RandomForestClassifier(**options).fit(x_sparse, y)
+
+    for prediction_format in (sparse.csr_matrix, sparse.csc_matrix):
+        probe = prediction_format(x)
+        np.testing.assert_array_equal(bankai.predict(probe), sklearn.predict(probe))
+        probabilities = bankai.predict_proba(probe)
+        np.testing.assert_allclose(probabilities.sum(axis=1), 1.0)
+
+
+@pytest.mark.parametrize("training_format", [sparse.csr_matrix, sparse.csc_matrix])
+@pytest.mark.parametrize("max_bins", [None, 8])
+def test_sparse_implicit_zeros_match_dense_backend(training_format, max_bins):
+    rng = np.random.RandomState(107)
+    x = rng.normal(size=(72, 7))
+    x[rng.random_sample(x.shape) < 0.75] = 0.0
+    y = (x[:, 0] + x[:, 2] - x[:, 5] > 0.0).astype(int)
+    params = dict(n_estimators=17, max_features=4, random_state=41, max_bins=max_bins, oob_score=True)
+    dense = BankaiRandomForestClassifier(**params).fit(x, y)
+    sparse_model = BankaiRandomForestClassifier(**params).fit(training_format(x), y)
+
+    np.testing.assert_array_equal(sparse_model.predict(x), dense.predict(x))
+    np.testing.assert_array_equal(sparse_model.predict_proba(x), dense.predict_proba(x))
+    np.testing.assert_allclose(sparse_model.feature_importances_, dense.feature_importances_)
+    np.testing.assert_array_equal(sparse_model.oob_decision_function_, dense.oob_decision_function_)
+
+
+@pytest.mark.parametrize("sparse_format", [sparse.csr_matrix, sparse.csc_matrix])
+def test_sparse_input_validation_rejects_non_finite_and_bad_csr_shape(sparse_format, separable_data):
+    x, y = separable_data
+    x = x.copy()
+    x[0, 0] = np.nan
+    with pytest.raises(ValueError, match="NaN"):
+        BankaiRandomForestClassifier().fit(sparse_format(x), y)
+
+
+def test_sparse_fit_and_prediction_never_densify(monkeypatch):
+    def fail_toarray(*args, **kwargs):
+        raise AssertionError("sparse input was densified")
+
+    monkeypatch.setattr(sparse.csr_matrix, "toarray", fail_toarray)
+    monkeypatch.setattr(sparse.csc_matrix, "toarray", fail_toarray)
+    x = sparse.random(40, 8, density=0.2, random_state=7, format="csr")
+    y = np.arange(x.shape[0]) % 2
+    model = BankaiRandomForestClassifier(n_estimators=5, random_state=5).fit(x, y)
+    model.predict(x.tocsc())
 
 
 def test_rejects_multioutput_targets_explicitly(separable_data):

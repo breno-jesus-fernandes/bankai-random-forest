@@ -45,7 +45,7 @@ impl NativeForest {
     #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1, max_bins=None, balanced_subsample=false, ccp_alpha=0.0, monotonic_cst=None))]
     fn fit(
         &mut self,
-        x: PyReadonlyArray2<'_, f64>,
+        x: &Bound<'_, PyAny>,
         y: PyReadonlyArray1<'_, i64>,
         n_estimators: usize,
         max_features: usize,
@@ -77,7 +77,8 @@ impl NativeForest {
             ));
         }
 
-        let (values, rows, columns) = matrix_to_owned(x)?;
+        let matrix = matrix_to_owned(x)?;
+        let (rows, columns) = matrix.shape();
         if max_features == 0 || max_features > columns {
             return Err(PyValueError::new_err(
                 "max_features must be between 1 and the number of features",
@@ -108,20 +109,10 @@ impl NativeForest {
             "entropy" | "log_loss" => Criterion::Entropy,
             _ => return Err(PyValueError::new_err("unsupported criterion")),
         };
-        let input = DenseInput::training(
-            values,
-            rows,
-            columns,
-            labels,
-            sample_weights,
-            n_classes,
-            min_leaf_weight,
-            criterion,
-            min_samples_split,
-            min_samples_leaf,
-            min_impurity_decrease,
-            max_bins,
-        )
+        let input = match matrix {
+            MatrixData::Dense(values, ..) => DenseInput::training(values, rows, columns, labels, sample_weights, n_classes, min_leaf_weight, criterion, min_samples_split, min_samples_leaf, min_impurity_decrease, max_bins),
+            MatrixData::Csr { indptr, indices, data, .. } => DenseInput::training_csr(indptr, indices, data, rows, columns, labels, sample_weights, n_classes, min_leaf_weight, criterion, min_samples_split, min_samples_leaf, min_impurity_decrease, max_bins),
+        }
         .map_err(PyValueError::new_err)?;
         let mut input = if balanced_subsample {
             input.with_balanced_subsample()
@@ -182,12 +173,13 @@ impl NativeForest {
         Ok(())
     }
 
-    fn predict(&self, x: PyReadonlyArray2<'_, f64>) -> PyResult<Vec<usize>> {
+    fn predict(&self, x: &Bound<'_, PyAny>) -> PyResult<Vec<usize>> {
         let forest = self
             .forest
             .as_ref()
             .ok_or_else(|| PyRuntimeError::new_err("forest is not fitted"))?;
-        let (values, rows, columns) = matrix_to_owned(x)?;
+        let matrix = matrix_to_owned(x)?;
+        let (rows, columns) = matrix.shape();
         if columns != self.n_features {
             return Err(PyValueError::new_err(format!(
                 "X has {columns} features, but the fitted forest expects {}",
@@ -195,13 +187,7 @@ impl NativeForest {
             )));
         }
 
-        let input = DenseInput::prediction(
-            values,
-            rows,
-            columns,
-            self.n_classes,
-            self.histogram_edges.as_deref(),
-        )
+        let input = matrix.into_prediction(rows, columns, self.n_classes, self.histogram_edges.as_deref())
         .map_err(PyValueError::new_err)?;
         let prediction = forest.predict(&input);
         let mut labels = vec![0; input.rows()];
@@ -211,12 +197,13 @@ impl NativeForest {
         Ok(labels)
     }
 
-    fn predict_proba(&self, x: PyReadonlyArray2<'_, f64>) -> PyResult<Vec<Vec<f64>>> {
+    fn predict_proba(&self, x: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<f64>>> {
         let forest = self
             .forest
             .as_ref()
             .ok_or_else(|| PyRuntimeError::new_err("forest is not fitted"))?;
-        let (values, rows, columns) = matrix_to_owned(x)?;
+        let matrix = matrix_to_owned(x)?;
+        let (rows, columns) = matrix.shape();
         if columns != self.n_features {
             return Err(PyValueError::new_err(format!(
                 "X has {columns} features, but the fitted forest expects {}",
@@ -224,13 +211,7 @@ impl NativeForest {
             )));
         }
 
-        let input = DenseInput::prediction(
-            values,
-            rows,
-            columns,
-            self.n_classes,
-            self.histogram_edges.as_deref(),
-        )
+        let input = matrix.into_prediction(rows, columns, self.n_classes, self.histogram_edges.as_deref())
         .map_err(PyValueError::new_err)?;
         Ok(forest
             .predict(&input)
@@ -335,11 +316,12 @@ impl NativeForest {
 
     /// Experimental native TreeSHAP (`tree_path_dependent`) for the forest's
     /// vote probabilities. Returns `(values, base_values)`.
-    fn tree_shap(&self, x: PyReadonlyArray2<'_, f64>) -> PyResult<(Vec<Vec<Vec<f64>>>, Vec<f64>)> {
+    fn tree_shap(&self, x: &Bound<'_, PyAny>) -> PyResult<(Vec<Vec<Vec<f64>>>, Vec<f64>)> {
         let forest = self.forest.as_ref().ok_or_else(|| PyRuntimeError::new_err("forest is not fitted"))?;
-        let (raw, rows, columns) = matrix_to_owned(x)?;
+        let matrix = matrix_to_owned(x)?;
+        let (rows, columns) = matrix.shape();
         if columns != self.n_features { return Err(PyValueError::new_err("X has a different number of features")); }
-        let input = DenseInput::prediction(raw, rows, columns, self.n_classes, self.histogram_edges.as_deref()).map_err(PyValueError::new_err)?;
+        let input = matrix.into_prediction(rows, columns, self.n_classes, self.histogram_edges.as_deref()).map_err(PyValueError::new_err)?;
         let trees: Vec<Vec<ShapNode>> = forest.tree_refs().map(|tree| { let mut nodes = Vec::new(); flatten_tree(tree, &mut nodes); nodes }).collect();
         let count = trees.len() as f64;
         let mut base = vec![0.0; self.n_classes];
@@ -415,17 +397,33 @@ fn recurse_shap(tree: &[ShapNode], input: &DenseInput, row: usize, _features: us
 fn unwind(pf: &mut [usize], z: &mut [f64], o: &mut [f64], w: &mut [f64], depth: usize, at: usize) { let one = o[at]; let zero = z[at]; let mut next = w[depth]; for i in (0..depth).rev() { if one != 0.0 { let tmp = w[i]; w[i] = next * (depth + 1) as f64 / ((i + 1) as f64 * one); next = tmp - w[i] * zero * (depth - i) as f64 / (depth + 1) as f64; } else { w[i] = w[i] * (depth + 1) as f64 / (zero * (depth - i) as f64); } } for i in at..depth { pf[i] = pf[i + 1]; z[i] = z[i + 1]; o[i] = o[i + 1]; } }
 fn unwound_sum(z: &[f64], o: &[f64], w: &[f64], depth: usize, at: usize) -> f64 { let one = o[at]; let zero = z[at]; let mut next = w[depth]; let mut total = 0.0; for i in (0..depth).rev() { if one != 0.0 { let tmp = next * (depth + 1) as f64 / ((i + 1) as f64 * one); total += tmp; next = w[i] - tmp * zero * (depth - i) as f64 / (depth + 1) as f64; } else { total += (w[i] / zero) / ((depth - i) as f64 / (depth + 1) as f64); } } total }
 
-fn matrix_to_owned(x: PyReadonlyArray2<'_, f64>) -> PyResult<(Vec<f64>, usize, usize)> {
-    let array = x.as_array();
-    let rows = array.nrows();
-    let columns = array.ncols();
-    let values: Vec<f64> = array.iter().copied().collect();
-
-    if values.iter().any(|value| !value.is_finite()) {
-        return Err(PyValueError::new_err("X must contain only finite values"));
+enum MatrixData { Dense(Vec<f64>, usize, usize), Csr { indptr: Vec<usize>, indices: Vec<usize>, data: Vec<f64>, rows: usize, columns: usize } }
+impl MatrixData {
+    fn shape(&self) -> (usize, usize) { match self { Self::Dense(_,r,c) | Self::Csr{rows:r,columns:c,..} => (*r,*c) } }
+    fn into_prediction(self, rows: usize, columns: usize, classes: usize, edges: Option<&[Vec<f64>]>) -> Result<DenseInput,String> {
+        match self { Self::Dense(v,_,_) => DenseInput::prediction(v,rows,columns,classes,edges), Self::Csr{indptr,indices,data,..} => DenseInput::prediction_csr(indptr,indices,data,rows,columns,classes,edges) }
     }
-
-    Ok((values, rows, columns))
+}
+fn matrix_to_owned(x: &Bound<'_, PyAny>) -> PyResult<MatrixData> {
+    if let Ok(array) = x.extract::<PyReadonlyArray2<'_, f64>>() {
+        let view = array.as_array(); let rows = view.nrows(); let columns = view.ncols();
+        let values: Vec<f64> = view.iter().copied().collect();
+        if values.iter().any(|v| !v.is_finite()) { return Err(PyValueError::new_err("X must contain only finite values")); }
+        return Ok(MatrixData::Dense(values, rows, columns));
+    }
+    if x.hasattr("indptr")? && x.hasattr("indices")? && x.hasattr("data")? && x.hasattr("shape")? {
+        let csr = x.call_method0("tocsr")?; csr.call_method0("sum_duplicates")?; csr.call_method0("sort_indices")?;
+        let shape: (usize,usize) = csr.getattr("shape")?.extract()?;
+        let p: PyReadonlyArray1<'_,i64> = csr.getattr("indptr")?.call_method1("astype",("int64",))?.extract()?;
+        let i: PyReadonlyArray1<'_,i64> = csr.getattr("indices")?.call_method1("astype",("int64",))?.extract()?;
+        let d: PyReadonlyArray1<'_,f64> = csr.getattr("data")?.call_method1("astype",("float64",))?.extract()?;
+        let indptr = p.as_array().iter().map(|&v| usize::try_from(v).map_err(|_| PyValueError::new_err("invalid CSR row pointer"))).collect::<PyResult<Vec<_>>>()?;
+        let indices = i.as_array().iter().map(|&v| usize::try_from(v).map_err(|_| PyValueError::new_err("invalid CSR column index"))).collect::<PyResult<Vec<_>>>()?;
+        let data: Vec<f64> = d.as_array().iter().copied().collect();
+        if data.iter().any(|v| !v.is_finite()) { return Err(PyValueError::new_err("X must contain only finite values")); }
+        return Ok(MatrixData::Csr{indptr,indices,data,rows:shape.0,columns:shape.1});
+    }
+    Err(PyValueError::new_err("X must be a two-dimensional NumPy array or CSR/CSC matrix"))
 }
 
 fn class_from_votes(votes: &ClassVotes) -> usize {

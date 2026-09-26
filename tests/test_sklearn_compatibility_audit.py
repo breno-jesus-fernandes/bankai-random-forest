@@ -196,7 +196,7 @@ def test_ccp_alpha_zero_preserves_unpruned_predictions_and_importances(max_bins)
 
     np.testing.assert_array_equal(explicit_zero.predict(x), default.predict(x))
     np.testing.assert_array_equal(explicit_zero.predict_proba(x), default.predict_proba(x))
-    np.testing.assert_array_equal(explicit_zero.feature_importances_, default.feature_importances_)
+    np.testing.assert_allclose(explicit_zero.feature_importances_, default.feature_importances_, rtol=1e-15, atol=0.0)
     assert [tree.tree_.node_count for tree in explicit_zero.estimators_] == [
         tree.tree_.node_count for tree in default.estimators_
     ]

@@ -81,12 +81,12 @@ pub trait RfInput: Sized {
         0
     }
     /// Application of pivot to a given subset of the data; returns of iterator that sends observations left (for true) or right (for false).
-    fn split_iter(
-        &self,
-        on: &Mask,
+    fn split_iter<'a>(
+        &'a self,
+        on: &'a Mask,
         using: Self::FeatureId,
-        by: &Self::Pivot,
-    ) -> impl Iterator<Item = bool>;
+        by: &'a Self::Pivot,
+    ) -> impl Iterator<Item = bool> + 'a;
 }
 
 pub trait FeatureSampler<I: RfInput> {

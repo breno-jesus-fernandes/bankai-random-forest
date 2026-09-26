@@ -246,11 +246,13 @@ loads the PyO3 wrapper.
 
 ### v1.4.0: Sparse Feature Matrices
 
-- [ ] Support SciPy CSR and CSC inputs in fit and prediction without implicit
+- [x] Support SciPy CSR and CSC inputs in fit and prediction without implicit
       densification.
-- [ ] Test predictions, probabilities, OOB, importances, validation, and
+- [x] Test predictions, probabilities, OOB, importances, validation, and
       sklearn parity for both formats and supported exact/histogram modes.
-- [ ] Verify dense inputs retain behavior and pass all quality gates.
+- [x] Verify dense inputs retain behavior and pass all quality gates: full
+      Python/Rust suites pass and dense release workloads regress by at most
+      2.34% in fit time.
 
 ### v1.5.0: Missing Feature Values
 
@@ -314,3 +316,4 @@ loads the PyO3 wrapper.
 | 2026-09-26 | v1.2.0-v1.6.0 | Compatibility expansion planned | Added independent pruning, monotonicity, sparse, NaN, and multioutput milestones. Each requires TDD, full compatibility regression coverage, release benchmarks with untimed warmups, and a maximum 5% regression in existing workloads. |
 | 2026-09-26 | v1.2.0 | Cost-complexity pruning complete | Added sklearn-compatible `ccp_alpha` to exact and histogram trees; alpha-zero regression and one-feature sklearn pruning-path parity pass, including inspection, TreeSHAP, and joblib coverage. Full Python/Rust suites and `check_estimator` pass. Release benchmarks with warmups on 10k rows stayed within 5% for both existing backends; report and raw CSV are in `benchmarks/results-ccp-alpha-10k/`. |
 | 2026-09-26 | v1.3.0 | Monotonic constraints complete | Added bounded split selection and leaf votes for increasing/decreasing constraints on binary classification, in exact and histogram modes. Reference probability invariants, invalid values, multiclass rejection, zero-constraint regression, `apply`/`decision_path`, TreeSHAP, joblib, ccp_alpha interaction, and sklearn estimator checks pass. Full suites report 112 Python and 19 Rust tests. Release benchmarks with warmups stayed below 1% regression when unset; enabled-feature cost and raw results are in `benchmarks/results-monotonic-10k/`. |
+| 2026-09-26 | v1.4.0 | Sparse feature matrices complete | Added CSR/CSC fit and prediction through CSR storage with implicit zeros, with no dense matrix materialization. CSR/CSC exact and histogram tests cover predictions/probabilities, OOB, importances, validation, sklearn label parity, and joblib. Dense release fit change stayed below 2.34% and prediction improved in the 10k×20 warmup benchmark; sparse timings and memory results are in `benchmarks/results-sparse-10k/`. |
