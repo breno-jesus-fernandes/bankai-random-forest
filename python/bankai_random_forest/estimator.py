@@ -32,7 +32,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         ccp_alpha=0.0,
         max_samples=None,
         monotonic_cst=None,
-        permutation_importance=False,
+        importance_type="split",
     ):
         self.n_estimators = n_estimators
         self.criterion = criterion
@@ -53,7 +53,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         self.ccp_alpha = ccp_alpha
         self.max_samples = max_samples
         self.monotonic_cst = monotonic_cst
-        self.permutation_importance = permutation_importance
+        self.importance_type = importance_type
 
     def fit(self, X, y, sample_weight=None):
         self._reject_unsupported_baseline_parameters(sample_weight)
@@ -115,7 +115,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         self._fit_min_impurity_decrease = self._resolve_min_impurity_decrease()
         self._fit_max_leaves = self._resolve_max_leaf_nodes()
         self._fit_verbose = self._resolve_verbose()
-        self._fit_permutation_importance = self._resolve_permutation_importance()
+        self._fit_importance_type = self._resolve_importance_type()
         if self._fit_verbose:
             print(
                 f"[BankaiRandomForestClassifier] building {self.n_estimators} trees",
@@ -140,18 +140,12 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             bootstrap=self.bootstrap,
             max_samples=self._fit_max_samples,
             oob=self.oob_score is True,
-            permutation_importance=self._fit_permutation_importance,
+            permutation_importance=self._fit_importance_type == "permutation",
             n_jobs=self._fit_n_jobs,
         )
         self._forest = forest
         self._fitted_n_estimators = self.n_estimators
-        self.feature_importances_ = np.asarray(
-            forest.feature_importances(), dtype=np.float64
-        )
-        if self._fit_permutation_importance:
-            self.permutation_importances_ = np.asarray(
-                forest.permutation_importances(), dtype=np.float64
-            )
+        self.feature_importances_ = self._selected_feature_importances(forest)
         if self.oob_score is True:
             self.oob_decision_function_ = np.asarray(
                 forest.oob_predict_proba(), dtype=np.float64
@@ -213,17 +207,11 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             bootstrap=self.bootstrap,
             max_samples=self._fit_max_samples,
             oob=self.oob_score is True,
-            permutation_importance=self._fit_permutation_importance,
+            permutation_importance=self._fit_importance_type == "permutation",
             n_jobs=self._fit_n_jobs,
         )
         self._forest = forest
-        self.feature_importances_ = np.asarray(
-            forest.feature_importances(), dtype=np.float64
-        )
-        if self._fit_permutation_importance:
-            self.permutation_importances_ = np.asarray(
-                forest.permutation_importances(), dtype=np.float64
-            )
+        self.feature_importances_ = self._selected_feature_importances(forest)
 
     def _next_seed(self):
         random_state = check_random_state(self.random_state)
@@ -319,12 +307,20 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             return int(self.verbose)
         raise ValueError("verbose must be a non-negative integer")
 
-    def _resolve_permutation_importance(self):
-        if not isinstance(self.permutation_importance, (bool, np.bool_)):
-            raise ValueError("permutation_importance must be a boolean")
-        if self.permutation_importance and self.bootstrap is not True:
-            raise ValueError("permutation_importance requires bootstrap=True")
-        return bool(self.permutation_importance)
+    def _resolve_importance_type(self):
+        if self.importance_type not in ("split", "permutation"):
+            raise ValueError("importance_type must be 'split' or 'permutation'")
+        if self.importance_type == "permutation" and self.bootstrap is not True:
+            raise ValueError("importance_type='permutation' requires bootstrap=True")
+        return self.importance_type
+
+    def _selected_feature_importances(self, forest):
+        method = (
+            forest.permutation_importances
+            if self._fit_importance_type == "permutation"
+            else forest.feature_importances
+        )
+        return np.asarray(method(), dtype=np.float64)
 
     def _combine_class_weight(self, y, sample_weight):
         if self.class_weight is None:

@@ -51,43 +51,50 @@ def test_fit_sets_normalized_feature_importances(separable_data):
     np.testing.assert_allclose(classifier.feature_importances_.sum(), 1.0)
 
 
-def test_permutation_importance_exposes_native_oob_accuracy_decrease():
+def test_permutation_importance_type_exposes_native_oob_accuracy_decrease():
     rng = np.random.RandomState(42)
     x = rng.normal(size=(200, 2))
     y = (x[:, 0] > 0.0).astype(int)
 
     classifier = BankaiRandomForestClassifier(
-        n_estimators=50, permutation_importance=True, random_state=42
+        n_estimators=50, importance_type="permutation", random_state=42
     ).fit(x, y)
 
-    assert classifier.permutation_importances_.shape == (2,)
-    assert classifier.permutation_importances_[0] > classifier.permutation_importances_[1]
+    assert classifier.feature_importances_.shape == (2,)
+    assert classifier.feature_importances_[0] > classifier.feature_importances_[1]
 
 
-def test_permutation_importance_requires_bootstrap(separable_data):
+def test_permutation_importance_type_requires_bootstrap(separable_data):
     x, y = separable_data
 
-    with pytest.raises(ValueError, match="permutation_importance requires bootstrap=True"):
+    with pytest.raises(ValueError, match="importance_type='permutation' requires bootstrap=True"):
         BankaiRandomForestClassifier(
-            permutation_importance=True, bootstrap=False
+            importance_type="permutation", bootstrap=False
         ).fit(x, y)
 
 
-def test_permutation_importance_is_deterministic_across_thread_counts():
+def test_permutation_importance_type_is_deterministic_across_thread_counts():
     rng = np.random.RandomState(42)
     x = rng.normal(size=(200, 3))
     y = (x[:, 0] + x[:, 1] > 0.0).astype(int)
 
     sequential = BankaiRandomForestClassifier(
-        n_estimators=50, n_jobs=1, permutation_importance=True, random_state=42
+        n_estimators=50, n_jobs=1, importance_type="permutation", random_state=42
     ).fit(x, y)
     parallel = BankaiRandomForestClassifier(
-        n_estimators=50, n_jobs=2, permutation_importance=True, random_state=42
+        n_estimators=50, n_jobs=2, importance_type="permutation", random_state=42
     ).fit(x, y)
 
     np.testing.assert_allclose(
-        sequential.permutation_importances_, parallel.permutation_importances_
+        sequential.feature_importances_, parallel.feature_importances_
     )
+
+
+def test_rejects_unknown_importance_type(separable_data):
+    x, y = separable_data
+
+    with pytest.raises(ValueError, match="importance_type must be 'split' or 'permutation'"):
+        BankaiRandomForestClassifier(importance_type="gain").fit(x, y)
 
 
 @pytest.mark.parametrize(

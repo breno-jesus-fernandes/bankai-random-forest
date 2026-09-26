@@ -19,6 +19,8 @@ struct Arguments {
     bootstrap: bool,
     max_samples: Option<usize>,
     balanced_class_weight: bool,
+    permutation_importance: bool,
+    importances: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -58,7 +60,7 @@ fn run() -> Result<(), String> {
         arguments.trees,
         arguments.max_features.unwrap_or_else(|| (arguments.features as f64).sqrt().max(1.0) as usize),
         true,
-        false,
+        arguments.permutation_importance,
         false,
         42,
         arguments.max_depth,
@@ -81,6 +83,18 @@ fn run() -> Result<(), String> {
         .map(|probabilities| if probabilities[1] > probabilities[0] { 1 } else { 0 })
         .collect();
     let f1 = binary_f1(&labels, &predicted);
+
+    if let Some(path) = arguments.importances {
+        let mut contents = String::from("feature,importance\n");
+        let mut importances = vec![0.0; arguments.features];
+        for (feature, importance) in forest.importance() {
+            importances[feature] = importance;
+        }
+        for (feature, importance) in importances.into_iter().enumerate() {
+            contents.push_str(&format!("{feature},{importance:.12}\n"));
+        }
+        std::fs::write(path, contents).map_err(|error| error.to_string())?;
+    }
 
     if let Some(path) = arguments.predictions {
         let mut contents = String::from("actual,predicted,probability_0,probability_1\n");
@@ -125,6 +139,8 @@ fn parse_arguments(arguments: impl Iterator<Item = String>) -> Result<Arguments,
         bootstrap: true,
         max_samples: None,
         balanced_class_weight: false,
+        permutation_importance: false,
+        importances: None,
     };
     let mut arguments = arguments;
     while let Some(argument) = arguments.next() {
@@ -139,6 +155,14 @@ fn parse_arguments(arguments: impl Iterator<Item = String>) -> Result<Arguments,
             "--no-bootstrap" => parsed.bootstrap = false,
             "--max-samples" => parsed.max_samples = Some(parse_positive(arguments.next(), "--max-samples")?),
             "--balanced-class-weight" => parsed.balanced_class_weight = true,
+            "--permutation-importance" => parsed.permutation_importance = true,
+            "--importances" => {
+                parsed.importances = Some(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "--importances requires a path".to_string())?,
+                ))
+            }
             "--markdown" => parsed.markdown = true,
             "--predictions" => {
                 parsed.predictions = Some(PathBuf::from(
@@ -155,6 +179,12 @@ fn parse_arguments(arguments: impl Iterator<Item = String>) -> Result<Arguments,
             }
             _ => return Err(format!("unknown argument: {argument}")),
         }
+    }
+    if parsed.importances.is_some() && !parsed.permutation_importance {
+        return Err("--importances requires --permutation-importance".to_string());
+    }
+    if parsed.permutation_importance && !parsed.bootstrap {
+        return Err("--permutation-importance requires bootstrap sampling".to_string());
     }
     Ok(parsed)
 }
