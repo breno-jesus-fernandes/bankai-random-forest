@@ -37,6 +37,89 @@ impl<I: RfInput> Tree<I> {
             rng,
         )
     }
+
+    /// Prune this tree using the normalized cost-complexity threshold.
+    pub fn prune_with_ccp_alpha(
+        &mut self,
+        input: &I,
+        bag: &Mask,
+        ccp_alpha: f64,
+        mask_cache: &mut MaskCache,
+    ) {
+        if ccp_alpha <= 0.0 {
+            return;
+        }
+        let root = input.decision_slice(bag);
+        let Some(root_weight) = root.pruning_weight() else {
+            return;
+        };
+        if root.pruning_risk(root_weight).is_none() {
+            return;
+        }
+        Self::prune_rec(self, input, bag, root_weight, ccp_alpha, mask_cache);
+    }
+
+    fn prune_rec(
+        tree: &mut Self,
+        input: &I,
+        mask: &Mask,
+        root_weight: f64,
+        ccp_alpha: f64,
+        mask_cache: &mut MaskCache,
+    ) -> (f64, usize) {
+        let node_slice = input.decision_slice(mask);
+        let Some(node_risk) = node_slice.pruning_risk(root_weight) else {
+            return (0.0, 1);
+        };
+        let (subtree_risk, leaf_count, collapse_vote) = match tree {
+            Self::Leaf(_, _) => return (node_risk, 1),
+            Self::Branch(feature, pivot, _, _, left, right) => {
+                let mut left_mask = mask_cache.provide();
+                let mut right_mask = mask_cache.provide();
+                mask.split_into(
+                    input.split_iter(mask, *feature, pivot),
+                    &mut left_mask,
+                    &mut right_mask,
+                );
+                let (left_risk, left_leaves) = Self::prune_rec(
+                    left,
+                    input,
+                    &left_mask,
+                    root_weight,
+                    ccp_alpha,
+                    mask_cache,
+                );
+                let (right_risk, right_leaves) = Self::prune_rec(
+                    right,
+                    input,
+                    &right_mask,
+                    root_weight,
+                    ccp_alpha,
+                    mask_cache,
+                );
+                mask_cache.release(right_mask);
+                mask_cache.release(left_mask);
+
+                let leaves = left_leaves + right_leaves;
+                let effective_alpha = (node_risk - left_risk - right_risk)
+                    / (leaves.saturating_sub(1) as f64);
+                let collapse_vote = if effective_alpha <= ccp_alpha {
+                    node_slice.pruning_vote()
+                } else {
+                    None
+                };
+                (left_risk + right_risk, leaves, collapse_vote)
+            }
+        };
+
+        if let Some(vote) = collapse_vote {
+            *tree = Self::Leaf(vote, mask.len());
+            (node_risk, 1)
+        } else {
+            (subtree_risk, leaf_count)
+        }
+    }
+
     fn new_rec(
         input: &I,
         mask: &Mask,

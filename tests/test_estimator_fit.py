@@ -162,7 +162,6 @@ def test_rejects_unknown_importance_type(separable_data):
 @pytest.mark.parametrize(
     ("parameters", "name"),
     [
-        ({"ccp_alpha": 0.1}, "ccp_alpha"),
         ({"monotonic_cst": [1]}, "monotonic_cst"),
     ],
 )

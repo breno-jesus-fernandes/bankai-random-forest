@@ -139,3 +139,64 @@ def test_oob_score_accepts_a_scoring_callable():
     ).fit(x, y)
 
     assert 0.0 <= model.oob_score_ <= 1.0
+
+
+@pytest.mark.parametrize("max_bins", [None, 8])
+def test_ccp_alpha_prunes_trees_to_root_for_large_alpha(max_bins):
+    x, y = audit_data(seed=97)
+    model = BankaiRandomForestClassifier(
+        n_estimators=7, max_features=None, ccp_alpha=1.0, max_bins=max_bins,
+        random_state=101, oob_score=True, importance_type="permutation",
+    ).fit(x, y)
+
+    assert all(tree.tree_.node_count == 1 for tree in model.estimators_)
+    np.testing.assert_array_equal(model.predict(x), np.full(len(y), model.predict(x[:1])[0]))
+    assert np.isfinite(model.oob_score_)
+    assert np.isfinite(model.feature_importances_).all()
+    assert model.apply(x).shape == (len(y), model.n_estimators)
+    path, node_ptr = model.decision_path(x)
+    assert path.shape == (len(y), sum(tree.tree_.node_count for tree in model.estimators_))
+    assert node_ptr.shape == (model.n_estimators + 1,)
+
+
+@pytest.mark.parametrize("alpha", [-0.1, np.nan, np.inf])
+def test_ccp_alpha_rejects_values_outside_sklearn_range(alpha):
+    x, y = audit_data(seed=103)
+    with pytest.raises(ValueError, match="ccp_alpha"):
+        BankaiRandomForestClassifier(ccp_alpha=alpha, n_estimators=2).fit(x, y)
+
+
+def test_ccp_alpha_matches_sklearn_single_feature_pruning_path():
+    rng = np.random.RandomState(12)
+    x = rng.normal(size=(80, 1))
+    y = (x[:, 0] > -0.3).astype(int)
+    y[rng.choice(len(y), 10, replace=False)] ^= 1
+
+    for alpha in (0.0, 0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0):
+        parameters = dict(
+            n_estimators=1,
+            bootstrap=False,
+            max_features=None,
+            random_state=5,
+            ccp_alpha=alpha,
+        )
+        bankai = BankaiRandomForestClassifier(**parameters).fit(x, y)
+        sklearn_model = RandomForestClassifier(**parameters).fit(x, y)
+
+        assert bankai.estimators_[0].tree_.node_count == sklearn_model.estimators_[0].tree_.node_count
+        np.testing.assert_array_equal(bankai.predict(x), sklearn_model.predict(x))
+
+
+@pytest.mark.parametrize("max_bins", [None, 8])
+def test_ccp_alpha_zero_preserves_unpruned_predictions_and_importances(max_bins):
+    x, y = audit_data(seed=107)
+    parameters = dict(n_estimators=9, max_bins=max_bins, random_state=109)
+    default = BankaiRandomForestClassifier(**parameters).fit(x, y)
+    explicit_zero = BankaiRandomForestClassifier(ccp_alpha=0.0, **parameters).fit(x, y)
+
+    np.testing.assert_array_equal(explicit_zero.predict(x), default.predict(x))
+    np.testing.assert_array_equal(explicit_zero.predict_proba(x), default.predict_proba(x))
+    np.testing.assert_array_equal(explicit_zero.feature_importances_, default.feature_importances_)
+    assert [tree.tree_.node_count for tree in explicit_zero.estimators_] == [
+        tree.tree_.node_count for tree in default.estimators_
+    ]

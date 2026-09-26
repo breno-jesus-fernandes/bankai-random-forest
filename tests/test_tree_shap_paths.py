@@ -8,7 +8,8 @@ from bankai_random_forest import BankaiRandomForestClassifier
 
 @pytest.mark.parametrize("max_bins", [None, 16])
 @pytest.mark.parametrize("classes", [2, 3])
-def test_all_tree_shap_paths_are_additive_with_constant_features(max_bins, classes):
+@pytest.mark.parametrize("ccp_alpha", [0.0, 0.05])
+def test_all_tree_shap_paths_are_additive_with_constant_features(max_bins, classes, ccp_alpha):
     rng = np.random.RandomState(19)
     x = rng.normal(size=(120, 5))
     x[:, 4] = 3.0
@@ -17,7 +18,7 @@ def test_all_tree_shap_paths_are_additive_with_constant_features(max_bins, class
     else:
         y = np.digitize(x[:, 0] + x[:, 1], [-0.5, 0.5])
     model = BankaiRandomForestClassifier(
-        n_estimators=12, random_state=13, max_bins=max_bins
+        n_estimators=12, random_state=13, max_bins=max_bins, ccp_alpha=ccp_alpha
     ).fit(x[:90], y[:90])
     explained = x[90:96]
     probabilities = model.predict_proba(explained)

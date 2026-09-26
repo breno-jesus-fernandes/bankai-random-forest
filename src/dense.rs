@@ -23,6 +23,7 @@ pub struct DenseInput {
     bin_edges: Option<Arc<Vec<Vec<f64>>>>,
     active_features: Vec<usize>,
     balanced_subsample: bool,
+    ccp_alpha: f64,
 }
 
 #[derive(Clone)]
@@ -140,6 +141,7 @@ impl DenseInput {
             bin_edges,
             active_features,
             balanced_subsample: false,
+            ccp_alpha: 0.0,
         })
     }
 
@@ -184,6 +186,7 @@ impl DenseInput {
             bin_edges: None,
             active_features: (0..columns).collect(),
             balanced_subsample: false,
+            ccp_alpha: 0.0,
         })
     }
 
@@ -201,6 +204,11 @@ impl DenseInput {
 
     pub fn with_balanced_subsample(mut self) -> Self {
         self.balanced_subsample = true;
+        self
+    }
+
+    pub fn with_ccp_alpha(mut self, ccp_alpha: f64) -> Self {
+        self.ccp_alpha = ccp_alpha;
         self
     }
 
@@ -246,6 +254,7 @@ impl DenseInput {
             total_weight: tree_total_weight,
             min_leaf_weight: min_leaf_fraction * tree_total_weight,
             balanced_subsample: false,
+            ccp_alpha: self.ccp_alpha,
             ..self.clone()
         }
     }
@@ -463,6 +472,7 @@ pub struct DenseDecisionSlice {
     labels: Vec<usize>,
     class_weights: Vec<f64>,
     total_weight: f64,
+    criterion: Criterion,
 }
 
 impl DenseDecisionSlice {
@@ -484,6 +494,7 @@ impl DenseDecisionSlice {
             labels,
             class_weights,
             total_weight,
+            criterion: input.criterion,
         }
     }
 }
@@ -503,6 +514,30 @@ impl DecisionSlice<usize> for DenseDecisionSlice {
             best.ingest(weight, class, rng);
         }
         best.consume().map(|(_, class)| class).unwrap_or(0)
+    }
+
+    fn pruning_weight(&self) -> Option<f64> {
+        Some(self.total_weight)
+    }
+
+    fn pruning_risk(&self, root_weight: f64) -> Option<f64> {
+        if root_weight <= 0.0 {
+            return Some(0.0);
+        }
+        Some(
+            self.total_weight * impurity(self.criterion, &self.class_weights, self.total_weight)
+                / root_weight,
+        )
+    }
+
+    fn pruning_vote(&self) -> Option<usize> {
+        let mut best_class = 0;
+        for (class, &weight) in self.class_weights.iter().enumerate().skip(1) {
+            if weight > self.class_weights[best_class] {
+                best_class = class;
+            }
+        }
+        Some(best_class)
     }
 }
 
@@ -755,6 +790,10 @@ impl RfInput for DenseInput {
 
     fn observation_count(&self) -> usize {
         self.rows
+    }
+
+    fn ccp_alpha(&self) -> f64 {
+        self.ccp_alpha
     }
 
     fn tree_input(&self, bag: &Mask) -> Option<Self> {

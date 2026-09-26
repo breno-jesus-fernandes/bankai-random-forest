@@ -240,6 +240,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             balanced_subsample=(
                 self.class_weight == "balanced_subsample" and self.bootstrap is True
             ),
+            ccp_alpha=self.ccp_alpha,
         )
         self._forest = forest
         self._shap_estimators_cache = None
@@ -311,6 +312,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             balanced_subsample=(
                 self.class_weight == "balanced_subsample" and self.bootstrap is True
             ),
+            ccp_alpha=self.ccp_alpha,
         )
         self._forest = forest
         self._shap_estimators_cache = None
@@ -322,12 +324,18 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
 
     def _reject_unsupported_baseline_parameters(self, sample_weight):
         unsupported = (
-            ("ccp_alpha", self.ccp_alpha != 0.0),
             ("monotonic_cst", self.monotonic_cst is not None),
         )
         for name, is_unsupported in unsupported:
             if is_unsupported:
                 raise NotImplementedError(f"{name} is not implemented yet")
+        if (
+            not isinstance(self.ccp_alpha, (int, float, np.integer, np.floating))
+            or isinstance(self.ccp_alpha, (bool, np.bool_))
+            or not np.isfinite(self.ccp_alpha)
+            or self.ccp_alpha < 0.0
+        ):
+            raise ValueError("ccp_alpha must be a finite non-negative number")
         if self.oob_score and self.bootstrap is not True:
             raise ValueError("Out of bag estimation only available if bootstrap=True")
         if not isinstance(self.oob_score, (bool, np.bool_)) and not callable(self.oob_score):

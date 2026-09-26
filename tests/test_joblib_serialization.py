@@ -6,7 +6,8 @@ from bankai_random_forest import BankaiRandomForestClassifier
 
 
 @pytest.mark.parametrize("max_bins", [None, 8])
-def test_joblib_round_trip_preserves_fitted_classifier(tmp_path, max_bins):
+@pytest.mark.parametrize("ccp_alpha", [0.0, 0.05])
+def test_joblib_round_trip_preserves_fitted_classifier(tmp_path, max_bins, ccp_alpha):
     rng = np.random.RandomState(23)
     x = rng.normal(size=(96, 5))
     y = np.where(x[:, 0] + x[:, 1] > 0, "positive", "negative")
@@ -14,6 +15,7 @@ def test_joblib_round_trip_preserves_fitted_classifier(tmp_path, max_bins):
         n_estimators=9,
         random_state=17,
         max_bins=max_bins,
+        ccp_alpha=ccp_alpha,
         importance_type="gain",
     ).fit(x[:72], y[:72])
     path = tmp_path / "bankai.joblib"
@@ -25,6 +27,9 @@ def test_joblib_round_trip_preserves_fitted_classifier(tmp_path, max_bins):
     assert restored.max_bins == max_bins
     assert restored.n_features_in_ == model.n_features_in_
     np.testing.assert_array_equal(restored.classes_, model.classes_)
+    assert [tree.tree_.node_count for tree in restored.estimators_] == [
+        tree.tree_.node_count for tree in model.estimators_
+    ]
     np.testing.assert_array_equal(restored.predict(x[72:]), model.predict(x[72:]))
     np.testing.assert_allclose(
         restored.predict_proba(x[72:]), model.predict_proba(x[72:]), atol=0, rtol=0

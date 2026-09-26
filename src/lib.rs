@@ -42,7 +42,7 @@ impl NativeForest {
         self.forest.is_some()
     }
 
-    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1, max_bins=None, balanced_subsample=false))]
+    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1, max_bins=None, balanced_subsample=false, ccp_alpha=0.0))]
     fn fit(
         &mut self,
         x: PyReadonlyArray2<'_, f64>,
@@ -65,9 +65,15 @@ impl NativeForest {
         n_jobs: usize,
         max_bins: Option<usize>,
         balanced_subsample: bool,
+        ccp_alpha: f64,
     ) -> PyResult<()> {
         if n_estimators == 0 {
             return Err(PyValueError::new_err("n_estimators must be at least 1"));
+        }
+        if !ccp_alpha.is_finite() || ccp_alpha < 0.0 {
+            return Err(PyValueError::new_err(
+                "ccp_alpha must be a finite non-negative number",
+            ));
         }
 
         let (values, rows, columns) = matrix_to_owned(x)?;
@@ -121,6 +127,7 @@ impl NativeForest {
         } else {
             input
         };
+        let input = input.with_ccp_alpha(ccp_alpha);
 
         self.forest = Some(if n_jobs == 1 {
             Forest::new_with_settings(

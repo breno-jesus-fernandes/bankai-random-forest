@@ -24,6 +24,10 @@ pub trait RfInput: Sized {
     type SplitCache;
     /// Number of observations, used to generate masks; has to be accurate.
     fn observation_count(&self) -> usize;
+    /// Cost-complexity threshold requested for trees trained on this input.
+    fn ccp_alpha(&self) -> f64 {
+        0.0
+    }
     /// Optional input view with tree-specific weights for the supplied bag.
     /// Implementations can share immutable feature storage with the original.
     fn tree_input(&self, _bag: &Mask) -> Option<Self> {
@@ -84,6 +88,18 @@ pub trait DecisionSlice<Vote> {
     fn is_pure(&self) -> bool;
     /// Generates a value for the leaf; note that condense may happen not only after is_pure is true but also when leaf is enforced by other circumstances, in particular the exhaustion of the allowed tree depth or failure to generate any split in the tree level scan.
     fn condense(&self, rng: &mut RfRng) -> Vote;
+    /// Total training weight used to normalize cost-complexity risk.
+    fn pruning_weight(&self) -> Option<f64> {
+        None
+    }
+    /// Weighted node impurity divided by the root training weight.
+    fn pruning_risk(&self, _root_weight: f64) -> Option<f64> {
+        None
+    }
+    /// Deterministic class vote used when a subtree is collapsed.
+    fn pruning_vote(&self) -> Option<Vote> {
+        None
+    }
 }
 
 /// Aggregator of votes coming from different trees, represents the result collected over the whole forest

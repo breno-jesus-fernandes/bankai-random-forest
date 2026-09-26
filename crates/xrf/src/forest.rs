@@ -117,7 +117,7 @@ impl<I: RfInput> Forest<I> {
             };
             let tree_input = input.tree_input(&bag);
             let tree_input = tree_input.as_ref().unwrap_or(input);
-            let tree = Tree::new(
+            let mut tree = Tree::new(
                 tree_input,
                 &bag,
                 tries,
@@ -127,6 +127,7 @@ impl<I: RfInput> Forest<I> {
                 &mut mask_cache,
                 &mut rng,
             );
+            tree.prune_with_ccp_alpha(tree_input, &bag, tree_input.ccp_alpha(), &mut mask_cache);
             if let Some(importance) = importance.as_mut() {
                 tree.permutational_importance(
                     input,
@@ -253,7 +254,7 @@ impl<I: RfInput> Forest<I> {
                             };
                             let tree_input = input.tree_input(&bag);
                             let tree_input = tree_input.as_ref().unwrap_or(input);
-                            let tree = Tree::new(
+                            let mut tree = Tree::new(
                                 tree_input,
                                 &bag,
                                 tries,
@@ -262,6 +263,12 @@ impl<I: RfInput> Forest<I> {
                                 max_leaves,
                                 &mut mask_cache,
                                 &mut rng,
+                            );
+                            tree.prune_with_ccp_alpha(
+                                tree_input,
+                                &bag,
+                                tree_input.ccp_alpha(),
+                                &mut mask_cache,
                             );
                             if let Some(importance) = importance.as_mut() {
                                 tree.permutational_importance(

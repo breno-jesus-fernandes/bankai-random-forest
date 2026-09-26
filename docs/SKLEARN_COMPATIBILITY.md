@@ -14,7 +14,8 @@ tests are in `tests/test_sklearn_compatibility_audit.py`.
 | Metadata routing | Supported for requested sample weights | `set_fit_request(sample_weight=True)` routes through a sklearn `Pipeline` when metadata routing is enabled. |
 | Classifier estimator tags | Supported | Bankai provides sklearn classifier and single-output target tags; `is_classifier` recognizes the estimator. |
 | `class_weight="balanced_subsample"` | Supported | With bootstrap enabled, each tree computes class factors from its own bootstrap multiplicities; with bootstrap disabled, behavior matches `balanced`. User sample weights are multiplied by the class factors. |
-| `ccp_alpha` and `monotonic_cst` | Unsupported beyond defaults | Non-default values raise `NotImplementedError`; the default `ccp_alpha=0.0` and `monotonic_cst=None` are accepted. Existing rejection tests are in `tests/test_estimator_fit.py`. |
+| `ccp_alpha` | Supported | Cost-complexity pruning supports exact and histogram trees; nonnegative finite values are accepted and `ccp_alpha=0` preserves unpruned behavior. |
+| `monotonic_cst` | Unsupported beyond defaults | Non-default values raise `NotImplementedError`; `None` is accepted. Existing rejection tests are in `tests/test_estimator_fit.py`. |
 | `max_samples` | Supported for supported inputs | Fractional sample counts use floor and weighted data uses the effective sum of sample weights, matching sklearn's sample-count rule. |
 | `oob_score` | Supported | Boolean scoring and callable scoring are supported; callables receive encoded targets and OOB argmax predictions. |
 | `warm_start` | Partial | Increasing `n_estimators` rebuilds the deterministic forest instead of appending only the new trees. Final predictions are covered, but incremental-fit performance differs. |
@@ -33,5 +34,7 @@ tests are in `tests/test_sklearn_compatibility_audit.py`.
 
 Verification ran against scikit-learn 1.9.1 and Python 3.11.11. The release
 extension build, sklearn estimator checks, Rust tests, and full Python suite
-passed (81 tests). Two existing
+passed (94 tests). Cost-complexity pruning is covered for exact and histogram
+trees, including parity against sklearn's pruning path for a single-feature
+forest. Two existing
 `divide by zero` warnings from `log(0)` remain in `predict_log_proba` coverage.

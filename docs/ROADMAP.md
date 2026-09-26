@@ -230,11 +230,11 @@ loads the PyO3 wrapper.
 
 ### v1.2.0: Cost-Complexity Pruning
 
-- [ ] Implement sklearn-compatible `ccp_alpha` pruning for positive alpha while
+- [x] Implement sklearn-compatible `ccp_alpha` pruning for positive alpha while
       preserving the existing unpruned tree behavior at `ccp_alpha=0`.
-- [ ] Add reference and regression tests for pruned structures, predictions,
+- [x] Add reference and regression tests for pruned structures, predictions,
       probabilities, importances, `apply`, `decision_path`, TreeSHAP, and joblib.
-- [ ] Verify exact and histogram modes and pass all compatibility quality gates.
+- [x] Verify exact and histogram modes and pass all compatibility quality gates.
 
 ### v1.3.0: Monotonic Constraints
 
@@ -312,3 +312,4 @@ loads the PyO3 wrapper.
 | 2026-09-26 | v1.0.0 | Compatibility remediation implemented | Fixed classifier tags, fractional/weighted `max_samples` flooring, and callable OOB scoring. `balanced_subsample` is accepted and handles `bootstrap=False`; exact per-bootstrap weighting is carried into v1.1. Release extension build passed and the full suite reports 76 passed. |
 | 2026-09-26 | v1.1.0 | Bootstrap class weight parity complete | Added per-tree balanced bootstrap weights through shared dense feature storage. Verified non-bootstrap weighting, deterministic sequential/parallel forests, OOB scoring and permutation importance. Release benchmarks on 10k rows stayed within the 5% gate for existing exact and histogram paths; details and raw measurements are in `benchmarks/results-balanced-subsample-10k/`. |
 | 2026-09-26 | v1.2.0-v1.6.0 | Compatibility expansion planned | Added independent pruning, monotonicity, sparse, NaN, and multioutput milestones. Each requires TDD, full compatibility regression coverage, release benchmarks with untimed warmups, and a maximum 5% regression in existing workloads. |
+| 2026-09-26 | v1.2.0 | Cost-complexity pruning complete | Added sklearn-compatible `ccp_alpha` to exact and histogram trees; alpha-zero regression and one-feature sklearn pruning-path parity pass, including inspection, TreeSHAP, and joblib coverage. Full Python/Rust suites and `check_estimator` pass. Release benchmarks with warmups on 10k rows stayed within 5% for both existing backends; report and raw CSV are in `benchmarks/results-ccp-alpha-10k/`. |
