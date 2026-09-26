@@ -1,4 +1,5 @@
 use std::env;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
@@ -10,6 +11,7 @@ struct Arguments {
     features: usize,
     trees: usize,
     markdown: bool,
+    predictions: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -58,13 +60,29 @@ fn run() -> Result<(), String> {
 
     let prediction = DenseInput::prediction(values, arguments.rows, arguments.features, 2)?;
     let predict_started = Instant::now();
-    let predicted: Vec<_> = forest
+    let probabilities: Vec<_> = forest
         .predict(&prediction)
         .predictions()
-        .map(|(_, votes)| votes.winner())
+        .map(|(_, votes)| votes.probabilities())
         .collect();
     let predict_seconds = predict_started.elapsed().as_secs_f64();
+    let predicted: Vec<_> = probabilities
+        .iter()
+        .map(|probabilities| if probabilities[1] > probabilities[0] { 1 } else { 0 })
+        .collect();
     let f1 = binary_f1(&labels, &predicted);
+
+    if let Some(path) = arguments.predictions {
+        let mut contents = String::from("actual,predicted,probability_0,probability_1\n");
+        for ((actual, predicted), probabilities) in labels.iter().zip(&predicted).zip(&probabilities)
+        {
+            contents.push_str(&format!(
+                "{actual},{predicted},{:.12},{:.12}\n",
+                probabilities[0], probabilities[1]
+            ));
+        }
+        std::fs::write(path, contents).map_err(|error| error.to_string())?;
+    }
 
     if arguments.markdown {
         println!("| rows | features | trees | train_seconds | predict_seconds | f1 |");
@@ -89,6 +107,7 @@ fn parse_arguments(arguments: impl Iterator<Item = String>) -> Result<Arguments,
         features: 20,
         trees: 100,
         markdown: false,
+        predictions: None,
     };
     let mut arguments = arguments;
     while let Some(argument) = arguments.next() {
@@ -97,9 +116,16 @@ fn parse_arguments(arguments: impl Iterator<Item = String>) -> Result<Arguments,
             "--features" => parsed.features = parse_positive(arguments.next(), "--features")?,
             "--trees" => parsed.trees = parse_positive(arguments.next(), "--trees")?,
             "--markdown" => parsed.markdown = true,
+            "--predictions" => {
+                parsed.predictions = Some(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "--predictions requires a path".to_string())?,
+                ))
+            }
             "--help" | "-h" => {
                 return Err(
-                    "usage: bankai-xrf-cli [--rows N] [--features N] [--trees N] [--markdown]"
+                    "usage: bankai-xrf-cli [--rows N] [--features N] [--trees N] [--markdown] [--predictions PATH]"
                         .to_string(),
                 )
             }
