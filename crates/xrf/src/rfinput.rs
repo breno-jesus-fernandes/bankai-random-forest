@@ -26,6 +26,10 @@ pub trait RfInput: Sized {
     fn feature_count(&self) -> usize;
     /// Constructor of the DecisionSlice object for elements in the mask.
     fn decision_slice(&self, mask: &Mask) -> Self::DecisionSlice;
+    /// Whether this node has enough observations to attempt a split.
+    fn can_split(&self, _: &Mask) -> bool {
+        true
+    }
     /// Constructor of FeatureSampler.
     fn feature_sampler(&self) -> Self::FeatureSampler;
     /// Constructor of a split, which is (usually optimal) pivot using certain feature that splits observations in a possibly most uniform subsets.

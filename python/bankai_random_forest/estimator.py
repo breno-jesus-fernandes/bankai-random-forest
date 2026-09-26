@@ -80,6 +80,12 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         self._fit_sample_weight = sample_weight
         self._fit_min_leaf_weight = min_leaf_weight
         self._fit_max_depth = self._resolve_max_depth()
+        self._fit_min_samples_split = self._resolve_min_samples(
+            self.min_samples_split, 2, "min_samples_split", X.shape[0]
+        )
+        self._fit_min_samples_leaf = self._resolve_min_samples(
+            self.min_samples_leaf, 1, "min_samples_leaf", X.shape[0]
+        )
 
         forest = _core.NativeForest()
         forest.fit(
@@ -92,6 +98,8 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             min_leaf_weight=self._fit_min_leaf_weight,
             criterion=self.criterion,
             max_depth=self._fit_max_depth,
+            min_samples_split=self._fit_min_samples_split,
+            min_samples_leaf=self._fit_min_samples_leaf,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -140,6 +148,8 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             min_leaf_weight=self._fit_min_leaf_weight,
             criterion=self.criterion,
             max_depth=self._fit_max_depth,
+            min_samples_split=self._fit_min_samples_split,
+            min_samples_leaf=self._fit_min_samples_leaf,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -152,8 +162,6 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
 
     def _reject_unsupported_baseline_parameters(self, sample_weight):
         unsupported = (
-            ("min_samples_split", self.min_samples_split != 2),
-            ("min_samples_leaf", self.min_samples_leaf != 1),
             ("max_leaf_nodes", self.max_leaf_nodes is not None),
             ("min_impurity_decrease", self.min_impurity_decrease != 0.0),
             ("bootstrap", self.bootstrap is not True),
@@ -175,6 +183,15 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         if isinstance(self.max_depth, (int, np.integer)) and self.max_depth >= 1:
             return int(self.max_depth)
         raise ValueError("max_depth must be an integer greater than or equal to 1")
+
+    @staticmethod
+    def _resolve_min_samples(value, minimum, name, n_samples):
+        if isinstance(value, (int, np.integer)) and not isinstance(value, bool):
+            if value >= minimum:
+                return int(value)
+        if isinstance(value, (float, np.floating)) and 0.0 < value <= 1.0:
+            return max(minimum, int(np.ceil(value * n_samples)))
+        raise ValueError(f"{name} must be an integer >= {minimum} or a float in (0, 1]")
 
     def _resolve_max_features(self):
         max_features = self.max_features

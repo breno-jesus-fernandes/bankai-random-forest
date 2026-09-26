@@ -40,7 +40,7 @@ impl<I: RfInput> Tree<I> {
         rng: &mut RfRng,
     ) -> Self {
         let y = input.decision_slice(mask);
-        if depth_left == 0 || y.is_pure() {
+        if depth_left == 0 || y.is_pure() || !input.can_split(mask) {
             Self::Leaf(y.condense(rng))
         } else {
             feature_sampler.reload();

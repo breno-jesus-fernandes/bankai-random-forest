@@ -12,6 +12,8 @@ pub struct DenseInput {
     n_classes: usize,
     min_leaf_weight: f64,
     criterion: Criterion,
+    min_samples_split: usize,
+    min_samples_leaf: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -30,6 +32,8 @@ impl DenseInput {
         n_classes: usize,
         min_leaf_weight: f64,
         criterion: Criterion,
+        min_samples_split: usize,
+        min_samples_leaf: usize,
     ) -> Result<Self, String> {
         validate_matrix(&values, rows, columns)?;
         if labels.len() != rows {
@@ -53,6 +57,9 @@ impl DenseInput {
         if !min_leaf_weight.is_finite() || min_leaf_weight < 0.0 {
             return Err("min_leaf_weight must be finite and non-negative".to_string());
         }
+        if min_samples_split < 2 || min_samples_leaf == 0 {
+            return Err("invalid minimum sample control".to_string());
+        }
         if labels.iter().any(|&label| label >= n_classes) {
             return Err("labels must be encoded in 0..n_classes".to_string());
         }
@@ -66,6 +73,8 @@ impl DenseInput {
             n_classes,
             min_leaf_weight,
             criterion,
+            min_samples_split,
+            min_samples_leaf,
         })
     }
 
@@ -89,6 +98,8 @@ impl DenseInput {
             n_classes,
             min_leaf_weight: 0.0,
             criterion: Criterion::Gini,
+            min_samples_split: 2,
+            min_samples_leaf: 1,
         })
     }
 
@@ -294,6 +305,11 @@ fn best_split(
         if left_weight == 0.0 || right_weight == 0.0 {
             continue;
         }
+        let left_count = index + 1;
+        let right_count = ranked.len() - left_count;
+        if left_count < input.min_samples_leaf || right_count < input.min_samples_leaf {
+            continue;
+        }
         if left_weight < input.min_leaf_weight || right_weight < input.min_leaf_weight {
             continue;
         }
@@ -369,6 +385,10 @@ impl RfInput for DenseInput {
 
     fn decision_slice(&self, mask: &Mask) -> Self::DecisionSlice {
         DenseDecisionSlice::new(self, mask)
+    }
+
+    fn can_split(&self, mask: &Mask) -> bool {
+        mask.len() >= self.min_samples_split
     }
 
     fn feature_sampler(&self) -> Self::FeatureSampler {
