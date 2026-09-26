@@ -439,11 +439,15 @@ def test_sparse_fit_and_prediction_never_densify(monkeypatch):
     model.predict(x.tocsc())
 
 
-def test_rejects_multioutput_targets_explicitly(separable_data):
+def test_supports_multioutput_targets(separable_data):
     x, y = separable_data
 
-    with pytest.raises(ValueError, match="multioutput"):
-        BankaiRandomForestClassifier().fit(x, np.column_stack([y, y]))
+    model = BankaiRandomForestClassifier(
+        n_estimators=7, bootstrap=False, random_state=42
+    ).fit(x, np.column_stack([y, y]))
+
+    np.testing.assert_array_equal(model.predict(x), np.column_stack([y, y]))
+    assert len(model.predict_proba(x)) == 2
 
 
 def test_dataframe_column_names_are_preserved(separable_data):

@@ -270,12 +270,17 @@ loads the PyO3 wrapper.
 
 ### v1.6.0: Multioutput Classification
 
-- [ ] Support sklearn RandomForestClassifier multioutput classification for
-      multiclass targets per output and multilabel indicator targets.
-- [ ] Test output shapes and values for `predict` and `predict_proba`, weights,
-      metrics, validation, joblib, and sklearn parity.
-- [ ] Verify single-output classification retains behavior and pass all quality
-      gates.
+- [x] Support multiclass and multilabel outputs with sklearn-compatible
+      `classes_`, `predict`, `predict_proba`, `predict_log_proba`, and OOB
+      output shapes. Bankai trains one native forest per output; sklearn shares
+      trees across outputs, so internal tree structures and exact probabilities
+      may differ.
+- [x] Test output shapes and values, per-output class weights, sample weights,
+      OOB scoring, metrics, validation, sparse/NaN input, joblib, estimator
+      tags, and prediction/probability parity against sklearn.
+- [x] Verify single-output behavior and performance gates. The paired release
+      benchmark's worst regression was +2.42%; multioutput measurements and
+      raw data are in `benchmarks/results-multioutput-10k-20f/`.
 
 ## Progress Log
 
@@ -324,3 +329,4 @@ loads the PyO3 wrapper.
 | 2026-09-26 | v1.3.0 | Monotonic constraints complete | Added bounded split selection and leaf votes for increasing/decreasing constraints on binary classification, in exact and histogram modes. Reference probability invariants, invalid values, multiclass rejection, zero-constraint regression, `apply`/`decision_path`, TreeSHAP, joblib, ccp_alpha interaction, and sklearn estimator checks pass. Full suites report 112 Python and 19 Rust tests. Release benchmarks with warmups stayed below 1% regression when unset; enabled-feature cost and raw results are in `benchmarks/results-monotonic-10k/`. |
 | 2026-09-26 | v1.4.0 | Sparse feature matrices complete | Added CSR/CSC fit and prediction through CSR storage with implicit zeros, with no dense matrix materialization. CSR/CSC exact and histogram tests cover predictions/probabilities, OOB, importances, validation, sklearn label parity, and joblib. Dense release fit change stayed below 2.34% and prediction improved in the 10k×20 warmup benchmark; sparse timings and memory results are in `benchmarks/results-sparse-10k/`. |
 | 2026-09-26 | v1.5.0 | NaN routing and performance gate complete | Added learned missing-value directions for exact and histogram splits, unseen-NaN fallback, dense/CSR/CSC coverage, OOB, sklearn parity, TreeSHAP/apply/decision_path, and joblib. Removed a third iterator variant that added a per-sample dispatch during tree traversal; finite training keeps the lazy route and NaN training buffers only its routed mask. The paired 10k×20 release benchmark reports a worst regression of +2.48% across six fit workloads and +0.86% across six prediction workloads. Python reports 140 passing tests; Rust reports 20. Results and raw measurements are in `benchmarks/results-nan-10k/`. |
+| 2026-09-26 | v1.6.0 | Multioutput classification complete | Added per-output native forests for multiclass-multioutput and multilabel targets, sklearn prediction/probability shapes, per-output classes and class weights, sample weights, OOB, sparse/NaN inputs, and joblib. Full sklearn estimator checks pass. Release multioutput benchmarks show at least 99.61% label agreement and maximum probability RMSE 0.0490 on 10k×20 data. Paired single-output release regressions stayed below 2.42%; all benchmark runs include warmups. Bankai uses independent forests per output, unlike sklearn's shared tree structures; that internal difference is documented in `docs/SKLEARN_COMPATIBILITY.md`. |

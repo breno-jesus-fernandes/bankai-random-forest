@@ -64,8 +64,8 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         tags.estimator_type = "classifier"
         tags.classifier_tags = ClassifierTags()
         tags.target_tags.required = True
-        tags.target_tags.one_d_labels = True
-        tags.target_tags.single_output = True
+        tags.target_tags.one_d_labels = False
+        tags.target_tags.single_output = False
         tags.input_tags.sparse = True
         tags.input_tags.allow_nan = True
         return tags
@@ -128,6 +128,9 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
     @property
     def estimators_(self):
         """Lazily expose native trees in sklearn's format for SHAP TreeExplainer."""
+        multioutput_models = getattr(self, "_multioutput_models", None)
+        if multioutput_models:
+            return multioutput_models[0].estimators_
         check_is_fitted(self, "_forest")
         if getattr(self, "_shap_estimators_cache", None) is None:
             self._shap_estimators_cache = _make_sklearn_trees(
@@ -137,6 +140,9 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
 
     def _tree_shap_adapter_for_benchmark(self):
         """Build the benchmark-only adapter facade accepted by TreeExplainer."""
+        multioutput_models = getattr(self, "_multioutput_models", None)
+        if multioutput_models:
+            return multioutput_models[0]._tree_shap_adapter_for_benchmark()
         check_is_fitted(self, "_forest")
         return _TreeSHAPAdapter(
             _make_sklearn_trees(
@@ -146,6 +152,9 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
 
     def _native_tree_shap_for_benchmark(self, X):
         """Return native Rust TreeSHAP values for benchmark comparisons."""
+        multioutput_models = getattr(self, "_multioutput_models", None)
+        if multioutput_models:
+            raise ValueError("native TreeSHAP is not exposed for multioutput models")
         check_is_fitted(self, "_forest")
         X = validate_data(self, X, reset=False, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan")
         values, base_values = self._forest.tree_shap(X)
@@ -165,8 +174,11 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         y_array = np.asarray(y)
         if y_array.ndim == 2 and y_array.shape[1] == 1:
             y = column_or_1d(y, warn=True)
+        elif y_array.ndim == 2 and y_array.shape[1] > 1:
+            return self._fit_multioutput(X, y_array, sample_weight, sparse_input, raw_dtype)
         elif y_array.ndim != 1:
             raise ValueError("multioutput targets are not supported")
+        self.__dict__.pop("_multioutput_models", None)
 
         warm_refit = self.warm_start and hasattr(self, "_forest")
         if warm_refit and self.n_estimators < self._fitted_n_estimators:
@@ -198,9 +210,16 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         min_leaf_weight = self._validate_min_weight_fraction_leaf(
             sample_weight, X.shape[0]
         )
-        X, encoded_y, sample_weight = self._prepare_training_data(
-            X, encoded_y, sample_weight
-        )
+        if getattr(self, "_track_training_row_order", False):
+            X, encoded_y, sample_weight, self._training_row_order = (
+                self._prepare_training_data(
+                    X, encoded_y, sample_weight, return_order=True
+                )
+            )
+        else:
+            X, encoded_y, sample_weight = self._prepare_training_data(
+                X, encoded_y, sample_weight
+            )
 
         self._fit_seed = self._fit_seed if warm_refit else self._next_seed()
         self._fit_max_features = self._resolve_max_features()
@@ -271,7 +290,128 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
                 self.oob_score_ = float(np.mean(predictions[valid] == self._fit_y[valid]))
         return self
 
+    def _fit_multioutput(self, X, y, sample_weight, sparse_input, raw_dtype):
+        target_type = type_of_target(y)
+        if target_type not in ("multilabel-indicator", "multiclass-multioutput"):
+            raise ValueError(f"Unknown label type: {target_type}")
+        if self.monotonic_cst is not None:
+            raise ValueError("monotonic_cst is not supported for multioutput classification")
+        if y.shape[0] != X.shape[0]:
+            raise ValueError("X and y must contain the same number of samples")
+
+        warm_refit = self.warm_start and hasattr(self, "_multioutput_models")
+        if warm_refit and self.n_estimators < self._fitted_n_estimators:
+            raise ValueError(
+                "n_estimators must be greater than or equal to the number of fitted trees "
+                "when warm_start=True"
+            )
+        validation_options = dict(
+            dtype=np.float64,
+            ensure_2d=True,
+            reset=not warm_refit,
+            ensure_all_finite="allow-nan",
+        )
+        if sparse_input:
+            validation_options["accept_sparse"] = ("csr", "csc")
+        X = validate_data(self, X, **validation_options)
+        if sparse_input:
+            X = X.tocsr(copy=False)
+
+        sample_weight = self._validate_sample_weight(sample_weight, X.shape[0])
+        self.copy_telemetry_ = {
+            "input_dtype": str(raw_dtype),
+            "core_dtype": str(X.dtype),
+            "input_c_contiguous": bool(X.data.flags.c_contiguous)
+            if sparse_input
+            else bool(X.flags.c_contiguous),
+            "cast_to_float64": raw_dtype != np.dtype(np.float64),
+            "input_sparse": sparse_input,
+        }
+        output_classes = [np.unique(y[:, output]) for output in range(y.shape[1])]
+        self.classes_ = output_classes
+        self.n_classes_ = np.asarray([len(classes) for classes in output_classes])
+        self.n_outputs_ = y.shape[1]
+
+        if isinstance(self.class_weight, list):
+            if len(self.class_weight) != self.n_outputs_:
+                raise ValueError("class_weight list must contain one dictionary per output")
+            output_class_weights = self.class_weight
+        else:
+            output_class_weights = [self.class_weight] * self.n_outputs_
+
+        previous_models = getattr(self, "_multioutput_models", None)
+        if warm_refit and previous_models and len(previous_models) == self.n_outputs_:
+            models = previous_models
+            seeds = self._multioutput_seeds
+        else:
+            self._fit_seed = self._next_seed()
+            rng = np.random.RandomState(self._fit_seed)
+            seeds = rng.randint(0, np.iinfo(np.int32).max, size=self.n_outputs_).tolist()
+            models = [None] * self.n_outputs_
+
+        for output in range(self.n_outputs_):
+            params = self.get_params(deep=False)
+            params["random_state"] = int(seeds[output])
+            params["class_weight"] = output_class_weights[output]
+            if models[output] is None:
+                models[output] = BankaiRandomForestClassifier(**params)
+            else:
+                models[output].set_params(**params)
+            models[output]._track_training_row_order = True
+            models[output].fit(X, y[:, output], sample_weight=sample_weight)
+
+        self._multioutput_models = models
+        self._multioutput_seeds = seeds
+        self._forest = models[0]._forest
+        self._fitted_n_estimators = self.n_estimators
+        self.feature_importances_ = np.mean(
+            [model.feature_importances_ for model in models], axis=0
+        )
+
+        if self.oob_score:
+            self.oob_decision_function_ = [
+                self._restore_multioutput_oob_order(
+                    model.oob_decision_function_,
+                    model._training_row_order,
+                    X.shape[0],
+                )
+                for model in models
+            ]
+            encoded_oob = np.column_stack(
+                [
+                    model.classes_[probabilities.argmax(axis=1)]
+                    for model, probabilities in zip(models, self.oob_decision_function_)
+                ]
+            )
+            valid = np.logical_and.reduce(
+                [probabilities.sum(axis=1) > 0.0 for probabilities in self.oob_decision_function_]
+            )
+            if callable(self.oob_score):
+                self.oob_score_ = float(self.oob_score(y, encoded_oob))
+            else:
+                self.oob_score_ = float(np.mean(np.all(encoded_oob[valid] == y[valid], axis=1)))
+        return self
+
+    @staticmethod
+    def _restore_multioutput_oob_order(probabilities, row_order, n_samples):
+        restored = np.zeros((n_samples, probabilities.shape[1]), dtype=np.float64)
+        counts = np.zeros(n_samples, dtype=np.int64)
+        valid = probabilities.sum(axis=1) > 0.0
+        np.add.at(restored, row_order[valid], probabilities[valid])
+        np.add.at(counts, row_order[valid], 1)
+        present = counts > 0
+        restored[present] /= counts[present, np.newaxis]
+        return restored
+
     def predict(self, X):
+        multioutput_models = getattr(self, "_multioutput_models", None)
+        if multioutput_models:
+            X = self._validate_multioutput_prediction_input(X)
+            outputs = []
+            for model in multioutput_models:
+                encoded = np.asarray(model._forest.predict(X), dtype=np.intp)
+                outputs.append(model.classes_[encoded])
+            return np.column_stack(outputs)
         check_is_fitted(self, "_forest")
         sparse_input = sparse.issparse(X)
         if sparse_input:
@@ -289,6 +429,13 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         return self.classes_[encoded_y]
 
     def predict_proba(self, X):
+        multioutput_models = getattr(self, "_multioutput_models", None)
+        if multioutput_models:
+            X = self._validate_multioutput_prediction_input(X)
+            return [
+                np.asarray(model._forest.predict_proba(X), dtype=np.float64)
+                for model in multioutput_models
+            ]
         check_is_fitted(self, "_forest")
         sparse_input = sparse.issparse(X)
         if sparse_input:
@@ -305,15 +452,46 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         return np.asarray(self._forest.predict_proba(X), dtype=np.float64)
 
     def predict_log_proba(self, X):
-        return np.log(self.predict_proba(X))
+        probabilities = self.predict_proba(X)
+        if isinstance(probabilities, list):
+            return [np.log(output) for output in probabilities]
+        return np.log(probabilities)
+
+    def _validate_multioutput_prediction_input(self, X):
+        check_is_fitted(self, "_forest")
+        sparse_input = sparse.issparse(X)
+        if sparse_input:
+            X = X.tocsr(copy=True)
+            X.sum_duplicates()
+            X.sort_indices()
+            X.eliminate_zeros()
+        options = dict(
+            reset=False,
+            dtype=np.float64,
+            ensure_2d=True,
+            ensure_all_finite="allow-nan",
+        )
+        if sparse_input:
+            options["accept_sparse"] = ("csr", "csc")
+        X = validate_data(self, X, **options)
+        return X.tocsr(copy=False) if sparse_input else X
 
     def __getstate__(self):
         state = self.__dict__.copy()
         state.pop("_forest", None)
+        if state.get("_multioutput_models"):
+            state.pop("_fit_X", None)
+            state.pop("_fit_y", None)
+            state.pop("_fit_sample_weight", None)
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        multioutput_models = getattr(self, "_multioutput_models", None)
+        if multioutput_models:
+            self._forest = multioutput_models[0]._forest
+            self._shap_estimators_cache = None
+            return
         if "_fit_X" not in state:
             return
 
@@ -537,11 +715,14 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         return weights
 
     @staticmethod
-    def _prepare_training_data(X, encoded_y, sample_weight):
+    def _prepare_training_data(X, encoded_y, sample_weight, return_order=False):
+        source_rows = np.arange(X.shape[0], dtype=np.intp) if return_order else None
         if sample_weight is not None and np.equal(
             sample_weight, np.floor(sample_weight)
         ).all():
             repeats = sample_weight.astype(np.intp, copy=False)
+            if return_order:
+                source_rows = np.repeat(source_rows, repeats)
             if sparse.issparse(X):
                 X = sparse.vstack([X[index] for index, count in enumerate(repeats) for _ in range(count)], format="csr")
             else:
@@ -562,6 +743,10 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         else:
             keys = (encoded_y, *(X[:, index] for index in range(X.shape[1] - 1, -1, -1)))
             order = np.lexsort(keys)
+        if return_order:
+            source_rows = source_rows[order]
         if sample_weight is None:
-            return X[order], encoded_y[order], None
-        return X[order], encoded_y[order], sample_weight[order]
+            result = (X[order], encoded_y[order], None)
+        else:
+            result = (X[order], encoded_y[order], sample_weight[order])
+        return (*result, source_rows) if return_order else result
