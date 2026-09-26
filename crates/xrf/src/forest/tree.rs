@@ -22,6 +22,7 @@ impl<I: RfInput> Tree<I> {
     ) -> Self {
         feature_sampler.reset();
         let mut leaf_count = 1;
+        let split_cache = input.split_cache(bag);
         Self::new_rec(
             input,
             bag,
@@ -31,6 +32,7 @@ impl<I: RfInput> Tree<I> {
             max_leaves,
             &mut leaf_count,
             mask_cache,
+            &split_cache,
             rng,
         )
     }
@@ -43,6 +45,7 @@ impl<I: RfInput> Tree<I> {
         max_leaves: usize,
         leaf_count: &mut usize,
         mask_cache: &mut MaskCache,
+        split_cache: &I::SplitCache,
         rng: &mut RfRng,
     ) -> Self {
         let y = input.decision_slice(mask);
@@ -53,7 +56,9 @@ impl<I: RfInput> Tree<I> {
             std::iter::repeat_n((), tries)
                 .fold(FairBest::new(), |mut fair_best: FairBest<_, f64>, _| {
                     let feature = feature_sampler.random_feature(rng);
-                    if let Some((pivot, score)) = input.new_split(mask, feature, &y, rng) {
+                    if let Some((pivot, score)) =
+                        input.new_split(mask, feature, &y, split_cache, rng)
+                    {
                         fair_best.ingest(score, (feature, pivot), rng);
                     }
                     fair_best
@@ -69,6 +74,8 @@ impl<I: RfInput> Tree<I> {
                         &mut left,
                         &mut right,
                     );
+                    let (left_split_cache, right_split_cache) =
+                        input.split_cache_children(split_cache, mask, &left, &right);
                     let branch = Self::Branch(
                         feature,
                         pivot,
@@ -82,6 +89,7 @@ impl<I: RfInput> Tree<I> {
                             max_leaves,
                             leaf_count,
                             mask_cache,
+                            &left_split_cache,
                             rng,
                         )),
                         Box::new(Self::new_rec(
@@ -93,6 +101,7 @@ impl<I: RfInput> Tree<I> {
                             max_leaves,
                             leaf_count,
                             mask_cache,
+                            &right_split_cache,
                             rng,
                         )),
                     );

@@ -99,6 +99,20 @@ def test_histogram_backend_preserves_native_permutation_importance():
     assert classifier.feature_importances_[0] > classifier.feature_importances_[2]
 
 
+def test_histogram_mode_skips_constant_features_without_changing_feature_positions():
+    rng = np.random.RandomState(42)
+    signal = rng.normal(size=200)
+    x = np.column_stack([signal, np.full(signal.size, 7.0)])
+    y = (signal > 0.0).astype(int)
+
+    classifier = BankaiRandomForestClassifier(
+        n_estimators=30, max_bins=16, max_features=None, random_state=42
+    ).fit(x, y)
+
+    assert classifier.predict(x).shape == y.shape
+    np.testing.assert_allclose(classifier.feature_importances_[1], 0.0)
+
+
 def test_permutation_importance_type_exposes_native_oob_accuracy_decrease():
     rng = np.random.RandomState(42)
     x = rng.normal(size=(200, 2))

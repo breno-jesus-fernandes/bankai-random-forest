@@ -17,6 +17,7 @@ impl RfInput for DataFrame {
     type VoteAggregator = Votes;
     type AccuracyDecreaseAggregator = DaAggregator;
     type FeatureSampler = FYSampler<Self>;
+    type SplitCache = ();
     fn observation_count(&self) -> usize {
         self.y.len()
     }
@@ -26,6 +27,16 @@ impl RfInput for DataFrame {
     fn feature_sampler(&self) -> Self::FeatureSampler {
         FYSampler::new(self)
     }
+    fn split_cache(&self, _: &Mask) -> Self::SplitCache {}
+    fn split_cache_children(
+        &self,
+        _: &Self::SplitCache,
+        _: &Mask,
+        _: &Mask,
+        _: &Mask,
+    ) -> (Self::SplitCache, Self::SplitCache) {
+        ((), ())
+    }
     fn decision_slice(&self, mask: &Mask) -> Self::DecisionSlice {
         DecisionSlice::new(self, mask)
     }
@@ -34,6 +45,7 @@ impl RfInput for DataFrame {
         on: &Mask,
         using: Self::FeatureId,
         y: &Self::DecisionSlice,
+        _: &Self::SplitCache,
         _rng: &mut crate::RfRng,
     ) -> Option<(Self::Pivot, f64)> {
         let feature = &self.x[using];

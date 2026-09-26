@@ -142,6 +142,11 @@ loads the PyO3 wrapper.
 - [x] Benchmark `fit` plus `feature_importances_` for permutation importance
       across exact and histogram modes, with optimized Rust builds.
 - [x] Review model quality and runtime tradeoffs across histogram resolutions.
+- [x] Cache node histograms and derive the larger child's histograms by
+      subtracting the smaller child's from the parent.
+- [x] Store histogram bin IDs in compact integer arrays instead of `f64`.
+- [x] Exclude globally constant features from histogram-mode split sampling
+      while keeping original feature IDs and importance output positions.
 
 ## Progress Log
 
@@ -173,3 +178,4 @@ loads the PyO3 wrapper.
 | 2026-09-26 | v0.5.0 | Feature importance benchmark complete | Compared gain, split frequency, and permutation for sklearn, PyO3, and Rust CLI on 10k training rows; permutation used a separate 10k validation set and five sklearn repeats. Reports are in `benchmarks/results-feature-importance-10k/`. |
 | 2026-09-26 | v0.6.0 | Histogram mode implemented | Added opt-in `max_bins` preprocessing and histogram split search; exact sorting remains the default when `max_bins=None`. |
 | 2026-09-26 | v0.6.0 | Histogram benchmark complete | Optimized 10k-row/20-feature/100-tree matrix measures fit plus permutation importance (no prediction): `max_bins=16` took 0.628 s vs exact 1.562 s (2.49x faster); LightGBM RF boosting took 0.841 s and sklearn RF 3.443 s. Higher histogram resolutions did not beat exact. Results are in `benchmarks/results-histogram-10k/`. Bankai OOB permutation is included in fit, while sklearn/LightGBM external permutation passes are added to fit; their model algorithms and Bankai's native OOB importance methodology differ. |
+| 2026-09-26 | v0.6.0 | Histogram internals optimized | Added node histogram caching/subtraction, `u8` bin storage, and histogram-mode filtering of globally constant features; original feature indices remain stable. Full Python and Rust suites pass. The optimized run reduced 255-bin time from 2.883 s to 1.616 s and 128-bin time from 1.633 s to 1.073 s; updated report is in `benchmarks/results-histogram-10k/`. |

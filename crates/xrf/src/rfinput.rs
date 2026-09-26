@@ -20,6 +20,8 @@ pub trait RfInput: Sized {
     /// A generator of random features for training.
     /// Useful to implement sampling without replacement; can be () where simple sampling is enough, for instance for Extra Trees.
     type FeatureSampler: FeatureSampler<Self>;
+    /// Per-node split-search state, allowing inputs to cache reusable statistics.
+    type SplitCache;
     /// Number of observations, used to generate masks; has to be accurate.
     fn observation_count(&self) -> usize;
     /// Number of features; not actually used by xrf, but usually useful for implementers.
@@ -32,12 +34,24 @@ pub trait RfInput: Sized {
     }
     /// Constructor of FeatureSampler.
     fn feature_sampler(&self) -> Self::FeatureSampler;
+    /// Build split-search state for a node.
+    fn split_cache(&self, on: &Mask) -> Self::SplitCache;
+    /// Derive child state after a node is split. Implementations can reuse the
+    /// parent state to avoid rebuilding statistics for both child nodes.
+    fn split_cache_children(
+        &self,
+        parent_cache: &Self::SplitCache,
+        parent: &Mask,
+        left: &Mask,
+        right: &Mask,
+    ) -> (Self::SplitCache, Self::SplitCache);
     /// Constructor of a split, which is (usually optimal) pivot using certain feature that splits observations in a possibly most uniform subsets.
     fn new_split(
         &self,
         on: &Mask,
         using: Self::FeatureId,
         y: &Self::DecisionSlice,
+        split_cache: &Self::SplitCache,
         rng: &mut RfRng,
     ) -> Option<(Self::Pivot, f64)>;
     /// Application of pivot to a given subset of the data; returns of iterator that sends observations left (for true) or right (for false).
