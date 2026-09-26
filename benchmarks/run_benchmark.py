@@ -17,6 +17,17 @@ import sklearn
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import f1_score
 
+PROFILES = {
+    "default": {},
+    "entropy": {"criterion": "entropy"},
+    "all_features": {"max_features": None},
+    "depth_8": {"max_depth": 8},
+    "leaf_10": {"min_samples_leaf": 10},
+    "subsample_50": {"max_samples": 0.5},
+    "no_bootstrap": {"bootstrap": False},
+    "balanced": {"class_weight": "balanced"},
+}
+
 def generate_dataset(rows, features):
     state = 42
     mask = (1 << 64) - 1
@@ -52,11 +63,10 @@ def measure_python(name, classifier, x, y):
     }
 
 
-def measure_rust(binary, rows, features, trees):
+def measure_rust(binary, rows, features, trees, parameters):
     with tempfile.TemporaryDirectory() as directory:
         predictions_path = Path(directory) / "predictions.csv"
-        output = subprocess.run(
-            [
+        command = [
                 str(binary),
                 "--rows",
                 str(rows),
@@ -66,7 +76,23 @@ def measure_rust(binary, rows, features, trees):
                 str(trees),
                 "--predictions",
                 str(predictions_path),
-            ],
+            ]
+        if parameters.get("criterion"):
+            command += ["--criterion", parameters["criterion"]]
+        if parameters.get("max_features") is None and "max_features" in parameters:
+            command += ["--max-features", str(features)]
+        if parameters.get("max_depth"):
+            command += ["--max-depth", str(parameters["max_depth"])]
+        if parameters.get("min_samples_leaf"):
+            command += ["--min-samples-leaf", str(parameters["min_samples_leaf"])]
+        if parameters.get("bootstrap") is False:
+            command += ["--no-bootstrap"]
+        if parameters.get("max_samples"):
+            command += ["--max-samples", str(round(parameters["max_samples"] * rows))]
+        if parameters.get("class_weight") == "balanced":
+            command += ["--balanced-class-weight"]
+        output = subprocess.run(
+            command,
             check=True,
             capture_output=True,
             text=True,
@@ -85,25 +111,23 @@ def measure_rust(binary, rows, features, trees):
     }
 
 
-def benchmark(rows, features, trees, binary):
+def benchmark(rows, features, trees, binary, profile, parameters):
     from bankai_random_forest import BankaiRandomForestClassifier
 
     x, y = generate_dataset(rows, features)
     sklearn_result = measure_python(
         "sklearn",
-        RandomForestClassifier(
-            n_estimators=trees, max_features="sqrt", n_jobs=1, random_state=42
-        ),
+        RandomForestClassifier(n_estimators=trees, max_features="sqrt", n_jobs=1, random_state=42, **parameters),
         x,
         y,
     )
     bankai_result = measure_python(
         "pyO3",
-        BankaiRandomForestClassifier(n_estimators=trees, n_jobs=1, random_state=42),
+        BankaiRandomForestClassifier(n_estimators=trees, n_jobs=1, random_state=42, **parameters),
         x,
         y,
     )
-    results = [sklearn_result, bankai_result, measure_rust(binary, rows, features, trees)]
+    results = [sklearn_result, bankai_result, measure_rust(binary, rows, features, trees, parameters)]
     rows_out = []
     for result in results:
         probability_rmse = float(
@@ -115,6 +139,7 @@ def benchmark(rows, features, trees, binary):
                 "rows": rows,
                 "features": features,
                 "trees": trees,
+                "profile": profile,
                 "implementation": result["implementation"],
                 "train_seconds": result["train_seconds"],
                 "predict_seconds": result["predict_seconds"],
@@ -145,11 +170,11 @@ def write_reports(rows, directory):
         writer.writeheader()
         writer.writerows(rows)
     with (directory / "benchmark.md").open("w") as handle:
-        handle.write("| rows | implementation | train s | predict s | F1 | probability RMSE | agreement |\n")
-        handle.write("| ---: | --- | ---: | ---: | ---: | ---: | ---: |\n")
+        handle.write("| rows | profile | implementation | train s | predict s | F1 | probability RMSE | agreement |\n")
+        handle.write("| ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |\n")
         for row in rows:
             handle.write(
-                "| {rows} | {implementation} | {train_seconds:.6f} | {predict_seconds:.6f} | "
+                "| {rows} | {profile} | {implementation} | {train_seconds:.6f} | {predict_seconds:.6f} | "
                 "{f1:.6f} | {probability_rmse_vs_sklearn:.6f} | {agreement_vs_sklearn:.6f} |\n".format(
                     **row
                 )
@@ -184,6 +209,7 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=Path("benchmarks/results"))
     parser.add_argument("--rust-binary", type=Path, default=Path("target/release/bankai-xrf-cli"))
     parser.add_argument("--skip-build", action="store_true")
+    parser.add_argument("--profiles", nargs="+", choices=sorted(PROFILES), default=sorted(PROFILES))
     arguments = parser.parse_args()
     root = Path(__file__).parents[1]
     if not arguments.skip_build:
@@ -193,7 +219,8 @@ def main():
     rows = [
         row
         for row_count in arguments.rows
-        for row in benchmark(row_count, arguments.features, arguments.trees, arguments.rust_binary)
+        for profile in arguments.profiles
+        for row in benchmark(row_count, arguments.features, arguments.trees, arguments.rust_binary, profile, PROFILES[profile])
     ]
     write_reports(rows, arguments.output_dir)
 

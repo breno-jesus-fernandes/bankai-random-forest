@@ -12,6 +12,13 @@ struct Arguments {
     trees: usize,
     markdown: bool,
     predictions: Option<PathBuf>,
+    criterion: Criterion,
+    max_features: Option<usize>,
+    max_depth: usize,
+    min_samples_leaf: usize,
+    bootstrap: bool,
+    max_samples: Option<usize>,
+    balanced_class_weight: bool,
 }
 
 fn main() -> ExitCode {
@@ -27,7 +34,10 @@ fn main() -> ExitCode {
 fn run() -> Result<(), String> {
     let arguments = parse_arguments(env::args().skip(1))?;
     let (values, labels) = generate_dataset(arguments.rows, arguments.features);
-    let weights = vec![1.0; arguments.rows];
+    let weights = if arguments.balanced_class_weight {
+        let counts = [labels.iter().filter(|&&label| label == 0).count(), labels.iter().filter(|&&label| label == 1).count()];
+        labels.iter().map(|&label| arguments.rows as f64 / (2 * counts[label]) as f64).collect()
+    } else { vec![1.0; arguments.rows] };
     let training = DenseInput::training(
         values.clone(),
         arguments.rows,
@@ -36,9 +46,9 @@ fn run() -> Result<(), String> {
         weights,
         2,
         0.0,
-        Criterion::Gini,
+        arguments.criterion,
         2,
-        1,
+        arguments.min_samples_leaf,
         0.0,
     )?;
 
@@ -46,15 +56,15 @@ fn run() -> Result<(), String> {
     let forest = Forest::new_with_settings(
         &training,
         arguments.trees,
-        (arguments.features as f64).sqrt().max(1.0) as usize,
+        arguments.max_features.unwrap_or_else(|| (arguments.features as f64).sqrt().max(1.0) as usize),
         true,
         false,
         false,
         42,
-        512,
+        arguments.max_depth,
         usize::MAX,
-        true,
-        None,
+        arguments.bootstrap,
+        arguments.max_samples,
     );
     let train_seconds = train_started.elapsed().as_secs_f64();
 
@@ -108,6 +118,13 @@ fn parse_arguments(arguments: impl Iterator<Item = String>) -> Result<Arguments,
         trees: 100,
         markdown: false,
         predictions: None,
+        criterion: Criterion::Gini,
+        max_features: None,
+        max_depth: 512,
+        min_samples_leaf: 1,
+        bootstrap: true,
+        max_samples: None,
+        balanced_class_weight: false,
     };
     let mut arguments = arguments;
     while let Some(argument) = arguments.next() {
@@ -115,6 +132,13 @@ fn parse_arguments(arguments: impl Iterator<Item = String>) -> Result<Arguments,
             "--rows" => parsed.rows = parse_positive(arguments.next(), "--rows")?,
             "--features" => parsed.features = parse_positive(arguments.next(), "--features")?,
             "--trees" => parsed.trees = parse_positive(arguments.next(), "--trees")?,
+            "--criterion" => parsed.criterion = match arguments.next().as_deref() { Some("gini") => Criterion::Gini, Some("entropy") | Some("log_loss") => Criterion::Entropy, _ => return Err("--criterion must be gini, entropy, or log_loss".to_string()) },
+            "--max-features" => parsed.max_features = Some(parse_positive(arguments.next(), "--max-features")?),
+            "--max-depth" => parsed.max_depth = parse_positive(arguments.next(), "--max-depth")?,
+            "--min-samples-leaf" => parsed.min_samples_leaf = parse_positive(arguments.next(), "--min-samples-leaf")?,
+            "--no-bootstrap" => parsed.bootstrap = false,
+            "--max-samples" => parsed.max_samples = Some(parse_positive(arguments.next(), "--max-samples")?),
+            "--balanced-class-weight" => parsed.balanced_class_weight = true,
             "--markdown" => parsed.markdown = true,
             "--predictions" => {
                 parsed.predictions = Some(PathBuf::from(
