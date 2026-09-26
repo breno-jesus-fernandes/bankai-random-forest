@@ -114,7 +114,7 @@ interface.
 ### v0.5.0: Benchmark and Distribution
 
 - [x] Implement the pure Rust `bankai-xrf-cli` benchmark runner.
-- [ ] Benchmark sklearn, CLI, and PyO3 wrapper at 10k and 100k rows.
+- [x] Benchmark sklearn, CLI, and PyO3 wrapper at 10k and 100k rows.
 - [x] Export raw CSV and Markdown reports with timings, peak RSS, FFI overhead,
       F1, probability RMSE, agreement, and environment metadata.
 - [ ] Build signed release artifacts with Maturin.
@@ -158,3 +158,4 @@ loads the PyO3 wrapper.
 | 2026-09-25 | v0.5.0 | Benchmark scope adjusted | Capped datasets at 100k rows and locked optimized native Rust benchmark builds. |
 | 2026-09-25 | v0.5.0 | Rust CLI runner complete | Added deterministic synthetic data, CSV/Markdown output, timings, and F1. |
 | 2026-09-25 | v0.5.0 | Comparative runner complete | Added sklearn/PyO3/Rust comparison with CSV and Markdown report export. |
+| 2026-09-25 | v0.5.0 | Benchmark matrix complete | Ran optimized 10k and 100k comparisons for sklearn, PyO3, and Rust CLI. |
