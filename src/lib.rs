@@ -30,7 +30,7 @@ impl NativeForest {
         self.forest.is_some()
     }
 
-    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, min_samples_split=2, min_samples_leaf=1, bootstrap=true, max_samples=None, oob=false, n_jobs=1))]
+    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, n_jobs=1))]
     fn fit(
         &mut self,
         x: PyReadonlyArray2<'_, f64>,
@@ -44,6 +44,7 @@ impl NativeForest {
         max_depth: usize,
         min_samples_split: usize,
         min_samples_leaf: usize,
+        min_impurity_decrease: f64,
         bootstrap: bool,
         max_samples: Option<usize>,
         oob: bool,
@@ -95,6 +96,7 @@ impl NativeForest {
             criterion,
             min_samples_split,
             min_samples_leaf,
+            min_impurity_decrease,
         )
             .map_err(PyValueError::new_err)?;
 

@@ -96,6 +96,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         )
         self._fit_max_samples = self._resolve_max_samples(X.shape[0])
         self._fit_n_jobs = self._resolve_n_jobs()
+        self._fit_min_impurity_decrease = self._resolve_min_impurity_decrease()
 
         forest = _core.NativeForest()
         forest.fit(
@@ -110,6 +111,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             max_depth=self._fit_max_depth,
             min_samples_split=self._fit_min_samples_split,
             min_samples_leaf=self._fit_min_samples_leaf,
+            min_impurity_decrease=self._fit_min_impurity_decrease,
             bootstrap=self.bootstrap,
             max_samples=self._fit_max_samples,
             oob=self.oob_score is True,
@@ -176,6 +178,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             max_depth=self._fit_max_depth,
             min_samples_split=self._fit_min_samples_split,
             min_samples_leaf=self._fit_min_samples_leaf,
+            min_impurity_decrease=self._fit_min_impurity_decrease,
             bootstrap=self.bootstrap,
             max_samples=self._fit_max_samples,
             oob=self.oob_score is True,
@@ -193,7 +196,6 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
     def _reject_unsupported_baseline_parameters(self, sample_weight):
         unsupported = (
             ("max_leaf_nodes", self.max_leaf_nodes is not None),
-            ("min_impurity_decrease", self.min_impurity_decrease != 0.0),
             ("verbose", self.verbose != 0),
             ("ccp_alpha", self.ccp_alpha != 0.0),
             ("monotonic_cst", self.monotonic_cst is not None),
@@ -263,6 +265,13 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             raise ValueError("n_jobs == 0 has no meaning")
         cpu_count = __import__("os").cpu_count() or 1
         return max(1, self.n_jobs if self.n_jobs > 0 else cpu_count + 1 + self.n_jobs)
+
+    def _resolve_min_impurity_decrease(self):
+        if isinstance(self.min_impurity_decrease, (float, int, np.floating, np.integer)) and (
+            self.min_impurity_decrease >= 0.0
+        ):
+            return float(self.min_impurity_decrease)
+        raise ValueError("min_impurity_decrease must be a non-negative number")
 
     def _combine_class_weight(self, y, sample_weight):
         if self.class_weight is None:

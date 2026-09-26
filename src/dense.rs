@@ -14,6 +14,7 @@ pub struct DenseInput {
     criterion: Criterion,
     min_samples_split: usize,
     min_samples_leaf: usize,
+    min_impurity_decrease: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -34,6 +35,7 @@ impl DenseInput {
         criterion: Criterion,
         min_samples_split: usize,
         min_samples_leaf: usize,
+        min_impurity_decrease: f64,
     ) -> Result<Self, String> {
         validate_matrix(&values, rows, columns)?;
         if labels.len() != rows {
@@ -60,6 +62,9 @@ impl DenseInput {
         if min_samples_split < 2 || min_samples_leaf == 0 {
             return Err("invalid minimum sample control".to_string());
         }
+        if !min_impurity_decrease.is_finite() || min_impurity_decrease < 0.0 {
+            return Err("min_impurity_decrease must be finite and non-negative".to_string());
+        }
         if labels.iter().any(|&label| label >= n_classes) {
             return Err("labels must be encoded in 0..n_classes".to_string());
         }
@@ -75,6 +80,7 @@ impl DenseInput {
             criterion,
             min_samples_split,
             min_samples_leaf,
+            min_impurity_decrease,
         })
     }
 
@@ -100,6 +106,7 @@ impl DenseInput {
             criterion: Criterion::Gini,
             min_samples_split: 2,
             min_samples_leaf: 1,
+            min_impurity_decrease: 0.0,
         })
     }
 
@@ -318,6 +325,9 @@ fn best_split(
             + (right_weight / total_weight)
                 * impurity(input.criterion, &right, right_weight);
         let gain = parent_impurity - child_impurity;
+        if gain < input.min_impurity_decrease {
+            continue;
+        }
         let midpoint = value * 0.5 + next * 0.5;
         let pivot = if midpoint >= next { value } else { midpoint };
 

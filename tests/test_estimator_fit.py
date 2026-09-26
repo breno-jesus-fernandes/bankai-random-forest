@@ -55,7 +55,6 @@ def test_fit_sets_normalized_feature_importances(separable_data):
     ("parameters", "name"),
     [
         ({"max_leaf_nodes": 2}, "max_leaf_nodes"),
-        ({"min_impurity_decrease": 0.1}, "min_impurity_decrease"),
         ({"verbose": 1}, "verbose"),
         ({"ccp_alpha": 0.1}, "ccp_alpha"),
         ({"monotonic_cst": [1]}, "monotonic_cst"),
@@ -201,6 +200,16 @@ def test_warm_start_matches_a_single_fit_with_the_final_tree_count(separable_dat
 
     np.testing.assert_array_equal(warmed.predict(x), direct.predict(x))
     np.testing.assert_allclose(warmed.predict_proba(x), direct.predict_proba(x))
+
+
+def test_fit_supports_minimum_impurity_decrease(separable_data):
+    x, y = separable_data
+
+    classifier = BankaiRandomForestClassifier(
+        n_estimators=25, min_impurity_decrease=0.1, random_state=42
+    ).fit(x, y)
+
+    np.testing.assert_array_equal(classifier.predict(x), y)
 
 
 def test_integer_sample_weight_matches_repeated_training_rows():
