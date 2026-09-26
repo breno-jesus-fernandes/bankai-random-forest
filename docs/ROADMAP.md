@@ -139,8 +139,8 @@ loads the PyO3 wrapper.
 - [x] Select histogram split candidates while preserving tree constraints and
       native permutation feature importance.
 - [x] Run full sklearn contract and regression suites with the default backend.
-- [x] Benchmark predict plus `feature_importances_` access for permutation
-      importance across exact and histogram modes, with optimized Rust builds.
+- [x] Benchmark `fit` plus `feature_importances_` for permutation importance
+      across exact and histogram modes, with optimized Rust builds.
 - [x] Review model quality and runtime tradeoffs across histogram resolutions.
 
 ## Progress Log
@@ -172,4 +172,4 @@ loads the PyO3 wrapper.
 | 2026-09-26 | v0.3.0 | Importance type selection complete | Added `importance_type="gain"` (criterion-weighted gain), `"split"` (split frequency), and `"permutation"` (native XRF OOB accuracy decrease) through `feature_importances_`. |
 | 2026-09-26 | v0.5.0 | Feature importance benchmark complete | Compared gain, split frequency, and permutation for sklearn, PyO3, and Rust CLI on 10k training rows; permutation used a separate 10k validation set and five sklearn repeats. Reports are in `benchmarks/results-feature-importance-10k/`. |
 | 2026-09-26 | v0.6.0 | Histogram mode implemented | Added opt-in `max_bins` preprocessing and histogram split search; exact sorting remains the default when `max_bins=None`. |
-| 2026-09-26 | v0.6.0 | Histogram benchmark complete | Optimized 10k-row/20-feature/100-tree matrix: `max_bins=16` fit in 0.619 s vs exact 1.506 s (2.43x), while predict plus importance attribute access was 0.0537 s vs 0.0499 s. Higher resolutions (128/255) did not beat exact. F1 and importance rank tradeoffs are in `benchmarks/results-histogram-10k/`; the benchmark measures Bankai OOB permutation work inside fit and sklearn's external permutation pass separately. |
+| 2026-09-26 | v0.6.0 | Histogram benchmark complete | Optimized 10k-row/20-feature/100-tree matrix measures fit plus permutation importance (no prediction): `max_bins=16` took 0.627 s vs exact 1.488 s (2.38x faster). Higher resolutions (128/255) did not beat exact. Importance rank correlations and complete timings are in `benchmarks/results-histogram-10k/`; Bankai OOB permutation is included in fit, while sklearn's external permutation pass is timed separately and added to fit. |

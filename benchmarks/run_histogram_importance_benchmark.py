@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure prediction and permutation-importance costs across histogram modes."""
+"""Measure fit plus permutation-importance costs across histogram modes."""
 
 import argparse
 import csv
@@ -11,7 +11,6 @@ from pathlib import Path
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.inspection import permutation_importance
-from sklearn.metrics import f1_score
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from benchmarks.run_benchmark import generate_dataset, prepare_optimized_binaries
@@ -36,7 +35,7 @@ def benchmark(rows, features, trees, bins, repeats, x, y, validation_x, validati
 
     records = []
     for label, max_bins in [("exact", None), *((f"histogram_{n}", n) for n in bins)]:
-        fit_samples, predict_samples, access_samples, scores, importance_values = [], [], [], [], []
+        fit_samples, access_samples, importance_values = [], [], []
         for seed in range(repeats):
             model = BankaiRandomForestClassifier(
                 n_estimators=trees,
@@ -46,12 +45,9 @@ def benchmark(rows, features, trees, bins, repeats, x, y, validation_x, validati
                 n_jobs=1,
             )
             fit_time, _ = elapsed(lambda: model.fit(x, y))
-            predict_time, predictions = elapsed(lambda: model.predict(validation_x))
             access_time, importances = elapsed(lambda: model.feature_importances_)
             fit_samples.append(fit_time)
-            predict_samples.append(predict_time)
             access_samples.append(access_time)
-            scores.append(f1_score(validation_y, predictions))
             importance_values.append(np.asarray(importances, dtype=np.float64))
 
         records.append({
@@ -64,14 +60,9 @@ def benchmark(rows, features, trees, bins, repeats, x, y, validation_x, validati
             "trees": trees,
             "repeats": repeats,
             "fit_seconds": statistics.median(fit_samples),
-            "predict_seconds": statistics.median(predict_samples),
             "feature_importance_seconds": statistics.median(access_samples),
-            "predict_plus_importance_seconds": statistics.median(predict_samples)
+            "fit_plus_importance_seconds": statistics.median(fit_samples)
             + statistics.median(access_samples),
-            "end_to_end_seconds": statistics.median(fit_samples)
-            + statistics.median(predict_samples)
-            + statistics.median(access_samples),
-            "validation_f1": statistics.median(scores),
             "importance_rank_correlation_vs_exact": "pending",
         })
         records[-1]["_importance"] = np.median(np.stack(importance_values), axis=0)
@@ -86,7 +77,6 @@ def benchmark(rows, features, trees, bins, repeats, x, y, validation_x, validati
         n_estimators=trees, max_features="sqrt", n_jobs=1, random_state=42
     )
     fit_time, _ = elapsed(lambda: sklearn.fit(x, y))
-    predict_time, predictions = elapsed(lambda: sklearn.predict(validation_x))
     importance_time, result = elapsed(lambda: permutation_importance(
         sklearn, validation_x, validation_y, scoring="f1", n_repeats=1,
         n_jobs=1, random_state=42,
@@ -101,11 +91,8 @@ def benchmark(rows, features, trees, bins, repeats, x, y, validation_x, validati
         "trees": trees,
         "repeats": repeats,
         "fit_seconds": fit_time,
-        "predict_seconds": predict_time,
         "feature_importance_seconds": importance_time,
-        "predict_plus_importance_seconds": predict_time + importance_time,
-        "end_to_end_seconds": fit_time + predict_time + importance_time,
-        "validation_f1": f1_score(validation_y, predictions),
+        "fit_plus_importance_seconds": fit_time + importance_time,
         "importance_rank_correlation_vs_exact": rank_correlation(
             exact_importance, result.importances_mean
         ),
@@ -138,15 +125,15 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
     columns = list(rows[0])
     with (args.output_dir / "histogram_importance.csv").open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer = csv.DictWriter(handle, fieldnames=columns, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     with (args.output_dir / "histogram_importance.md").open("w") as handle:
         handle.write("# Histogram and permutation importance benchmark\n\n")
-        handle.write("Times are median Bankai results across seeds; sklearn uses one fit and one external permutation pass. Bankai computes native OOB permutation importance during fit, so `feature_importance_seconds` measures the public attribute access separately and `fit_seconds` includes its computation.\n\n")
-        handle.write("| mode | bins | fit s (includes Bankai OOB permutation) | predict s | importance access/calculation s | predict + importance s | end to end s | F1 | rank corr vs exact |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n")
+        handle.write("Times are median Bankai results across seeds; sklearn uses one fit and one external permutation pass. Bankai computes native OOB permutation importance during fit, so its fit time already includes the importance calculation; `feature_importance_seconds` measures only public attribute access. The comparable workload is `fit_plus_importance_seconds`.\n\n")
+        handle.write("| mode | bins | fit s (includes Bankai OOB permutation) | importance access/calculation s | fit + importance s | rank corr vs exact |\n| --- | ---: | ---: | ---: | ---: | ---: |\n")
         for row in rows:
-            handle.write("| {mode} | {max_bins} | {fit_seconds:.6f} | {predict_seconds:.6f} | {feature_importance_seconds:.6f} | {predict_plus_importance_seconds:.6f} | {end_to_end_seconds:.6f} | {validation_f1:.6f} | {importance_rank_correlation_vs_exact:.6f} |\n".format(**row))
+            handle.write("| {mode} | {max_bins} | {fit_seconds:.6f} | {feature_importance_seconds:.6f} | {fit_plus_importance_seconds:.6f} | {importance_rank_correlation_vs_exact:.6f} |\n".format(**row))
     print(f"Wrote {args.output_dir / 'histogram_importance.csv'} and Markdown report")
 
 
