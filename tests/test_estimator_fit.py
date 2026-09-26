@@ -292,6 +292,42 @@ def test_dataframe_column_names_are_preserved(separable_data):
     np.testing.assert_array_equal(classifier.feature_names_in_, ["temperature"])
 
 
+def test_rejects_nan_features(separable_data):
+    x, y = separable_data
+    x[0, 0] = np.nan
+
+    with pytest.raises(ValueError, match="NaN"):
+        BankaiRandomForestClassifier().fit(x, y)
+
+
+def test_accepts_float32_features(separable_data):
+    x, y = separable_data
+
+    classifier = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(
+        x.astype(np.float32), y
+    )
+
+    np.testing.assert_array_equal(classifier.predict(x.astype(np.float32)), y)
+
+
+def test_predict_rejects_mismatched_feature_count(separable_data):
+    x, y = separable_data
+    classifier = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(x, y)
+
+    with pytest.raises(ValueError, match="features"):
+        classifier.predict(np.column_stack([x, x]))
+
+
+def test_predict_rejects_changed_dataframe_feature_names(separable_data):
+    x, y = separable_data
+    classifier = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(
+        pd.DataFrame(x, columns=["temperature"]), y
+    )
+
+    with pytest.raises(ValueError, match="Feature names"):
+        classifier.predict(pd.DataFrame(x, columns=["humidity"]))
+
+
 def test_pickle_round_trip_preserves_predictions(separable_data):
     x, y = separable_data
     classifier = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(x, y)

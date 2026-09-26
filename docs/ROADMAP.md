@@ -105,9 +105,9 @@ interface.
 ### v0.4.0: Robustness and Data Boundaries
 
 - [ ] DataFrame noise and 99:1 imbalance suites.
-- [ ] Sparse, NaN, multioutput, dimensionality, dtype, and feature-name errors.
+- [x] Sparse, NaN, multioutput, dimensionality, dtype, and feature-name errors.
   - [x] Sparse and multioutput rejection; DataFrame feature-name preservation.
-  - [ ] NaN, dimensionality, dtype, and feature-name error coverage.
+  - [x] NaN, dimensionality, dtype, and feature-name error coverage.
 - [ ] Float32/float64 transfer tests with copy telemetry.
 - [ ] Deterministic trees, predictions, serialization, and thread counts.
 
@@ -145,3 +145,4 @@ interface.
 | 2026-09-25 | v0.3.0 | Tree limits complete | Added structural `max_leaf_nodes` enforcement. |
 | 2026-09-25 | v0.4.0 | Data boundaries in progress | Added explicit multioutput rejection and DataFrame feature-name coverage. |
 | 2026-09-25 | v0.3.0 | State controls complete | Added validated verbose construction reporting. |
+| 2026-09-25 | v0.4.0 | Input boundary coverage complete | Added NaN, float32, feature-count, and feature-name mismatch tests. |
