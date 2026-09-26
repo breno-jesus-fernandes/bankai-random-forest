@@ -1,4 +1,4 @@
-name: Build and attest release artifacts
+name: Build and sign release artifacts
 
 on:
   push:
@@ -8,6 +8,8 @@ on:
     paths:
       - ".github/workflows/release.yml"
   workflow_dispatch:
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -59,39 +61,40 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  attest-artifacts:
-    name: Attest release candidates
+  sign-candidates:
+    name: Sign release candidates
     needs: [wheels, source-distribution]
     if: >-
-      startsWith(github.ref, 'refs/tags/') ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
-      attestations: write
-      artifact-metadata: write
     steps:
       - uses: actions/download-artifact@v5
         with:
           pattern: dist-*
           path: dist
           merge-multiple: true
-      - name: Generate signed build provenance
-        uses: actions/attest@v4
+      - name: Create and verify Sigstore signatures
+        uses: sigstore/gh-action-sigstore-python@v3.4.0
         with:
-          subject-path: dist/*
+          inputs: dist/*
+          upload-signing-artifacts: true
+          verify: true
+          verify-cert-identity: https://github.com/${{ github.workflow_ref }}
+          verify-oidc-issuer: https://token.actions.githubusercontent.com
       - uses: actions/upload-artifact@v5
         with:
-          name: signed-release-candidates
+          name: release-candidates
           path: dist/*
           if-no-files-found: error
           retention-days: 30
 
   publish-release:
     name: Publish tagged release assets
-    needs: attest-artifacts
+    needs: [wheels, source-distribution]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -99,10 +102,24 @@ jobs:
     steps:
       - uses: actions/download-artifact@v5
         with:
-          name: signed-release-candidates
+          pattern: dist-*
           path: dist
+          merge-multiple: true
       - name: Create GitHub release with wheels and source archive
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+
+  sign-published-release:
+    name: Sign published release assets
+    if: github.event_name == 'release' && github.event.action == 'published'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Sign release files and attach Sigstore bundles
+        uses: sigstore/gh-action-sigstore-python@v3.4.0
+        with:
+          release-signing-artifacts: true

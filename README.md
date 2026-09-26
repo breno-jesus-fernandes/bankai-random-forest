@@ -116,14 +116,18 @@ uv run cargo test --workspace
 
 Pull requests and pushes to `master` build an optimized `abi3` wheel and run
 the full Python suite against it on Python 3.11, 3.12, and 3.13. A `v*` tag
-builds Linux, macOS, and Windows wheels plus a source archive, creates signed
-GitHub build provenance, and attaches the artifacts to a GitHub Release. The
-release workflow can also be dispatched manually to build and attest candidate
-artifacts without publishing a release. Verify an artifact's provenance with:
+builds Linux, macOS, and Windows wheels plus a source archive, signs the files
+with Sigstore, and attaches both artifacts and signature bundles to a
+GitHub Release. The release workflow can also be dispatched manually to build,
+sign, and verify candidate artifacts without publishing a release; download the
+candidate and signing-artifact workflow artifacts from that run. Install the
+Sigstore CLI and verify a release wheel with:
 
 ```bash
-gh attestation verify bankai_random_forest-0.1.0-cp311-abi3-*.whl \
-  --repo breno-jesus-fernandes/bankai-random-forest
+python -m pip install sigstore
+sigstore verify github bankai_random_forest-0.1.0-cp311-abi3-*.whl \
+  --bundle bankai_random_forest-0.1.0-cp311-abi3-*.whl.sigstore.json \
+  --repository breno-jesus-fernandes/bankai-random-forest
 ```
 
 The project is licensed under GPL-3.0-or-later; see [`COPYING`](COPYING).
