@@ -8,7 +8,7 @@ pub enum Walk<I: RfInput> {
     /// The currently visited vertex is a leaf in a decision tree
     VisitLeaf(I::Vote),
     /// The currently visited vertex is a branch in a decision tree
-    VisitBranch(I::FeatureId, I::Pivot),
+    VisitBranch(I::FeatureId, I::Pivot, f64),
 }
 
 pub struct WalkIter<'a, I>
@@ -44,10 +44,10 @@ where
                 self.on = self.stack.pop();
                 Some(Walk::VisitLeaf(*v))
             }
-            Tree::Branch(fid, pivot, left, right) => {
+            Tree::Branch(fid, pivot, score, left, right) => {
                 self.stack.push(right);
                 self.on = Some(left);
-                Some(Walk::VisitBranch(*fid, (*pivot).clone()))
+                Some(Walk::VisitBranch(*fid, (*pivot).clone(), *score))
             }
         }
     }

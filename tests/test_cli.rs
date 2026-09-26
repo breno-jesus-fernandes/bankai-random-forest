@@ -60,3 +60,45 @@ fn cli_exports_native_permutation_importances() {
     assert_eq!(importances.lines().count(), 4);
     fs::remove_file(path).expect("temporary importances should be removable");
 }
+
+#[test]
+fn cli_exports_split_importances() {
+    let path = env::temp_dir().join(format!("bankai-splits-{}.csv", std::process::id()));
+    let output = Command::new(env!("CARGO_BIN_EXE_bankai-xrf-cli"))
+        .args([
+            "--rows",
+            "64",
+            "--features",
+            "3",
+            "--trees",
+            "5",
+            "--split-importances",
+            path.to_str().expect("temporary path should be UTF-8"),
+        ])
+        .output()
+        .expect("benchmark CLI should run");
+
+    assert!(output.status.success());
+    let importances = fs::read_to_string(&path).expect("CLI should write importances");
+    assert!(importances.starts_with("feature,importance"));
+    assert_eq!(importances.lines().count(), 4);
+    fs::remove_file(path).expect("temporary importances should be removable");
+}
+
+#[test]
+fn cli_exports_gain_importances() {
+    let path = env::temp_dir().join(format!("bankai-gains-{}.csv", std::process::id()));
+    let output = Command::new(env!("CARGO_BIN_EXE_bankai-xrf-cli"))
+        .args([
+            "--rows", "64", "--features", "3", "--trees", "5",
+            "--gain-importances", path.to_str().expect("temporary path should be UTF-8"),
+        ])
+        .output()
+        .expect("benchmark CLI should run");
+
+    assert!(output.status.success());
+    let importances = fs::read_to_string(&path).expect("CLI should write importances");
+    assert!(importances.starts_with("feature,importance"));
+    assert_eq!(importances.lines().count(), 4);
+    fs::remove_file(path).expect("temporary importances should be removable");
+}

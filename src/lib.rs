@@ -190,7 +190,7 @@ impl NativeForest {
             .ok_or_else(|| PyRuntimeError::new_err("forest is not fitted"))?;
         let mut importances = vec![0.0; self.n_features];
         for walk in forest.walk() {
-            if let Walk::VisitBranch(feature, _) = walk {
+            if let Walk::VisitBranch(feature, _, _) = walk {
                 importances[feature] += 1.0;
             }
         }
@@ -199,6 +199,18 @@ impl NativeForest {
             for importance in &mut importances {
                 *importance /= total;
             }
+        }
+        Ok(importances)
+    }
+
+    fn gain_importances(&self) -> PyResult<Vec<f64>> {
+        let forest = self
+            .forest
+            .as_ref()
+            .ok_or_else(|| PyRuntimeError::new_err("forest is not fitted"))?;
+        let mut importances = vec![0.0; self.n_features];
+        for (feature, importance) in forest.gain_importance_normalised() {
+            importances[feature] = importance;
         }
         Ok(importances)
     }

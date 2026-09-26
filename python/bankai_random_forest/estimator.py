@@ -32,7 +32,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         ccp_alpha=0.0,
         max_samples=None,
         monotonic_cst=None,
-        importance_type="split",
+        importance_type="gain",
     ):
         self.n_estimators = n_estimators
         self.criterion = criterion
@@ -308,8 +308,8 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         raise ValueError("verbose must be a non-negative integer")
 
     def _resolve_importance_type(self):
-        if self.importance_type not in ("split", "permutation"):
-            raise ValueError("importance_type must be 'split' or 'permutation'")
+        if self.importance_type not in ("gain", "split", "permutation"):
+            raise ValueError("importance_type must be 'gain', 'split', or 'permutation'")
         if self.importance_type == "permutation" and self.bootstrap is not True:
             raise ValueError("importance_type='permutation' requires bootstrap=True")
         return self.importance_type
@@ -318,6 +318,8 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         method = (
             forest.permutation_importances
             if self._fit_importance_type == "permutation"
+            else forest.gain_importances
+            if self._fit_importance_type == "gain"
             else forest.feature_importances
         )
         return np.asarray(method(), dtype=np.float64)

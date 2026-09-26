@@ -58,7 +58,7 @@ impl<I: RfInput> Tree<I> {
     {
         match self {
             Self::Leaf(vote) => collector(upstream_permuted, on, vote),
-            Self::Branch(feature_id, pivot, left, right) => {
+            Self::Branch(feature_id, pivot, _, left, right) => {
                 let mut left_mask = mask_cache.provide();
                 let mut right_mask = mask_cache.provide();
                 let mut left_perm = mask_cache.provide();

@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use bankai_random_forest::dense::{Criterion, DenseInput};
-use xrf::Forest;
+use xrf::{Forest, Walk};
 
 struct Arguments {
     rows: usize,
@@ -21,6 +21,8 @@ struct Arguments {
     balanced_class_weight: bool,
     permutation_importance: bool,
     importances: Option<PathBuf>,
+    split_importances: Option<PathBuf>,
+    gain_importances: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -96,6 +98,44 @@ fn run() -> Result<(), String> {
         std::fs::write(path, contents).map_err(|error| error.to_string())?;
     }
 
+    if let Some(path) = arguments.split_importances {
+        let started = Instant::now();
+        let mut importances = vec![0.0; arguments.features];
+        for walk in forest.walk() {
+            if let Walk::VisitBranch(feature, _, _) = walk {
+                importances[feature] += 1.0;
+            }
+        }
+        let total = importances.iter().sum::<f64>();
+        if total > 0.0 {
+            for importance in &mut importances {
+                *importance /= total;
+            }
+        }
+        let importance_seconds = started.elapsed().as_secs_f64();
+        let mut contents = String::from("feature,importance\n");
+        for (feature, importance) in importances.into_iter().enumerate() {
+            contents.push_str(&format!("{feature},{importance:.12}\n"));
+        }
+        std::fs::write(path, contents).map_err(|error| error.to_string())?;
+        eprintln!("split_importance_seconds={importance_seconds:.9}");
+    }
+
+    if let Some(path) = arguments.gain_importances {
+        let started = Instant::now();
+        let mut importances = vec![0.0; arguments.features];
+        for (feature, importance) in forest.gain_importance_normalised() {
+            importances[feature] = importance;
+        }
+        let importance_seconds = started.elapsed().as_secs_f64();
+        let mut contents = String::from("feature,importance\n");
+        for (feature, importance) in importances.into_iter().enumerate() {
+            contents.push_str(&format!("{feature},{importance:.12}\n"));
+        }
+        std::fs::write(path, contents).map_err(|error| error.to_string())?;
+        eprintln!("gain_importance_seconds={importance_seconds:.9}");
+    }
+
     if let Some(path) = arguments.predictions {
         let mut contents = String::from("actual,predicted,probability_0,probability_1\n");
         for ((actual, predicted), probabilities) in labels.iter().zip(&predicted).zip(&probabilities)
@@ -141,6 +181,8 @@ fn parse_arguments(arguments: impl Iterator<Item = String>) -> Result<Arguments,
         balanced_class_weight: false,
         permutation_importance: false,
         importances: None,
+        split_importances: None,
+        gain_importances: None,
     };
     let mut arguments = arguments;
     while let Some(argument) = arguments.next() {
@@ -163,6 +205,20 @@ fn parse_arguments(arguments: impl Iterator<Item = String>) -> Result<Arguments,
                         .ok_or_else(|| "--importances requires a path".to_string())?,
                 ))
             }
+            "--split-importances" => {
+                parsed.split_importances = Some(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "--split-importances requires a path".to_string())?,
+                ))
+            }
+            "--gain-importances" => {
+                parsed.gain_importances = Some(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "--gain-importances requires a path".to_string())?,
+                ))
+            }
             "--markdown" => parsed.markdown = true,
             "--predictions" => {
                 parsed.predictions = Some(PathBuf::from(
@@ -182,6 +238,21 @@ fn parse_arguments(arguments: impl Iterator<Item = String>) -> Result<Arguments,
     }
     if parsed.importances.is_some() && !parsed.permutation_importance {
         return Err("--importances requires --permutation-importance".to_string());
+    }
+    if parsed.importances.is_some() && parsed.split_importances.is_some() {
+        return Err("choose either permutation or split importances".to_string());
+    }
+    if [
+        parsed.importances.is_some(),
+        parsed.split_importances.is_some(),
+        parsed.gain_importances.is_some(),
+    ]
+    .into_iter()
+    .filter(|selected| *selected)
+    .count()
+        > 1
+    {
+        return Err("choose only one feature-importance output".to_string());
     }
     if parsed.permutation_importance && !parsed.bootstrap {
         return Err("--permutation-importance requires bootstrap sampling".to_string());

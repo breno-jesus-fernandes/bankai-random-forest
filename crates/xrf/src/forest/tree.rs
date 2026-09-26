@@ -4,7 +4,7 @@ use crate::{FairBest, FeatureSampler, Mask, MaskCache, RfRng, XrfError};
 
 pub enum Tree<I: RfInput> {
     Leaf(I::Vote),
-    Branch(I::FeatureId, I::Pivot, Box<Tree<I>>, Box<Tree<I>>),
+    Branch(I::FeatureId, I::Pivot, f64, Box<Tree<I>>, Box<Tree<I>>),
 }
 
 use crate::walk::{Walk, WalkIter};
@@ -65,7 +65,7 @@ impl<I: RfInput> Tree<I> {
                 .consume()
                 .map(|best| {
                     *leaf_count += 1;
-                    let (_best_score, (feature, pivot)) = best;
+                    let (best_score, (feature, pivot)) = best;
                     let mut left = mask_cache.provide();
                     let mut right = mask_cache.provide();
                     mask.split_into(
@@ -76,6 +76,7 @@ impl<I: RfInput> Tree<I> {
                     let branch = Self::Branch(
                         feature,
                         pivot,
+                        best_score,
                         Box::new(Self::new_rec(
                             input,
                             &left,
@@ -111,10 +112,10 @@ impl<I: RfInput> Tree<I> {
         let b = iter.next();
         match b {
             Some(Walk::VisitLeaf(v)) => Ok(Tree::Leaf(v)),
-            Some(Walk::VisitBranch(fid, piv)) => {
+            Some(Walk::VisitBranch(fid, piv, score)) => {
                 let left = Self::from_walk(iter)?;
                 let right = Self::from_walk(iter)?;
-                Ok(Tree::Branch(fid, piv, Box::new(left), Box::new(right)))
+                Ok(Tree::Branch(fid, piv, score, Box::new(left), Box::new(right)))
             }
             None => Err(XrfError::WalkAggregationFailure),
         }
@@ -128,7 +129,7 @@ impl<I: RfInput> Tree<I> {
     ) {
         match self {
             Self::Leaf(vote) => on.iter().for_each(|e| onto[*e].ingest_vote(*vote)),
-            Self::Branch(feature_id, pivot, left, right) => {
+            Self::Branch(feature_id, pivot, _, left, right) => {
                 let mut left_on = mask_cache.provide();
                 let mut right_on = mask_cache.provide();
                 on.split_into(
@@ -183,17 +184,19 @@ mod tests {
 
         use crate::mockups::simple_cls::DataFrame;
         let ref_walk = vec![
-            Walk::<DataFrame>::VisitBranch(0, 3.5),
-            Walk::<DataFrame>::VisitBranch(0, 5.5),
+            Walk::<DataFrame>::VisitBranch(0, 3.5, 0.0),
+            Walk::<DataFrame>::VisitBranch(0, 5.5, 0.0),
             Walk::<DataFrame>::VisitLeaf(3),
             Walk::<DataFrame>::VisitLeaf(2),
-            Walk::<DataFrame>::VisitBranch(0, 1.5),
+            Walk::<DataFrame>::VisitBranch(0, 1.5, 0.0),
             Walk::<DataFrame>::VisitLeaf(1),
             Walk::<DataFrame>::VisitLeaf(0),
         ];
         let ok = tw.iter().zip(ref_walk.iter()).all(|x| match x {
             (Walk::VisitLeaf(x), Walk::VisitLeaf(y)) => x == y,
-            (Walk::VisitBranch(xf, xp), Walk::VisitBranch(yf, yp)) => (xf == yf) && (xp == yp),
+            (Walk::VisitBranch(xf, xp, _), Walk::VisitBranch(yf, yp, _)) => {
+                (xf == yf) && (xp == yp)
+            }
             _ => false,
         });
         assert!(ok);

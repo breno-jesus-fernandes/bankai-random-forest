@@ -165,5 +165,5 @@ loads the PyO3 wrapper.
 | 2026-09-25 | v0.5.0 | Comparative runner complete | Added sklearn/PyO3/Rust comparison with CSV and Markdown report export. |
 | 2026-09-25 | v0.5.0 | Benchmark matrix complete | Ran optimized 10k and 100k comparisons for sklearn, PyO3, and Rust CLI. |
 | 2026-09-25 | v0.5.0 | Hyperparameter matrix complete | Ran the optimized 10k-row matrix across criterion, feature count, depth, leaf size, bootstrap sampling, and balanced weights; reports live in `benchmarks/results-hyperparameters-10k/`. |
-| 2026-09-26 | v0.3.0 | Importance type selection complete | Added `importance_type="split"` and `importance_type="permutation"`; the latter exposes native XRF OOB mean-decrease-in-accuracy values through `feature_importances_`. |
-| 2026-09-26 | v0.5.0 | Permutation benchmark runner complete | Added separate reports for sklearn inspection permutation importance and native XRF OOB importance in PyO3 and the Rust CLI. |
+| 2026-09-26 | v0.3.0 | Importance type selection complete | Added `importance_type="gain"` (criterion-weighted gain), `"split"` (split frequency), and `"permutation"` (native XRF OOB accuracy decrease) through `feature_importances_`. |
+| 2026-09-26 | v0.5.0 | Feature importance benchmark complete | Compared gain, split frequency, and permutation for sklearn, PyO3, and Rust CLI on 10k training rows; permutation used a separate 10k validation set and five sklearn repeats. Reports are in `benchmarks/results-feature-importance-10k/`. |

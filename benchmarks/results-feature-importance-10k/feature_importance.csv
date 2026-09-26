@@ -1,0 +1,10 @@
+rows,validation_rows,features,trees,profile,importance_type,implementation,importance_source,fit_seconds,importance_seconds,total_seconds,rank_correlation_vs_sklearn,top_three_overlap_vs_sklearn,top_feature
+10000,10000,20,100,default,gain,sklearn,sklearn impurity gain,1.8316952919703908,0.003686790994834155,1.835382082965225,1.0,1.0,2
+10000,10000,20,100,default,gain,pyO3,criterion-weighted XRF split gain,1.293301708996296,0.0010737919947132468,1.2943755009910092,0.4541353383458646,1.0,2
+10000,10000,20,100,default,gain,rust-cli,criterion-weighted XRF split gain,1.335538,0.001100167,1.3366381669999998,0.5082706766917292,1.0,2
+10000,10000,20,100,default,split,sklearn,split count derived from sklearn tree nodes,1.7647944169584662,0.0018792920163832605,1.7666737089748494,1.0,1.0,1
+10000,10000,20,100,default,split,pyO3,normalized split frequency,1.318780583969783,0.0008807919803075492,1.3196613759500906,0.23157894736842105,1.0,1
+10000,10000,20,100,default,split,rust-cli,normalized split frequency,1.362645,0.000920083,1.3635650830000001,0.6571428571428571,1.0,1
+10000,10000,20,100,default,permutation,sklearn,sklearn inspection permutation (five repeats),1.7705514170229435,6.891049958998337,8.66160137602128,1.0,1.0,0
+10000,10000,20,100,default,permutation,pyO3,native XRF OOB permutation,1.3249122920096852,0.13435516599565744,1.4592674580053426,0.7022556390977444,1.0,2
+10000,10000,20,100,default,permutation,rust-cli,native XRF OOB permutation,1.385495,0.12543700000000002,1.510932,0.5308270676691729,1.0,2

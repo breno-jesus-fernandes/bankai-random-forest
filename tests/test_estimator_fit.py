@@ -51,6 +51,19 @@ def test_fit_sets_normalized_feature_importances(separable_data):
     np.testing.assert_allclose(classifier.feature_importances_.sum(), 1.0)
 
 
+def test_gain_importance_ranks_predictive_features_above_noise():
+    rng = np.random.RandomState(42)
+    x = rng.normal(size=(200, 3))
+    y = (x[:, 0] + x[:, 1] > 0.0).astype(int)
+
+    classifier = BankaiRandomForestClassifier(n_estimators=50, random_state=42).fit(x, y)
+
+    assert classifier.importance_type == "gain"
+    assert classifier.feature_importances_[0] > classifier.feature_importances_[2]
+    assert classifier.feature_importances_[1] > classifier.feature_importances_[2]
+    np.testing.assert_allclose(classifier.feature_importances_.sum(), 1.0)
+
+
 def test_permutation_importance_type_exposes_native_oob_accuracy_decrease():
     rng = np.random.RandomState(42)
     x = rng.normal(size=(200, 2))
@@ -93,8 +106,8 @@ def test_permutation_importance_type_is_deterministic_across_thread_counts():
 def test_rejects_unknown_importance_type(separable_data):
     x, y = separable_data
 
-    with pytest.raises(ValueError, match="importance_type must be 'split' or 'permutation'"):
-        BankaiRandomForestClassifier(importance_type="gain").fit(x, y)
+    with pytest.raises(ValueError, match="importance_type must be 'gain', 'split', or 'permutation'"):
+        BankaiRandomForestClassifier(importance_type="unknown").fit(x, y)
 
 
 @pytest.mark.parametrize(

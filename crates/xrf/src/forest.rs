@@ -414,4 +414,21 @@ impl<I: RfInput> Forest<I> {
                 .map(|val| (feature, val))
         })
     }
+
+    /// Iterator producing normalized accumulated split-score importance.
+    pub fn gain_importance_normalised(&self) -> impl Iterator<Item = (I::FeatureId, f64)>
+    where
+        I::Pivot: Clone,
+    {
+        let mut importance = HashMap::new();
+        for walk in self.walk() {
+            if let Walk::VisitBranch(feature, _, score) = walk {
+                *importance.entry(feature).or_insert(0.0) += score.max(0.0);
+            }
+        }
+        let total = importance.values().sum::<f64>();
+        importance
+            .into_iter()
+            .map(move |(feature, value)| (feature, if total > 0.0 { value / total } else { 0.0 }))
+    }
 }

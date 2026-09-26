@@ -16,6 +16,7 @@ pub struct DenseInput {
     min_samples_split: usize,
     min_samples_leaf: usize,
     min_impurity_decrease: f64,
+    total_weight: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -70,6 +71,7 @@ impl DenseInput {
             return Err("labels must be encoded in 0..n_classes".to_string());
         }
 
+        let total_weight = sample_weights.iter().sum();
         Ok(Self {
             values,
             labels: Some(labels),
@@ -82,6 +84,7 @@ impl DenseInput {
             min_samples_split,
             min_samples_leaf,
             min_impurity_decrease,
+            total_weight,
         })
     }
 
@@ -108,6 +111,7 @@ impl DenseInput {
             min_samples_split: 2,
             min_samples_leaf: 1,
             min_impurity_decrease: 0.0,
+            total_weight: 0.0,
         })
     }
 
@@ -339,7 +343,12 @@ fn best_split(
         }
     }
 
-    best
+    best.map(|(pivot, gain)| {
+        (
+            pivot,
+            gain * target.total_weight / input.total_weight,
+        )
+    })
 }
 
 pub struct PermutationImportance {
