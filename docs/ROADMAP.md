@@ -83,12 +83,18 @@ interface.
 
 ### v0.3.0: Full Parameter Semantics
 
-- [ ] Criteria: Gini, entropy, and log-loss.
+- [x] Criteria: Gini, entropy, and log-loss.
 - [ ] Tree limits: depth, split size, leaf size, leaf weight, feature count,
       maximum leaves, and impurity decrease.
+  - [x] Depth, split size, leaf size, leaf weight, and feature count.
+  - [ ] Maximum leaves and impurity decrease.
 - [ ] Sampling: bootstrap, `max_samples`, OOB predictions, and OOB score.
+  - [x] Bootstrap and `max_samples`.
+  - [ ] OOB predictions and OOB score.
 - [ ] Weights: `sample_weight`, `class_weight`, `balanced`, and
       `balanced_subsample`.
+  - [x] `sample_weight`, `class_weight`, and `balanced`.
+  - [ ] `balanced_subsample`.
 - [ ] State: `random_state`, deterministic `n_jobs`, `verbose`, and
       `warm_start`.
 - [ ] Structural controls: `ccp_alpha` and valid binary `monotonic_cst`.
@@ -126,3 +132,4 @@ interface.
 | 2026-09-25 | v0.1.0 | XRF vendor complete | Pinned XRF source, upstream attribution, NOTICE, and GPL-3.0 text added. |
 | 2026-09-25 | v0.2.0 | Baseline in progress | Dense Gini fitting, original-label prediction, sample weights, sparse rejection, and pickle reconstruction work. `class_weight` and `min_weight_fraction_leaf` remain required before the sklearn common-check gate can pass. |
 | 2026-09-25 | v0.2.0 | Estimator contract complete | Probability predictions, feature importances, class weights, and minimum leaf-weight support added; `check_estimator` passes without expected failures. |
+| 2026-09-25 | v0.3.0 | Parameter controls in progress | Added entropy/log-loss, max-features, depth, minimum split/leaf constraints, class weights, bootstrap selection, and `max_samples`; OOB, parallelism, pruning, and monotonic constraints remain. |
