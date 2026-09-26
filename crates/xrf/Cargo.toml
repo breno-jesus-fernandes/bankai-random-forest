@@ -1,0 +1,12 @@
+[package]
+name = "xrf"
+version = "1.0.0"
+edition = "2024"
+readme = "README.md"
+description = "Generic library to build Random Forest implementations"
+license = "GPL-3.0-or-later"
+authors = ["Miron B. Kursa <m@mbq.me>"]
+keywords = ["random-forest","ml"]
+categories = ["science"]
+
+[dependencies]

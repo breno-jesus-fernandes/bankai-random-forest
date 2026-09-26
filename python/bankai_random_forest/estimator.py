@@ -1,0 +1,199 @@
+import numpy as np
+from scipy import sparse
+from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.utils.multiclass import type_of_target
+from sklearn.utils import check_random_state
+from sklearn.utils.validation import check_is_fitted, validate_data
+
+from . import _core
+
+
+class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
+    def __init__(
+        self,
+        n_estimators=100,
+        *,
+        criterion="gini",
+        max_depth=None,
+        min_samples_split=2,
+        min_samples_leaf=1,
+        min_weight_fraction_leaf=0.0,
+        max_features="sqrt",
+        max_leaf_nodes=None,
+        min_impurity_decrease=0.0,
+        bootstrap=True,
+        oob_score=False,
+        n_jobs=None,
+        random_state=None,
+        verbose=0,
+        warm_start=False,
+        class_weight=None,
+        ccp_alpha=0.0,
+        max_samples=None,
+        monotonic_cst=None,
+    ):
+        self.n_estimators = n_estimators
+        self.criterion = criterion
+        self.max_depth = max_depth
+        self.min_samples_split = min_samples_split
+        self.min_samples_leaf = min_samples_leaf
+        self.min_weight_fraction_leaf = min_weight_fraction_leaf
+        self.max_features = max_features
+        self.max_leaf_nodes = max_leaf_nodes
+        self.min_impurity_decrease = min_impurity_decrease
+        self.bootstrap = bootstrap
+        self.oob_score = oob_score
+        self.n_jobs = n_jobs
+        self.random_state = random_state
+        self.verbose = verbose
+        self.warm_start = warm_start
+        self.class_weight = class_weight
+        self.ccp_alpha = ccp_alpha
+        self.max_samples = max_samples
+        self.monotonic_cst = monotonic_cst
+
+    def fit(self, X, y, sample_weight=None):
+        self._reject_unsupported_baseline_parameters(sample_weight)
+        if sparse.issparse(X):
+            raise TypeError("sparse input is not supported")
+
+        X, y = validate_data(self, X, y, dtype=np.float64, ensure_2d=True)
+        target_type = type_of_target(y)
+        if target_type.startswith("continuous"):
+            raise ValueError(f"Unknown label type: {target_type}")
+        sample_weight = self._validate_sample_weight(sample_weight, X.shape[0])
+        self.classes_, encoded_y = np.unique(y, return_inverse=True)
+        self.n_classes_ = int(self.classes_.shape[0])
+        X, encoded_y, sample_weight = self._prepare_training_data(
+            X, encoded_y, sample_weight
+        )
+
+        self._fit_seed = self._next_seed()
+        self._fit_max_features = max(1, int(np.sqrt(self.n_features_in_)))
+        self._fit_X = X
+        self._fit_y = encoded_y.astype(np.int64, copy=False)
+        self._fit_sample_weight = sample_weight
+
+        forest = _core.NativeForest()
+        forest.fit(
+            self._fit_X,
+            self._fit_y,
+            n_estimators=self.n_estimators,
+            max_features=self._fit_max_features,
+            random_state=self._fit_seed,
+            sample_weight=self._fit_sample_weight,
+        )
+        self._forest = forest
+        self.feature_importances_ = np.asarray(
+            forest.feature_importances(), dtype=np.float64
+        )
+        return self
+
+    def predict(self, X):
+        check_is_fitted(self, "_forest")
+        if sparse.issparse(X):
+            raise TypeError("sparse input is not supported")
+
+        X = validate_data(self, X, reset=False, dtype=np.float64, ensure_2d=True)
+        encoded_y = np.asarray(self._forest.predict(X), dtype=np.intp)
+        return self.classes_[encoded_y]
+
+    def predict_proba(self, X):
+        check_is_fitted(self, "_forest")
+        if sparse.issparse(X):
+            raise TypeError("sparse input is not supported")
+
+        X = validate_data(self, X, reset=False, dtype=np.float64, ensure_2d=True)
+        return np.asarray(self._forest.predict_proba(X), dtype=np.float64)
+
+    def predict_log_proba(self, X):
+        return np.log(self.predict_proba(X))
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_forest", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if "_fit_X" not in state:
+            return
+
+        forest = _core.NativeForest()
+        forest.fit(
+            self._fit_X,
+            self._fit_y,
+            n_estimators=self.n_estimators,
+            max_features=self._fit_max_features,
+            random_state=self._fit_seed,
+            sample_weight=self._fit_sample_weight,
+        )
+        self._forest = forest
+        self.feature_importances_ = np.asarray(
+            forest.feature_importances(), dtype=np.float64
+        )
+
+    def _next_seed(self):
+        random_state = check_random_state(self.random_state)
+        return int(random_state.randint(0, np.iinfo(np.uint32).max))
+
+    def _reject_unsupported_baseline_parameters(self, sample_weight):
+        unsupported = (
+            ("criterion", self.criterion != "gini"),
+            ("max_depth", self.max_depth is not None),
+            ("min_samples_split", self.min_samples_split != 2),
+            ("min_samples_leaf", self.min_samples_leaf != 1),
+            (
+                "min_weight_fraction_leaf",
+                self.min_weight_fraction_leaf != 0.0,
+            ),
+            ("max_features", self.max_features != "sqrt"),
+            ("max_leaf_nodes", self.max_leaf_nodes is not None),
+            ("min_impurity_decrease", self.min_impurity_decrease != 0.0),
+            ("bootstrap", self.bootstrap is not True),
+            ("oob_score", self.oob_score is not False),
+            ("n_jobs", self.n_jobs is not None),
+            ("verbose", self.verbose != 0),
+            ("warm_start", self.warm_start is not False),
+            ("class_weight", self.class_weight is not None),
+            ("ccp_alpha", self.ccp_alpha != 0.0),
+            ("max_samples", self.max_samples is not None),
+            ("monotonic_cst", self.monotonic_cst is not None),
+        )
+        for name, is_unsupported in unsupported:
+            if is_unsupported:
+                raise NotImplementedError(f"{name} is not implemented yet")
+
+    @staticmethod
+    def _validate_sample_weight(sample_weight, n_samples):
+        if sample_weight is None:
+            return None
+
+        weights = np.asarray(sample_weight, dtype=np.float64)
+        if weights.ndim != 1:
+            raise ValueError("sample_weight must be one-dimensional")
+        if weights.shape[0] != n_samples:
+            raise ValueError("sample_weight must have the same length as X")
+        if not np.isfinite(weights).all():
+            raise ValueError("sample_weight must contain only finite values")
+        if np.any(weights < 0.0):
+            raise ValueError("sample_weight cannot contain negative values")
+        if not np.any(weights > 0.0):
+            raise ValueError("sample_weight cannot be all zero")
+        return weights
+
+    @staticmethod
+    def _prepare_training_data(X, encoded_y, sample_weight):
+        if sample_weight is not None and np.equal(
+            sample_weight, np.floor(sample_weight)
+        ).all():
+            repeats = sample_weight.astype(np.intp, copy=False)
+            X = np.repeat(X, repeats, axis=0)
+            encoded_y = np.repeat(encoded_y, repeats)
+            sample_weight = None
+
+        keys = (encoded_y, *(X[:, index] for index in range(X.shape[1] - 1, -1, -1)))
+        order = np.lexsort(keys)
+        if sample_weight is None:
+            return X[order], encoded_y[order], None
+        return X[order], encoded_y[order], sample_weight[order]

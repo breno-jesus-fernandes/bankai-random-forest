@@ -1,0 +1,9 @@
+.venv/
+target/
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+benchmarks/results/
+*.prof

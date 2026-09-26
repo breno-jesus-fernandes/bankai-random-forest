@@ -1,0 +1,10 @@
+This project includes a maintained fork of XRF.
+
+Upstream project: https://gitlab.com/mbq/xrf/
+Vendored revision: 19e1bf046aa3167ffbef5e50f9db36a5abe13858
+Upstream package: xrf 1.0.0
+Upstream copyright: Miron B. Kursa
+Upstream license: GPL-3.0-or-later
+
+The vendored source is located in crates/xrf. Changes made by this project are
+tracked in this repository and remain subject to GPL-3.0-or-later.
