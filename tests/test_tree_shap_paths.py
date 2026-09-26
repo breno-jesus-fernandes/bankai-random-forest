@@ -64,3 +64,19 @@ def test_constrained_tree_shap_paths_remain_additive(max_bins):
     np.testing.assert_allclose(
         values.sum(axis=1) + explainer.expected_value, probabilities, atol=1e-6
     )
+
+
+@pytest.mark.parametrize("max_bins", [None, 8])
+def test_native_tree_shap_routes_nan_rows_additively(max_bins):
+    x = np.array([[0.0], [1.0], [np.nan], [3.0], [4.0], [np.nan]])
+    y = np.array([0, 0, 1, 1, 1, 1])
+    model = BankaiRandomForestClassifier(
+        n_estimators=7, max_features=1, bootstrap=False, random_state=42, max_bins=max_bins
+    ).fit(x, y)
+    values, base = model._native_tree_shap_for_benchmark(np.array([[np.nan], [0.5], [3.5]]))
+
+    np.testing.assert_allclose(values.sum(axis=1) + base, model.predict_proba([[np.nan], [0.5], [3.5]]), atol=1e-10)
+    direct = shap.TreeExplainer(model)
+    explained = np.array([[np.nan], [0.5], [3.5]])
+    direct_values = np.asarray(direct.shap_values(explained))
+    np.testing.assert_allclose(direct_values.sum(axis=1) + direct.expected_value, model.predict_proba(explained), atol=1e-6)

@@ -27,7 +27,7 @@ class _TreeSHAPAdapter(RandomForestClassifier):
 def _make_sklearn_trees(tree_arrays, n_features, n_classes):
     """Reconstruct minimal sklearn Tree objects from Rust's exported arrays."""
     trees = []
-    for left, right, feature, threshold, cover, flat_values in tree_arrays:
+    for left, right, feature, threshold, cover, flat_values, missing_go_to_left in tree_arrays:
         n_nodes = len(feature)
         nodes = np.zeros(n_nodes, dtype=_tree.NODE_DTYPE)
         nodes["left_child"] = left
@@ -45,6 +45,7 @@ def _make_sklearn_trees(tree_arrays, n_features, n_classes):
         values[internal, 0, 0] = 1.0
         tree = _tree.Tree(n_features, np.array([n_classes], dtype=np.intp), 1)
         tree.__setstate__({"max_depth": n_nodes, "node_count": n_nodes, "nodes": nodes, "values": values})
+        tree.missing_go_to_left[:] = missing_go_to_left
         estimator = DecisionTreeClassifier()
         estimator.tree_ = tree
         estimator.n_features_in_ = n_features
@@ -66,6 +67,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         tags.target_tags.one_d_labels = True
         tags.target_tags.single_output = True
         tags.input_tags.sparse = True
+        tags.input_tags.allow_nan = True
         return tags
 
     @property
@@ -145,7 +147,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
     def _native_tree_shap_for_benchmark(self, X):
         """Return native Rust TreeSHAP values for benchmark comparisons."""
         check_is_fitted(self, "_forest")
-        X = validate_data(self, X, reset=False, dtype=np.float64, ensure_2d=True)
+        X = validate_data(self, X, reset=False, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan")
         values, base_values = self._forest.tree_shap(X)
         return np.asarray(values, dtype=np.float64), np.asarray(base_values, dtype=np.float64)
 
@@ -172,7 +174,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
                 "n_estimators must be greater than or equal to the number of fitted trees "
                 "when warm_start=True"
             )
-        validation_options = dict(dtype=np.float64, ensure_2d=True, reset=not warm_refit)
+        validation_options = dict(dtype=np.float64, ensure_2d=True, reset=not warm_refit, ensure_all_finite="allow-nan")
         if sparse_input:
             validation_options["accept_sparse"] = ("csr", "csc")
         X, y = validate_data(self, X, y, **validation_options)
@@ -277,7 +279,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             X.sum_duplicates()
             X.sort_indices()
             X.eliminate_zeros()
-        validation_options = dict(reset=False, dtype=np.float64, ensure_2d=True)
+        validation_options = dict(reset=False, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan")
         if sparse_input:
             validation_options["accept_sparse"] = ("csr", "csc")
         X = validate_data(self, X, **validation_options)
@@ -294,7 +296,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             X.sum_duplicates()
             X.sort_indices()
             X.eliminate_zeros()
-        validation_options = dict(reset=False, dtype=np.float64, ensure_2d=True)
+        validation_options = dict(reset=False, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan")
         if sparse_input:
             validation_options["accept_sparse"] = ("csr", "csc")
         X = validate_data(self, X, **validation_options)

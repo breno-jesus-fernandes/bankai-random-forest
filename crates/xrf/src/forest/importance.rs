@@ -58,7 +58,7 @@ impl<I: RfInput> Tree<I> {
     {
         match self {
             Self::Leaf(vote, _) => collector(upstream_permuted, on, vote),
-            Self::Branch(feature_id, pivot, _, _, left, right) => {
+            Self::Branch(feature_id, pivot, score, _, left, right) => {
                 let mut left_mask = mask_cache.provide();
                 let mut right_mask = mask_cache.provide();
                 let mut left_perm = mask_cache.provide();
@@ -69,7 +69,7 @@ impl<I: RfInput> Tree<I> {
                     upstream_used.push(*feature_id);
                     on.split_together_into(
                         perm,
-                        input.split_iter(on, *feature_id, pivot),
+                        input.split_iter(on, *feature_id, pivot, score.is_sign_negative()),
                         &mut left_mask,
                         &mut left_perm,
                         &mut right_mask,
@@ -106,7 +106,7 @@ impl<I: RfInput> Tree<I> {
                     //We make a permuted split
                     on.split_together_into(
                         perm,
-                        input.split_iter(perm, *feature_id, pivot),
+                        input.split_iter(perm, *feature_id, pivot, score.is_sign_negative()),
                         &mut left_mask,
                         &mut left_perm,
                         &mut right_mask,

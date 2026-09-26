@@ -117,6 +117,22 @@ def test_joblib_round_trip_preserves_monotonic_constraints(tmp_path, max_bins):
     np.testing.assert_array_equal(restored.predict_proba(x[75:]), model.predict_proba(x[75:]))
 
 
+@pytest.mark.parametrize("max_bins", [None, 8])
+def test_joblib_round_trip_preserves_nan_routing(tmp_path, max_bins):
+    x = np.array([[0.0], [1.0], [np.nan], [3.0], [4.0], [np.nan]])
+    y = np.array([0, 0, 1, 1, 1, 1])
+    model = BankaiRandomForestClassifier(
+        n_estimators=7, max_features=1, bootstrap=False, random_state=42, max_bins=max_bins
+    ).fit(x, y)
+    path = tmp_path / "bankai-nan.joblib"
+    joblib.dump(model, path)
+    restored = joblib.load(path)
+
+    np.testing.assert_array_equal(restored.predict(x), model.predict(x))
+    np.testing.assert_array_equal(restored.predict([[np.nan], [0.5], [3.5]]), [1, 0, 1])
+    np.testing.assert_allclose(restored.predict_proba(x), model.predict_proba(x))
+
+
 def test_uncompressed_joblib_round_trip_accepts_mmap_mode(tmp_path):
     rng = np.random.RandomState(37)
     x = rng.normal(size=(64, 4))

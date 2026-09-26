@@ -419,11 +419,11 @@ def test_sparse_implicit_zeros_match_dense_backend(training_format, max_bins):
 
 
 @pytest.mark.parametrize("sparse_format", [sparse.csr_matrix, sparse.csc_matrix])
-def test_sparse_input_validation_rejects_non_finite_and_bad_csr_shape(sparse_format, separable_data):
+def test_sparse_input_validation_rejects_infinite_and_bad_csr_shape(sparse_format, separable_data):
     x, y = separable_data
     x = x.copy()
-    x[0, 0] = np.nan
-    with pytest.raises(ValueError, match="NaN"):
+    x[0, 0] = np.inf
+    with pytest.raises(ValueError, match="infinity|infinite"):
         BankaiRandomForestClassifier().fit(sparse_format(x), y)
 
 
@@ -457,12 +457,62 @@ def test_dataframe_column_names_are_preserved(separable_data):
     np.testing.assert_array_equal(classifier.feature_names_in_, ["temperature"])
 
 
-def test_rejects_nan_features(separable_data):
-    x, y = separable_data
-    x[0, 0] = np.nan
+@pytest.mark.parametrize("max_bins", [None, 8])
+def test_nan_features_learn_missing_routes_and_predict_unseen_nan(max_bins):
+    x = np.array([[0.0], [1.0], [np.nan], [3.0], [4.0], [np.nan]])
+    y = np.array([0, 0, 1, 1, 1, 1])
+    model = BankaiRandomForestClassifier(
+        n_estimators=7, max_features=1, bootstrap=False, random_state=42, max_bins=max_bins
+    ).fit(x, y)
+    sklearn_model = RandomForestClassifier(
+        n_estimators=7, max_features=1, bootstrap=False, random_state=42
+    ).fit(x, y)
 
-    with pytest.raises(ValueError, match="NaN"):
-        BankaiRandomForestClassifier().fit(x, y)
+    np.testing.assert_array_equal(model.predict(x), y)
+    np.testing.assert_array_equal(model.predict(x), sklearn_model.predict(x))
+    np.testing.assert_allclose(model.predict_proba(x), sklearn_model.predict_proba(x))
+    np.testing.assert_array_equal(model.predict([[np.nan], [0.5], [3.5]]), [1, 0, 1])
+    np.testing.assert_allclose(model.predict_proba([[np.nan], [0.5], [3.5]]).sum(axis=1), 1.0)
+    assert model.apply(x).shape == (len(x), model.n_estimators)
+    assert model.decision_path(x)[0].shape[0] == len(x)
+
+
+@pytest.mark.parametrize("sparse_format", [sparse.csr_matrix, sparse.csc_matrix])
+@pytest.mark.parametrize("max_bins", [None, 8])
+def test_sparse_nan_routes_match_dense(sparse_format, max_bins):
+    x = np.array([[0.0], [1.0], [np.nan], [3.0], [4.0], [np.nan]])
+    y = np.array([0, 0, 1, 1, 1, 1])
+    params = dict(n_estimators=7, max_features=1, bootstrap=False, random_state=42, max_bins=max_bins)
+    dense = BankaiRandomForestClassifier(**params).fit(x, y)
+    matrix = sparse_format(x)
+    sparse_model = BankaiRandomForestClassifier(**params).fit(matrix, y)
+
+    np.testing.assert_array_equal(sparse_model.predict(matrix), dense.predict(x))
+    np.testing.assert_array_equal(sparse_model.predict([[np.nan], [0.5], [3.5]]), [1, 0, 1])
+    np.testing.assert_allclose(sparse_model.predict_proba(matrix), dense.predict_proba(x))
+
+
+def test_nan_rows_work_with_oob_predictions():
+    rng = np.random.RandomState(211)
+    x = rng.normal(size=(120, 4))
+    x[rng.random_sample(x.shape) < 0.15] = np.nan
+    y = (np.nan_to_num(x[:, 0]) + np.nan_to_num(x[:, 1]) > 0).astype(int)
+    model = BankaiRandomForestClassifier(n_estimators=25, random_state=223, oob_score=True).fit(x, y)
+
+    assert np.isfinite(model.oob_decision_function_).all()
+    assert np.isfinite(model.oob_score_)
+
+
+@pytest.mark.parametrize("max_bins", [None, 8])
+def test_nan_prediction_falls_back_to_larger_child_when_training_was_finite(max_bins):
+    x = np.arange(8, dtype=np.float64).reshape(-1, 1)
+    y = np.array([0, 0, 0, 0, 1, 1, 1, 1])
+    model = BankaiRandomForestClassifier(
+        n_estimators=3, max_features=1, bootstrap=False, random_state=42, max_bins=max_bins
+    ).fit(x, y)
+
+    # The equal-sized root children follow sklearn's default direction: right.
+    np.testing.assert_array_equal(model.predict([[np.nan]]), [1])
 
 
 def test_accepts_float32_features(separable_data):

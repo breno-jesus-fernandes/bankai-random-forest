@@ -459,7 +459,7 @@ impl<I: RfInput> Forest<I> {
         let mut importance = HashMap::new();
         for walk in self.walk() {
             if let Walk::VisitBranch(feature, _, score) = walk {
-                *importance.entry(feature).or_insert(0.0) += score.max(0.0);
+                *importance.entry(feature).or_insert(0.0) += score.abs();
             }
         }
         let total = importance.values().sum::<f64>();

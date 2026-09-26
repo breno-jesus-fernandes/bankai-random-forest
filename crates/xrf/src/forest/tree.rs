@@ -82,11 +82,11 @@ impl<I: RfInput> Tree<I> {
         };
         let (subtree_risk, leaf_count, collapse_vote) = match tree {
             Self::Leaf(_, _) => return (node_risk, 1),
-            Self::Branch(feature, pivot, _, _, left, right) => {
+            Self::Branch(feature, pivot, score, _, left, right) => {
                 let mut left_mask = mask_cache.provide();
                 let mut right_mask = mask_cache.provide();
                 mask.split_into(
-                    input.split_iter(mask, *feature, pivot),
+                    input.split_iter(mask, *feature, pivot, score.is_sign_negative()),
                     &mut left_mask,
                     &mut right_mask,
                 );
@@ -148,7 +148,7 @@ impl<I: RfInput> Tree<I> {
             std::iter::repeat_n((), tries)
                 .fold(FairBest::new(), |mut fair_best: FairBest<_, f64>, _| {
                     let feature = feature_sampler.random_feature(rng);
-                    if let Some((pivot, score)) = input.new_split_with_bounds(
+                    if let Some((pivot, missing_left, score)) = input.new_split_with_bounds(
                         mask,
                         feature,
                         &y,
@@ -157,18 +157,18 @@ impl<I: RfInput> Tree<I> {
                         lower_bound,
                         upper_bound,
                     ) {
-                        fair_best.ingest(score, (feature, pivot), rng);
+                        fair_best.ingest(score, (feature, pivot, missing_left), rng);
                     }
                     fair_best
                 })
                 .consume()
                 .map(|best| {
                     *leaf_count += 1;
-                    let (best_score, (feature, pivot)) = best;
+                    let (best_score, (feature, pivot, missing_left)) = best;
                     let mut left = mask_cache.provide();
                     let mut right = mask_cache.provide();
                     mask.split_into(
-                        input.split_iter(mask, feature, &pivot),
+                        input.split_iter(mask, feature, &pivot, missing_left),
                         &mut left,
                         &mut right,
                     );
@@ -194,10 +194,11 @@ impl<I: RfInput> Tree<I> {
                             ((lower_bound, middle), (middle, upper_bound))
                         }
                     };
+                    let stored_score = if missing_left { -best_score.abs() } else { best_score.abs() };
                     let branch = Self::Branch(
                         feature,
                         pivot,
-                        best_score,
+                        stored_score,
                         mask.len(),
                         Box::new(Self::new_rec(
                             input,
@@ -269,11 +270,11 @@ impl<I: RfInput> Tree<I> {
     ) {
         match self {
             Self::Leaf(vote, _) => on.iter().for_each(|e| onto[*e].ingest_vote(*vote)),
-            Self::Branch(feature_id, pivot, _, _, left, right) => {
+            Self::Branch(feature_id, pivot, score, _, left, right) => {
                 let mut left_on = mask_cache.provide();
                 let mut right_on = mask_cache.provide();
                 on.split_into(
-                    input.split_iter(on, *feature_id, pivot),
+                    input.split_iter(on, *feature_id, pivot, score.is_sign_negative()),
                     &mut left_on,
                     &mut right_on,
                 );

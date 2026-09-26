@@ -25,6 +25,7 @@ pub struct DenseInput {
     balanced_subsample: bool,
     ccp_alpha: f64,
     monotonic_constraints: Option<Arc<Vec<i8>>>,
+    has_missing_values: bool,
 }
 
 #[derive(Clone)]
@@ -61,6 +62,13 @@ enum DenseSplitIter<'a> {
         feature: usize,
         pivot: f64,
     },
+    LazyMissing {
+        input: &'a DenseInput,
+        rows: std::slice::Iter<'a, usize>,
+        feature: usize,
+        pivot: f64,
+        missing_left: bool,
+    },
     Buffered(std::vec::IntoIter<bool>),
 }
 
@@ -75,6 +83,7 @@ impl Iterator for DenseSplitIter<'_> {
                 feature,
                 pivot,
             } => rows.next().map(|&row| input.value(row, *feature) > *pivot),
+            Self::LazyMissing { input, rows, feature, pivot, missing_left } => rows.next().map(|&row| input.routes_left(row, *feature, *pivot, *missing_left)),
             Self::Buffered(values) => values.next(),
         }
     }
@@ -101,6 +110,7 @@ impl DenseInput {
         min_impurity_decrease: f64,
         max_bins: Option<usize>,
     ) -> Result<Self, String> {
+        let has_missing_values = values.iter().any(|value| value.is_nan());
         validate_matrix(&values, rows, columns)?;
         if labels.len() != rows {
             return Err("y must contain one label per row".to_string());
@@ -178,6 +188,7 @@ impl DenseInput {
             balanced_subsample: false,
             ccp_alpha: 0.0,
             monotonic_constraints: None,
+            has_missing_values,
         })
     }
 
@@ -188,6 +199,7 @@ impl DenseInput {
         n_classes: usize,
         bin_edges: Option<&[Vec<f64>]>,
     ) -> Result<Self, String> {
+        let has_missing_values = values.iter().any(|value| value.is_nan());
         validate_matrix(&values, rows, columns)?;
         if n_classes == 0 {
             return Err("at least one class is required".to_string());
@@ -219,11 +231,12 @@ impl DenseInput {
             min_impurity_decrease: 0.0,
             total_weight: 0.0,
             histogram_bins: None,
-            bin_edges: None,
+            bin_edges: bin_edges.map(|edges| Arc::new(edges.to_vec())),
             active_features: (0..columns).collect(),
             balanced_subsample: false,
             ccp_alpha: 0.0,
             monotonic_constraints: None,
+            has_missing_values,
         })
     }
 
@@ -243,6 +256,7 @@ impl DenseInput {
         min_impurity_decrease: f64,
         max_bins: Option<usize>,
     ) -> Result<Self, String> {
+        let has_missing_values = data.iter().any(|value| value.is_nan());
         let sparse = validate_csr(indptr, indices, data, rows, columns)?;
         if labels.len() != rows {
             return Err("y must contain one label per row".into());
@@ -302,6 +316,7 @@ impl DenseInput {
             balanced_subsample: false,
             ccp_alpha: 0.0,
             monotonic_constraints: None,
+            has_missing_values,
         })
     }
 
@@ -314,6 +329,7 @@ impl DenseInput {
         n_classes: usize,
         bin_edges: Option<&[Vec<f64>]>,
     ) -> Result<Self, String> {
+        let has_missing_values = data.iter().any(|value| value.is_nan());
         let sparse = validate_csr(indptr, indices, data, rows, columns)?;
         if n_classes == 0 {
             return Err("at least one class is required".into());
@@ -340,6 +356,7 @@ impl DenseInput {
             balanced_subsample: false,
             ccp_alpha: 0.0,
             monotonic_constraints: None,
+            has_missing_values,
         })
     }
 
@@ -434,12 +451,48 @@ impl DenseInput {
     fn value(&self, row: usize, column: usize) -> f64 {
         match &self.values {
             DenseValues::Exact(values) => values[row * self.columns + column],
-            DenseValues::Binned(values) => values[row * self.columns + column] as f64,
+            DenseValues::Binned(values) => {
+                let bin = values[row * self.columns + column];
+                let missing_bin = self.bin_edges.as_ref().map_or(usize::MAX, |e| e[column].len() + 1);
+                if bin as usize == missing_bin { f64::NAN } else { bin as f64 }
+            }
             DenseValues::Sparse(values) => {
                 let value = values.get(row, column);
                 self.bin_edges.as_ref().map_or(value, |edges| {
-                    edges[column].partition_point(|edge| value > *edge) as f64
+                    if value.is_nan() { (edges[column].len() + 1) as f64 } else { edges[column].partition_point(|edge| value > *edge) as f64 }
                 })
+            }
+        }
+    }
+
+    #[inline]
+    fn routes_left(&self, row: usize, column: usize, pivot: f64, missing_left: bool) -> bool {
+        if !self.has_missing_values {
+            return match &self.values {
+                DenseValues::Exact(values) => values[row * self.columns + column] > pivot,
+                DenseValues::Binned(values) => (values[row * self.columns + column] as f64) > pivot,
+                DenseValues::Sparse(values) => {
+                    let value = values.get(row, column);
+                    let value = self.bin_edges.as_ref().map_or(value, |edges| edges[column].partition_point(|edge| value > *edge) as f64);
+                    value > pivot
+                }
+            };
+        }
+        match &self.values {
+            DenseValues::Exact(values) => {
+                let value = values[row * self.columns + column];
+                if value.is_nan() { missing_left } else { value > pivot }
+            }
+            DenseValues::Binned(values) => {
+                let bin = values[row * self.columns + column];
+                let missing_bin = self.bin_edges.as_ref().map_or(usize::MAX, |e| e[column].len() + 1);
+                if bin as usize == missing_bin { missing_left } else { (bin as f64) > pivot }
+            }
+            DenseValues::Sparse(values) => {
+                let raw = values.get(row, column);
+                if raw.is_nan() { return missing_left; }
+                let value = self.bin_edges.as_ref().map_or(raw, |edges| edges[column].partition_point(|edge| raw > *edge) as f64);
+                value > pivot
             }
         }
     }
@@ -447,8 +500,11 @@ impl DenseInput {
     fn bin_value(&self, row: usize, column: usize) -> usize {
         match &self.values {
             DenseValues::Binned(values) => values[row * self.columns + column] as usize,
-            DenseValues::Sparse(values) => self.bin_edges.as_ref().unwrap()[column]
-                .partition_point(|edge| values.get(row, column) > *edge),
+            DenseValues::Sparse(values) => {
+                let value = values.get(row, column);
+                if value.is_nan() { self.bin_edges.as_ref().unwrap()[column].len() + 1 }
+                else { self.bin_edges.as_ref().unwrap()[column].partition_point(|edge| value > *edge) }
+            }
             DenseValues::Exact(_) => unreachable!("histograms require binned input"),
         }
     }
@@ -493,8 +549,8 @@ fn validate_csr(
     {
         return Err("CSR column indices must be sorted and unique".into());
     }
-    if data.iter().any(|v| !v.is_finite()) {
-        return Err("X must contain only finite values".into());
+    if data.iter().any(|v| v.is_infinite()) {
+        return Err("X must not contain infinite values".into());
     }
     Ok(CsrValues {
         indptr,
@@ -513,6 +569,7 @@ fn sparse_histogram_edges(
         .map(|column| {
             let mut sorted = (0..rows)
                 .map(|row| values.get(row, column))
+                .filter(|value| !value.is_nan())
                 .collect::<Vec<_>>();
             sorted.sort_unstable_by(f64::total_cmp);
             sorted.dedup_by(|a, b| a.total_cmp(b).is_eq());
@@ -550,8 +607,8 @@ fn validate_matrix(values: &[f64], rows: usize, columns: usize) -> Result<(), St
     if values.len() != expected {
         return Err("X buffer length does not match its shape".to_string());
     }
-    if values.iter().any(|value| !value.is_finite()) {
-        return Err("X must contain only finite values".to_string());
+    if values.iter().any(|value| value.is_infinite()) {
+        return Err("X must not contain infinite values".to_string());
     }
 
     Ok(())
@@ -567,6 +624,7 @@ fn histogramize(
     for feature in 0..columns {
         let mut sorted: Vec<_> = (0..rows)
             .map(|row| values[row * columns + feature])
+            .filter(|value| !value.is_nan())
             .collect();
         sorted.sort_unstable_by(f64::total_cmp);
         sorted.dedup_by(|left, right| left.total_cmp(right).is_eq());
@@ -615,7 +673,7 @@ fn apply_histogram_edges(
     for row in 0..rows {
         for feature in 0..columns {
             let value = values[row * columns + feature];
-            let bin = edges_by_feature[feature].partition_point(|edge| value > *edge);
+            let bin = if value.is_nan() { edges_by_feature[feature].len() + 1 } else { edges_by_feature[feature].partition_point(|edge| value > *edge) };
             binned.push(bin as u8);
         }
     }
@@ -629,7 +687,7 @@ fn build_histograms(input: &DenseInput, mask: &Mask) -> HistogramCache {
         .expect("histogram cache requires fitted bin edges")
         .iter()
         .map(|edges| {
-            let bins = edges.len() + 1;
+            let bins = edges.len() + 1 + usize::from(input.has_missing_values);
             FeatureHistogram {
                 class_weights: vec![0.0; bins * input.n_classes],
                 sample_counts: vec![0; bins],
@@ -860,7 +918,7 @@ fn best_split(
     monotonic_constraint: i8,
     lower_bound: f64,
     upper_bound: f64,
-) -> Option<(f64, f64)> {
+) -> Option<(f64, bool, f64)> {
     let best = if input.histogram_bins.is_some() {
         best_split_histogram(
             input,
@@ -881,7 +939,7 @@ fn best_split(
             upper_bound,
         )
     }?;
-    Some((best.0, best.1 * target.total_weight / input.total_weight))
+    Some((best.0, best.1, best.2 * target.total_weight / input.total_weight))
 }
 
 fn best_split_exact(
@@ -892,7 +950,7 @@ fn best_split_exact(
     monotonic_constraint: i8,
     lower_bound: f64,
     upper_bound: f64,
-) -> Option<(f64, f64)> {
+) -> Option<(f64, bool, f64)> {
     let mut ranked: Vec<(f64, usize, f64)> = match &input.values {
         DenseValues::Exact(values) => mask
             .iter()
@@ -922,6 +980,21 @@ fn best_split_exact(
             .map(|(&row, &label)| (values.get(row, feature), label, input.sample_weight(row)))
             .collect(),
     };
+    let mut missing = input.has_missing_values.then(|| vec![0.0; input.n_classes]);
+    let mut missing_count = 0usize;
+    let mut missing_weight = 0.0;
+    if input.has_missing_values {
+        ranked.retain(|(value, label, weight)| {
+            if value.is_nan() {
+                missing.as_mut().unwrap()[*label] += *weight;
+                missing_count += 1;
+                missing_weight += *weight;
+                false
+            } else {
+                true
+            }
+        });
+    }
     ranked.sort_unstable_by(|left, right| left.0.total_cmp(&right.0));
 
     if ranked.len() < 2 {
@@ -932,8 +1005,11 @@ fn best_split_exact(
     let parent_impurity = impurity(input.criterion, &target.class_weights, total_weight);
     let mut left = vec![0.0; input.n_classes];
     let mut right = target.class_weights.clone();
+    if let Some(missing) = &missing {
+        for class in 0..input.n_classes { right[class] -= missing[class]; }
+    }
     let mut left_weight = 0.0;
-    let mut best: Option<(f64, f64)> = None;
+    let mut best: Option<(f64, bool, f64)> = None;
 
     for index in 0..(ranked.len() - 1) {
         let (value, label, weight) = ranked[index];
@@ -946,45 +1022,57 @@ fn best_split_exact(
             continue;
         }
 
-        let right_weight = total_weight - left_weight;
-        if left_weight == 0.0 || right_weight == 0.0 {
-            continue;
-        }
-        if monotonic_constraint != 0 {
-            let left_positive = left[1] / left_weight;
-            let right_positive = right[1] / right_weight;
-            if left_positive < lower_bound
-                || left_positive > upper_bound
-                || right_positive < lower_bound
-                || right_positive > upper_bound
-                || (left_positive - right_positive) * monotonic_constraint as f64 > 0.0
-            {
-                continue;
-            }
-        }
-        let left_count = index + 1;
-        let right_count = ranked.len() - left_count;
-        if left_count < input.min_samples_leaf || right_count < input.min_samples_leaf {
-            continue;
-        }
-        if left_weight < input.min_leaf_weight || right_weight < input.min_leaf_weight {
-            continue;
-        }
-        let child_impurity = (left_weight / total_weight)
-            * impurity(input.criterion, &left, left_weight)
-            + (right_weight / total_weight) * impurity(input.criterion, &right, right_weight);
-        let gain = parent_impurity - child_impurity;
-        if gain < input.min_impurity_decrease {
-            continue;
-        }
         let midpoint = value * 0.5 + next * 0.5;
         let pivot = if midpoint >= next { value } else { midpoint };
-
-        if best
-            .as_ref()
-            .is_none_or(|(_, previous_gain)| gain > *previous_gain)
-        {
-            best = Some((pivot, gain));
+        let finite_left_count = index + 1;
+        let finite_right_count = ranked.len() - finite_left_count;
+        if missing_count == 0 {
+            let right_weight = total_weight - left_weight;
+            if finite_left_count < input.min_samples_leaf || finite_right_count < input.min_samples_leaf
+                || left_weight < input.min_leaf_weight || right_weight < input.min_leaf_weight
+                || left_weight == 0.0 || right_weight == 0.0 { continue; }
+            if monotonic_constraint != 0 {
+                let lp = left[1] / left_weight; let rp = right[1] / right_weight;
+                if lp < lower_bound || lp > upper_bound || rp < lower_bound || rp > upper_bound
+                    || (lp - rp) * monotonic_constraint as f64 > 0.0 { continue; }
+            }
+            let child_impurity = (left_weight / total_weight) * impurity(input.criterion, &left, left_weight)
+                + (right_weight / total_weight) * impurity(input.criterion, &right, right_weight);
+            let gain = parent_impurity - child_impurity;
+            if gain >= input.min_impurity_decrease && best.as_ref().is_none_or(|(_, _, g)| gain > *g) {
+                best = Some((pivot, finite_left_count <= finite_right_count, gain));
+            }
+            continue;
+        }
+        for missing_left in [false, true] {
+            if missing_count == 0 && missing_left != (finite_left_count > finite_right_count) { continue; }
+            let (left_classes, right_classes, left_count, right_count, left_weight) = if missing_left {
+                let mut l = left.clone();
+                for class in 0..input.n_classes { l[class] += missing.as_ref().unwrap()[class]; }
+                (l, right.clone(), finite_left_count + missing_count, finite_right_count, left_weight + missing_weight)
+            } else {
+                let mut r = right.clone();
+                for class in 0..input.n_classes { r[class] += missing.as_ref().unwrap()[class]; }
+                (left.clone(), r, finite_left_count, finite_right_count + missing_count, left_weight)
+            };
+            let right_weight = total_weight - left_weight;
+            if left_count < input.min_samples_leaf || right_count < input.min_samples_leaf
+                || left_weight < input.min_leaf_weight || right_weight < input.min_leaf_weight
+                || left_weight == 0.0 || right_weight == 0.0 { continue; }
+            if monotonic_constraint != 0 {
+                let lp = left_classes[1] / left_weight;
+                let rp = right_classes[1] / right_weight;
+                if lp < lower_bound || lp > upper_bound || rp < lower_bound || rp > upper_bound
+                    || (lp - rp) * monotonic_constraint as f64 > 0.0 { continue; }
+            }
+            let child_impurity = (left_weight / total_weight) * impurity(input.criterion, &left_classes, left_weight)
+                + (right_weight / total_weight) * impurity(input.criterion, &right_classes, right_weight);
+            let gain = parent_impurity - child_impurity;
+            if gain >= input.min_impurity_decrease && best.as_ref().is_none_or(|(_, _, g)| gain > *g) {
+                // Split iterators route values above the pivot to XRF's left
+                // child, while the running histogram accumulates low bins first.
+                best = Some((pivot, !missing_left, gain));
+            }
         }
     }
 
@@ -998,7 +1086,7 @@ fn best_split_histogram(
     monotonic_constraint: i8,
     lower_bound: f64,
     upper_bound: f64,
-) -> Option<(f64, f64)> {
+) -> Option<(f64, bool, f64)> {
     let bin_count = histogram.sample_counts.len();
     if bin_count < 2 {
         return None;
@@ -1010,10 +1098,17 @@ fn best_split_histogram(
     let mut right = target.class_weights.clone();
     let mut left_weight = 0.0;
     let mut left_count = 0;
-    let total_count = histogram.sample_counts.iter().sum::<usize>();
-    let mut best: Option<(f64, f64)> = None;
+    let missing_bin = if input.has_missing_values { bin_count - 1 } else { bin_count };
+    let missing_classes = input.has_missing_values.then(|| (0..input.n_classes).map(|class| histogram.class_weights[missing_bin * input.n_classes + class]).collect::<Vec<_>>());
+    let missing_count = if input.has_missing_values { histogram.sample_counts[missing_bin] } else { 0 };
+    if let Some(missing_classes) = &missing_classes {
+        for class in 0..input.n_classes { right[class] -= missing_classes[class]; }
+    }
+    let total_count = histogram.sample_counts[..missing_bin].iter().sum::<usize>();
+    let mut best: Option<(f64, bool, f64)> = None;
 
-    for bin in 0..(bin_count - 1) {
+    let split_bin_end = if input.has_missing_values { missing_bin.saturating_sub(1) } else { bin_count.saturating_sub(1) };
+    for bin in 0..split_bin_end {
         for class in 0..input.n_classes {
             let weight = histogram.class_weights[bin * input.n_classes + class];
             left[class] += weight;
@@ -1021,44 +1116,52 @@ fn best_split_histogram(
             left_weight += weight;
         }
         left_count += histogram.sample_counts[bin];
-        let right_count = total_count - left_count;
-        if left_count < input.min_samples_leaf || right_count < input.min_samples_leaf {
-            continue;
-        }
-
-        let right_weight = total_weight - left_weight;
-        if left_weight == 0.0
-            || right_weight == 0.0
-            || left_weight < input.min_leaf_weight
-            || right_weight < input.min_leaf_weight
-        {
-            continue;
-        }
-        if monotonic_constraint != 0 {
-            let left_positive = left[1] / left_weight;
-            let right_positive = right[1] / right_weight;
-            if left_positive < lower_bound
-                || left_positive > upper_bound
-                || right_positive < lower_bound
-                || right_positive > upper_bound
-                || (left_positive - right_positive) * monotonic_constraint as f64 > 0.0
-            {
-                continue;
-            }
-        }
-        let child_impurity = (left_weight / total_weight)
-            * impurity(input.criterion, &left, left_weight)
-            + (right_weight / total_weight) * impurity(input.criterion, &right, right_weight);
-        let gain = parent_impurity - child_impurity;
-        if gain < input.min_impurity_decrease {
-            continue;
-        }
         let pivot = bin as f64 + 0.5;
-        if best
-            .as_ref()
-            .is_none_or(|(_, previous_gain)| gain > *previous_gain)
-        {
-            best = Some((pivot, gain));
+        if missing_count == 0 {
+            let right_count = total_count - left_count;
+            let right_weight = total_weight - left_weight;
+            if left_count < input.min_samples_leaf || right_count < input.min_samples_leaf
+                || left_weight == 0.0 || right_weight == 0.0
+                || left_weight < input.min_leaf_weight || right_weight < input.min_leaf_weight { continue; }
+            if monotonic_constraint != 0 {
+                let lp = left[1] / left_weight; let rp = right[1] / right_weight;
+                if lp < lower_bound || lp > upper_bound || rp < lower_bound || rp > upper_bound
+                    || (lp - rp) * monotonic_constraint as f64 > 0.0 { continue; }
+            }
+            let child_impurity = (left_weight / total_weight) * impurity(input.criterion, &left, left_weight)
+                + (right_weight / total_weight) * impurity(input.criterion, &right, right_weight);
+            let gain = parent_impurity - child_impurity;
+            if gain >= input.min_impurity_decrease && best.as_ref().is_none_or(|(_, _, g)| gain > *g) {
+                best = Some((pivot, left_count <= right_count, gain));
+            }
+            continue;
+        }
+        for missing_left in [false, true] {
+            if missing_count == 0 && missing_left != (left_count > total_count - left_count) { continue; }
+            let (lc, rc, lcount, rcount, lw) = if missing_left {
+                let mut lc = left.clone();
+                let missing_classes = missing_classes.as_ref().unwrap();
+                for class in 0..input.n_classes { lc[class] += missing_classes[class]; }
+                (lc, right.clone(), left_count + missing_count, total_count - left_count, left_weight + missing_classes.iter().sum::<f64>())
+            } else {
+                let mut rc = right.clone();
+                for class in 0..input.n_classes { rc[class] += missing_classes.as_ref().unwrap()[class]; }
+                (left.clone(), rc, left_count, total_count - left_count + missing_count, left_weight)
+            };
+            let rw = total_weight - lw;
+            if lcount < input.min_samples_leaf || rcount < input.min_samples_leaf || lw == 0.0 || rw == 0.0
+                || lw < input.min_leaf_weight || rw < input.min_leaf_weight { continue; }
+            if monotonic_constraint != 0 {
+                let lp = lc[1] / lw; let rp = rc[1] / rw;
+                if lp < lower_bound || lp > upper_bound || rp < lower_bound || rp > upper_bound
+                    || (lp - rp) * monotonic_constraint as f64 > 0.0 { continue; }
+            }
+            let child_impurity = (lw / total_weight) * impurity(input.criterion, &lc, lw)
+                + (rw / total_weight) * impurity(input.criterion, &rc, rw);
+            let gain = parent_impurity - child_impurity;
+            if gain >= input.min_impurity_decrease && best.as_ref().is_none_or(|(_, _, g)| gain > *g) {
+                best = Some((pivot, !missing_left, gain));
+            }
         }
     }
     best
@@ -1218,7 +1321,7 @@ impl RfInput for DenseInput {
         target: &Self::DecisionSlice,
         split_cache: &Self::SplitCache,
         _: &mut RfRng,
-    ) -> Option<(Self::Pivot, f64)> {
+    ) -> Option<(Self::Pivot, bool, f64)> {
         best_split(self, mask, feature, target, split_cache, 0, 0.0, 1.0)
     }
 
@@ -1231,7 +1334,7 @@ impl RfInput for DenseInput {
         _: &mut RfRng,
         lower_bound: f64,
         upper_bound: f64,
-    ) -> Option<(Self::Pivot, f64)> {
+    ) -> Option<(Self::Pivot, bool, f64)> {
         best_split(
             self,
             mask,
@@ -1257,32 +1360,30 @@ impl RfInput for DenseInput {
         mask: &'a Mask,
         feature: Self::FeatureId,
         pivot: &'a Self::Pivot,
+        missing_left: bool,
     ) -> impl Iterator<Item = bool> + 'a {
         if self.labels.is_none() {
             let values = match &self.values {
-                DenseValues::Exact(values) => mask
-                    .iter()
-                    .map(|&row| values[row * self.columns + feature] > *pivot)
-                    .collect::<Vec<_>>()
-                    .into_iter(),
-                DenseValues::Binned(values) => mask
-                    .iter()
-                    .map(|&row| values[row * self.columns + feature] as f64 > *pivot)
-                    .collect::<Vec<_>>()
-                    .into_iter(),
+                DenseValues::Exact(values) => {
+                    if self.has_missing_values { mask.iter().map(|&row| { let value = values[row * self.columns + feature]; if value.is_nan() { missing_left } else { value > *pivot } }).collect::<Vec<_>>().into_iter() }
+                    else { mask.iter().map(|&row| values[row * self.columns + feature] > *pivot).collect::<Vec<_>>().into_iter() }
+                }
+                DenseValues::Binned(values) => {
+                    if self.has_missing_values { mask.iter().map(|&row| { let bin = values[row * self.columns + feature]; let missing_bin = self.bin_edges.as_ref().map_or(usize::MAX, |e| e[feature].len() + 1); if bin as usize == missing_bin { missing_left } else { (bin as f64) > *pivot } }).collect::<Vec<_>>().into_iter() }
+                    else { mask.iter().map(|&row| (values[row * self.columns + feature] as f64) > *pivot).collect::<Vec<_>>().into_iter() }
+                }
                 DenseValues::Sparse(_) => mask
                     .iter()
-                    .map(|&row| self.value(row, feature) > *pivot)
+                    .map(|&row| self.routes_left(row, feature, *pivot, missing_left))
                     .collect::<Vec<_>>()
                     .into_iter(),
             };
             DenseSplitIter::Buffered(values)
         } else {
-            DenseSplitIter::Lazy {
-                input: self,
-                rows: mask.iter(),
-                feature,
-                pivot: *pivot,
+            if self.has_missing_values {
+                DenseSplitIter::LazyMissing { input: self, rows: mask.iter(), feature, pivot: *pivot, missing_left }
+            } else {
+                DenseSplitIter::Lazy { input: self, rows: mask.iter(), feature, pivot: *pivot }
             }
         }
     }

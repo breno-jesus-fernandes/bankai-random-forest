@@ -21,12 +21,13 @@ tests are in `tests/test_sklearn_compatibility_audit.py`.
 | `warm_start` | Partial | Increasing `n_estimators` rebuilds the deterministic forest instead of appending only the new trees. Final predictions are covered, but incremental-fit performance differs. |
 | Feature importance | Partial semantic parity | The sklearn attribute exists. Bankai also exposes split-count, gain, and OOB permutation modes; values are not guaranteed to match sklearn's default impurity importance exactly. |
 | Sparse input | Supported for CSR/CSC feature matrices | Fit and prediction accept SciPy CSR and CSC without materializing the full matrix as dense. Implicit entries are zero. Exact and histogram modes, OOB, importances, validation, and sklearn prediction labels have coverage. |
-| NaN and multioutput input | Intentional Bankai boundary | NaN feature values and multioutput targets remain unsupported. Focused rejection tests are retained while their follow-up milestones remain open. |
+| NaN feature input | Supported | Dense and CSR/CSC matrices accept NaN. Exact and histogram splits learn a missing-value direction; prediction uses it, or sends unseen NaNs to the larger child. Multioutput targets remain unsupported. |
+| Multioutput input | Intentional Bankai boundary | Multioutput targets remain unsupported while the v1.6 milestone is open. |
 
 ## Priorities
 
-1. Keep NaN input and multioutput as explicit follow-up decisions; they require
-   backend or scope changes beyond this audit.
+1. Keep multioutput targets as an explicit follow-up decision; they require
+   broader estimator and prediction-shape changes.
 2. Preserve the current `apply` and `decision_path` behavior with regression
    coverage; these inherited methods work in the tested sklearn version.
 
@@ -34,11 +35,16 @@ tests are in `tests/test_sklearn_compatibility_audit.py`.
 
 Verification ran against scikit-learn 1.9.1 and Python 3.11.11. The release
 extension build, sklearn estimator checks, Rust tests, and full Python suite
-passed (128 Python tests and 19 Rust tests). Sparse coverage checks CSR/CSC
+passed (140 Python tests and 19 Rust tests). NaN coverage exercises learned
+routing and fallback for dense/CSR/CSC, exact/histogram, OOB, apply,
+decision_path, TreeSHAP, sklearn parity, and joblib. Sparse coverage checks CSR/CSC
 against dense results, sklearn predictions, OOB, validation, and joblib.
 Monotonicity coverage compares
 increasing and decreasing constraints against sklearn's probability invariants
 in exact and histogram modes, and checks joblib and TreeSHAP compatibility.
 Two existing `divide by zero` warnings from `log(0)` remain in
 `predict_log_proba` coverage. Release benchmarks with warmups are documented
-in `benchmarks/results-monotonic-10k/` and `benchmarks/results-sparse-10k/`.
+in `benchmarks/results-monotonic-10k/`, `benchmarks/results-sparse-10k/`, and
+`benchmarks/results-nan-10k/`. The NaN implementation is still being optimized:
+several finite-only workloads currently exceed the roadmap's 5% regression
+limit, so v1.5.0 remains open.

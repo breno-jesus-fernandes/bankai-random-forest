@@ -256,11 +256,14 @@ loads the PyO3 wrapper.
 
 ### v1.5.0: Missing Feature Values
 
-- [ ] Support NaN values in training and prediction with tree-learned missing
+- [x] Support NaN values in training and prediction with tree-learned missing
       value routing compatible with sklearn.
-- [ ] Test missing-value patterns, features without training NaNs, OOB,
+- [x] Test missing-value patterns, features without training NaNs, OOB,
       probabilities, exact and histogram modes, and serialization.
 - [ ] Verify finite-only data retains behavior and pass all quality gates.
+      The current release comparison exceeds the 5% regression ceiling in
+      dense histogram prediction and several exact CSR/CSC paths; performance
+      remediation is required before this milestone can close.
 
 ### v1.6.0: Multioutput Classification
 
@@ -317,3 +320,4 @@ loads the PyO3 wrapper.
 | 2026-09-26 | v1.2.0 | Cost-complexity pruning complete | Added sklearn-compatible `ccp_alpha` to exact and histogram trees; alpha-zero regression and one-feature sklearn pruning-path parity pass, including inspection, TreeSHAP, and joblib coverage. Full Python/Rust suites and `check_estimator` pass. Release benchmarks with warmups on 10k rows stayed within 5% for both existing backends; report and raw CSV are in `benchmarks/results-ccp-alpha-10k/`. |
 | 2026-09-26 | v1.3.0 | Monotonic constraints complete | Added bounded split selection and leaf votes for increasing/decreasing constraints on binary classification, in exact and histogram modes. Reference probability invariants, invalid values, multiclass rejection, zero-constraint regression, `apply`/`decision_path`, TreeSHAP, joblib, ccp_alpha interaction, and sklearn estimator checks pass. Full suites report 112 Python and 19 Rust tests. Release benchmarks with warmups stayed below 1% regression when unset; enabled-feature cost and raw results are in `benchmarks/results-monotonic-10k/`. |
 | 2026-09-26 | v1.4.0 | Sparse feature matrices complete | Added CSR/CSC fit and prediction through CSR storage with implicit zeros, with no dense matrix materialization. CSR/CSC exact and histogram tests cover predictions/probabilities, OOB, importances, validation, sklearn label parity, and joblib. Dense release fit change stayed below 2.34% and prediction improved in the 10k×20 warmup benchmark; sparse timings and memory results are in `benchmarks/results-sparse-10k/`. |
+| 2026-09-26 | v1.5.0 | NaN routing implemented; performance gate open | Added learned missing-value directions for exact and histogram splits, unseen-NaN fallback, dense/CSR/CSC coverage, OOB, sklearn parity, TreeSHAP/apply/decision_path, and joblib. Python reports 140 passing tests; Rust reports 19. Release benchmark uses warmups and matched `target-cpu=native` builds, but finite workload regressions exceed the 5% gate, so v1.5 remains open. Results are in `benchmarks/results-nan-10k/`. |

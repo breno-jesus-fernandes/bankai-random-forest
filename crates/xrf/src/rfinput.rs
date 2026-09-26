@@ -62,7 +62,7 @@ pub trait RfInput: Sized {
         y: &Self::DecisionSlice,
         split_cache: &Self::SplitCache,
         rng: &mut RfRng,
-    ) -> Option<(Self::Pivot, f64)>;
+    ) -> Option<(Self::Pivot, bool, f64)>;
     /// Find a split under inherited positive-class probability bounds.
     fn new_split_with_bounds(
         &self,
@@ -73,7 +73,7 @@ pub trait RfInput: Sized {
         rng: &mut RfRng,
         _lower_bound: f64,
         _upper_bound: f64,
-    ) -> Option<(Self::Pivot, f64)> {
+    ) -> Option<(Self::Pivot, bool, f64)> {
         self.new_split(on, using, y, split_cache, rng)
     }
     /// Monotonicity direction for a feature: -1, 0, or 1.
@@ -86,6 +86,7 @@ pub trait RfInput: Sized {
         on: &'a Mask,
         using: Self::FeatureId,
         by: &'a Self::Pivot,
+        missing_left: bool,
     ) -> impl Iterator<Item = bool> + 'a;
 }
 

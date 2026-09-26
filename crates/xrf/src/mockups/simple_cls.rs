@@ -47,15 +47,16 @@ impl RfInput for DataFrame {
         y: &Self::DecisionSlice,
         _: &Self::SplitCache,
         _rng: &mut crate::RfRng,
-    ) -> Option<(Self::Pivot, f64)> {
+    ) -> Option<(Self::Pivot, bool, f64)> {
         let feature = &self.x[using];
-        scan(&feature, y, on)
+        scan(&feature, y, on).map(|(pivot, score)| (pivot, false, score))
     }
     fn split_iter<'a>(
         &'a self,
         on: &'a Mask,
         using: Self::FeatureId,
         by: &'a Self::Pivot,
+        _missing_left: bool,
     ) -> impl Iterator<Item = bool> + 'a {
         let feature = &self.x[using];
         on.iter().map(|&e| feature[e] > *by)

@@ -10,6 +10,7 @@ use xrf::{Forest, Walk};
 struct ShapNode {
     feature: i32,
     threshold: f64,
+    missing_left: bool,
     left: usize,
     right: usize,
     cover: f64,
@@ -284,7 +285,7 @@ impl NativeForest {
     /// Export compact tree arrays for the experimental Python TreeSHAP facade.
     /// Children are reversed because XRF's left branch is `value > pivot`,
     /// while sklearn tree arrays define left as `value <= threshold`.
-    fn shap_tree_arrays(&self) -> PyResult<Vec<(Vec<i32>, Vec<i32>, Vec<i32>, Vec<f64>, Vec<f64>, Vec<f64>)>> {
+    fn shap_tree_arrays(&self) -> PyResult<Vec<(Vec<i32>, Vec<i32>, Vec<i32>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<i32>)>> {
         let forest = self.forest.as_ref().ok_or_else(|| PyRuntimeError::new_err("forest is not fitted"))?;
         Ok(forest.tree_refs().map(|tree| {
             let mut nodes = Vec::new();
@@ -295,6 +296,7 @@ impl NativeForest {
             let mut threshold = Vec::with_capacity(nodes.len());
             let mut cover = Vec::with_capacity(nodes.len());
             let mut values = Vec::with_capacity(nodes.len() * self.n_classes);
+            let mut missing_go_to_left = Vec::with_capacity(nodes.len());
             for node in nodes {
                 // See method documentation: swap child indexes for sklearn.
                 left.push(if node.feature < 0 { -1 } else { node.right as i32 });
@@ -305,12 +307,14 @@ impl NativeForest {
                     feature_edges.get(node.threshold.floor() as usize).copied()
                 }).unwrap_or(node.threshold);
                 threshold.push(exported_threshold);
+                // Exported child indexes are reversed to sklearn's convention.
+                missing_go_to_left.push(i32::from(!node.missing_left));
                 cover.push(node.cover);
                 for class in 0..self.n_classes {
                     values.push(f64::from(node.vote == Some(class)));
                 }
             }
-            (left, right, feature, threshold, cover, values)
+            (left, right, feature, threshold, cover, values, missing_go_to_left)
         }).collect())
     }
 
@@ -345,9 +349,9 @@ impl NativeForest {
 fn flatten_tree(tree: &xrf::Tree<DenseInput>, nodes: &mut Vec<ShapNode>) -> usize {
     let index = nodes.len();
     match tree {
-        xrf::Tree::Leaf(vote, cover) => nodes.push(ShapNode { feature: -1, threshold: 0.0, left: 0, right: 0, cover: *cover as f64, vote: Some(*vote) }),
-        xrf::Tree::Branch(feature, pivot, _, cover, left, right) => {
-            nodes.push(ShapNode { feature: *feature as i32, threshold: *pivot, left: 0, right: 0, cover: *cover as f64, vote: None });
+        xrf::Tree::Leaf(vote, cover) => nodes.push(ShapNode { feature: -1, threshold: 0.0, missing_left: false, left: 0, right: 0, cover: *cover as f64, vote: Some(*vote) }),
+        xrf::Tree::Branch(feature, pivot, score, cover, left, right) => {
+            nodes.push(ShapNode { feature: *feature as i32, threshold: *pivot, missing_left: score.is_sign_negative(), left: 0, right: 0, cover: *cover as f64, vote: None });
             let left_index = flatten_tree(left, nodes);
             let right_index = flatten_tree(right, nodes);
             nodes[index].left = left_index; nodes[index].right = right_index;
@@ -380,7 +384,8 @@ fn recurse_shap(tree: &[ShapNode], input: &DenseInput, row: usize, _features: us
         return;
     }
     let feature = node.feature as usize;
-    let hot = if input.value_at(row, feature) > node.threshold { node.left } else { node.right };
+    let value = input.value_at(row, feature);
+    let hot = if value.is_nan() { if node.missing_left { node.left } else { node.right } } else if value > node.threshold { node.left } else { node.right };
     let cold = if hot == node.left { node.right } else { node.left };
     let cover = node.cover.max(1.0);
     let hot_zero = tree[hot].cover / cover; let cold_zero = tree[cold].cover / cover;
@@ -408,7 +413,7 @@ fn matrix_to_owned(x: &Bound<'_, PyAny>) -> PyResult<MatrixData> {
     if let Ok(array) = x.extract::<PyReadonlyArray2<'_, f64>>() {
         let view = array.as_array(); let rows = view.nrows(); let columns = view.ncols();
         let values: Vec<f64> = view.iter().copied().collect();
-        if values.iter().any(|v| !v.is_finite()) { return Err(PyValueError::new_err("X must contain only finite values")); }
+        if values.iter().any(|v| v.is_infinite()) { return Err(PyValueError::new_err("X must not contain infinite values")); }
         return Ok(MatrixData::Dense(values, rows, columns));
     }
     if x.hasattr("indptr")? && x.hasattr("indices")? && x.hasattr("data")? && x.hasattr("shape")? {
@@ -420,7 +425,7 @@ fn matrix_to_owned(x: &Bound<'_, PyAny>) -> PyResult<MatrixData> {
         let indptr = p.as_array().iter().map(|&v| usize::try_from(v).map_err(|_| PyValueError::new_err("invalid CSR row pointer"))).collect::<PyResult<Vec<_>>>()?;
         let indices = i.as_array().iter().map(|&v| usize::try_from(v).map_err(|_| PyValueError::new_err("invalid CSR column index"))).collect::<PyResult<Vec<_>>>()?;
         let data: Vec<f64> = d.as_array().iter().copied().collect();
-        if data.iter().any(|v| !v.is_finite()) { return Err(PyValueError::new_err("X must contain only finite values")); }
+        if data.iter().any(|v| v.is_infinite()) { return Err(PyValueError::new_err("X must not contain infinite values")); }
         return Ok(MatrixData::Csr{indptr,indices,data,rows:shape.0,columns:shape.1});
     }
     Err(PyValueError::new_err("X must be a two-dimensional NumPy array or CSR/CSC matrix"))
