@@ -1,6 +1,6 @@
 mod dense;
 
-use dense::{ClassVotes, DenseInput};
+use dense::{ClassVotes, Criterion, DenseInput};
 use numpy::{PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -28,7 +28,7 @@ impl NativeForest {
         self.forest.is_some()
     }
 
-    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0))]
+    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini"))]
     fn fit(
         &mut self,
         x: PyReadonlyArray2<'_, f64>,
@@ -38,6 +38,7 @@ impl NativeForest {
         random_state: u64,
         sample_weight: Option<PyReadonlyArray1<'_, f64>>,
         min_leaf_weight: f64,
+        criterion: &str,
     ) -> PyResult<()> {
         if n_estimators == 0 {
             return Err(PyValueError::new_err("n_estimators must be at least 1"));
@@ -69,6 +70,11 @@ impl NativeForest {
             .max()
             .and_then(|label| label.checked_add(1))
             .ok_or_else(|| PyValueError::new_err("y must contain at least one class"))?;
+        let criterion = match criterion {
+            "gini" => Criterion::Gini,
+            "entropy" | "log_loss" => Criterion::Entropy,
+            _ => return Err(PyValueError::new_err("unsupported criterion")),
+        };
         let input = DenseInput::training(
             values,
             rows,
@@ -77,6 +83,7 @@ impl NativeForest {
             sample_weights,
             n_classes,
             min_leaf_weight,
+            criterion,
         )
             .map_err(PyValueError::new_err)?;
 

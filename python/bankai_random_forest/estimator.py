@@ -74,7 +74,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         )
 
         self._fit_seed = self._next_seed()
-        self._fit_max_features = max(1, int(np.sqrt(self.n_features_in_)))
+        self._fit_max_features = self._resolve_max_features()
         self._fit_X = X
         self._fit_y = encoded_y.astype(np.int64, copy=False)
         self._fit_sample_weight = sample_weight
@@ -89,6 +89,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             random_state=self._fit_seed,
             sample_weight=self._fit_sample_weight,
             min_leaf_weight=self._fit_min_leaf_weight,
+            criterion=self.criterion,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -135,6 +136,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             random_state=self._fit_seed,
             sample_weight=self._fit_sample_weight,
             min_leaf_weight=self._fit_min_leaf_weight,
+            criterion=self.criterion,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -147,11 +149,9 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
 
     def _reject_unsupported_baseline_parameters(self, sample_weight):
         unsupported = (
-            ("criterion", self.criterion != "gini"),
             ("max_depth", self.max_depth is not None),
             ("min_samples_split", self.min_samples_split != 2),
             ("min_samples_leaf", self.min_samples_leaf != 1),
-            ("max_features", self.max_features != "sqrt"),
             ("max_leaf_nodes", self.max_leaf_nodes is not None),
             ("min_impurity_decrease", self.min_impurity_decrease != 0.0),
             ("bootstrap", self.bootstrap is not True),
@@ -166,6 +166,25 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         for name, is_unsupported in unsupported:
             if is_unsupported:
                 raise NotImplementedError(f"{name} is not implemented yet")
+
+    def _resolve_max_features(self):
+        max_features = self.max_features
+        n_features = self.n_features_in_
+        if max_features is None:
+            return n_features
+        if max_features == "sqrt":
+            return max(1, int(np.sqrt(n_features)))
+        if max_features == "log2":
+            return max(1, int(np.log2(n_features)))
+        if isinstance(max_features, (int, np.integer)) and not isinstance(max_features, bool):
+            if 1 <= max_features <= n_features:
+                return int(max_features)
+        if isinstance(max_features, (float, np.floating)) and 0.0 < max_features <= 1.0:
+            return max(1, int(max_features * n_features))
+        raise ValueError(
+            "max_features must be an integer in [1, n_features], a float in (0, 1], "
+            "'sqrt', 'log2', or None"
+        )
 
     def _combine_class_weight(self, y, sample_weight):
         if self.class_weight is None:

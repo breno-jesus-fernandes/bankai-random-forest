@@ -54,11 +54,9 @@ def test_fit_sets_normalized_feature_importances(separable_data):
 @pytest.mark.parametrize(
     ("parameters", "name"),
     [
-        ({"criterion": "entropy"}, "criterion"),
         ({"max_depth": 2}, "max_depth"),
         ({"min_samples_split": 3}, "min_samples_split"),
         ({"min_samples_leaf": 2}, "min_samples_leaf"),
-        ({"max_features": "log2"}, "max_features"),
         ({"max_leaf_nodes": 2}, "max_leaf_nodes"),
         ({"min_impurity_decrease": 0.1}, "min_impurity_decrease"),
         ({"bootstrap": False}, "bootstrap"),
@@ -109,6 +107,28 @@ def test_class_weight_changes_the_majority_vote():
     ).fit(x, y)
 
     np.testing.assert_array_equal(classifier.predict([[0.0]]), np.array([1]))
+
+
+@pytest.mark.parametrize("criterion", ["entropy", "log_loss"])
+def test_fit_supports_information_gain_criteria(separable_data, criterion):
+    x, y = separable_data
+
+    classifier = BankaiRandomForestClassifier(
+        n_estimators=25, criterion=criterion, random_state=42
+    ).fit(x, y)
+
+    np.testing.assert_array_equal(classifier.predict(x), y)
+
+
+@pytest.mark.parametrize("max_features", [None, "log2", 1, 1.0, 0.5])
+def test_fit_supports_sklearn_max_features_forms(separable_data, max_features):
+    x, y = separable_data
+
+    classifier = BankaiRandomForestClassifier(
+        n_estimators=25, max_features=max_features, random_state=42
+    ).fit(x, y)
+
+    np.testing.assert_array_equal(classifier.predict(x), y)
 
 
 def test_integer_sample_weight_matches_repeated_training_rows():

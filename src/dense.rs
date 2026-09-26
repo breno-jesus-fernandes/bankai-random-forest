@@ -11,6 +11,13 @@ pub struct DenseInput {
     columns: usize,
     n_classes: usize,
     min_leaf_weight: f64,
+    criterion: Criterion,
+}
+
+#[derive(Clone, Copy)]
+pub enum Criterion {
+    Gini,
+    Entropy,
 }
 
 impl DenseInput {
@@ -22,6 +29,7 @@ impl DenseInput {
         sample_weights: Vec<f64>,
         n_classes: usize,
         min_leaf_weight: f64,
+        criterion: Criterion,
     ) -> Result<Self, String> {
         validate_matrix(&values, rows, columns)?;
         if labels.len() != rows {
@@ -57,6 +65,7 @@ impl DenseInput {
             columns,
             n_classes,
             min_leaf_weight,
+            criterion,
         })
     }
 
@@ -79,6 +88,7 @@ impl DenseInput {
             columns,
             n_classes,
             min_leaf_weight: 0.0,
+            criterion: Criterion::Gini,
         })
     }
 
@@ -220,21 +230,32 @@ impl DecisionSlice<usize> for DenseDecisionSlice {
     }
 }
 
-fn gini(class_weights: &[f64], total_weight: f64) -> f64 {
+fn impurity(criterion: Criterion, class_weights: &[f64], total_weight: f64) -> f64 {
     if total_weight == 0.0 {
         return 0.0;
     }
-
-    1.0 - class_weights
-        .iter()
-        .map(|&weight| {
-            let probability = weight / total_weight;
-            probability * probability
-        })
-        .sum::<f64>()
+    match criterion {
+        Criterion::Gini => {
+            1.0 - class_weights
+                .iter()
+                .map(|&weight| {
+                    let probability = weight / total_weight;
+                    probability * probability
+                })
+                .sum::<f64>()
+        }
+        Criterion::Entropy => class_weights
+            .iter()
+            .filter(|&&weight| weight > 0.0)
+            .map(|&weight| {
+                let probability = weight / total_weight;
+                -probability * probability.ln()
+            })
+            .sum(),
+    }
 }
 
-fn best_gini_split(
+fn best_split(
     input: &DenseInput,
     mask: &Mask,
     feature: usize,
@@ -252,7 +273,7 @@ fn best_gini_split(
     }
 
     let total_weight = target.total_weight;
-    let parent_impurity = gini(&target.class_weights, total_weight);
+    let parent_impurity = impurity(input.criterion, &target.class_weights, total_weight);
     let mut left = vec![0.0; input.n_classes];
     let mut right = target.class_weights.clone();
     let mut left_weight = 0.0;
@@ -276,8 +297,10 @@ fn best_gini_split(
         if left_weight < input.min_leaf_weight || right_weight < input.min_leaf_weight {
             continue;
         }
-        let child_impurity = (left_weight / total_weight) * gini(&left, left_weight)
-            + (right_weight / total_weight) * gini(&right, right_weight);
+        let child_impurity = (left_weight / total_weight)
+            * impurity(input.criterion, &left, left_weight)
+            + (right_weight / total_weight)
+                * impurity(input.criterion, &right, right_weight);
         let gain = parent_impurity - child_impurity;
         let midpoint = value * 0.5 + next * 0.5;
         let pivot = if midpoint >= next { value } else { midpoint };
@@ -361,7 +384,7 @@ impl RfInput for DenseInput {
         target: &Self::DecisionSlice,
         _: &mut RfRng,
     ) -> Option<(Self::Pivot, f64)> {
-        best_gini_split(self, mask, feature, target)
+        best_split(self, mask, feature, target)
     }
 
     fn split_iter(
