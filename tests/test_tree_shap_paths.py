@@ -42,3 +42,25 @@ def test_all_tree_shap_paths_are_additive_with_constant_features(max_bins, class
     np.testing.assert_allclose(
         native_values.sum(axis=1) + native_base, probabilities, atol=1e-6
     )
+
+
+@pytest.mark.parametrize("max_bins", [None, 16])
+def test_constrained_tree_shap_paths_remain_additive(max_bins):
+    rng = np.random.RandomState(157)
+    x = rng.normal(size=(120, 4))
+    y = (x[:, 0] - x[:, 1] > 0).astype(int)
+    model = BankaiRandomForestClassifier(
+        n_estimators=9,
+        random_state=163,
+        max_bins=max_bins,
+        monotonic_cst=[1, -1, 0, 0],
+    ).fit(x[:90], y[:90])
+    explained = x[90:96]
+    probabilities = model.predict_proba(explained)
+    explainer = shap.TreeExplainer(model)
+    values = np.asarray(explainer.shap_values(explained))
+
+    assert values.shape == (len(explained), x.shape[1], 2)
+    np.testing.assert_allclose(
+        values.sum(axis=1) + explainer.expected_value, probabilities, atol=1e-6
+    )

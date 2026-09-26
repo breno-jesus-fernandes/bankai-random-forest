@@ -238,10 +238,10 @@ loads the PyO3 wrapper.
 
 ### v1.3.0: Monotonic Constraints
 
-- [ ] Implement sklearn-compatible `monotonic_cst` for binary classification.
-- [ ] Test increasing, decreasing, and unconstrained features; invalid
+- [x] Implement sklearn-compatible `monotonic_cst` for binary classification.
+- [x] Test increasing, decreasing, and unconstrained features; invalid
       constraints; probabilities; exact and histogram modes; TreeSHAP; and joblib.
-- [ ] Verify existing unconstrained models retain behavior and pass all quality
+- [x] Verify existing unconstrained models retain behavior and pass all quality
       gates.
 
 ### v1.4.0: Sparse Feature Matrices
@@ -313,3 +313,4 @@ loads the PyO3 wrapper.
 | 2026-09-26 | v1.1.0 | Bootstrap class weight parity complete | Added per-tree balanced bootstrap weights through shared dense feature storage. Verified non-bootstrap weighting, deterministic sequential/parallel forests, OOB scoring and permutation importance. Release benchmarks on 10k rows stayed within the 5% gate for existing exact and histogram paths; details and raw measurements are in `benchmarks/results-balanced-subsample-10k/`. |
 | 2026-09-26 | v1.2.0-v1.6.0 | Compatibility expansion planned | Added independent pruning, monotonicity, sparse, NaN, and multioutput milestones. Each requires TDD, full compatibility regression coverage, release benchmarks with untimed warmups, and a maximum 5% regression in existing workloads. |
 | 2026-09-26 | v1.2.0 | Cost-complexity pruning complete | Added sklearn-compatible `ccp_alpha` to exact and histogram trees; alpha-zero regression and one-feature sklearn pruning-path parity pass, including inspection, TreeSHAP, and joblib coverage. Full Python/Rust suites and `check_estimator` pass. Release benchmarks with warmups on 10k rows stayed within 5% for both existing backends; report and raw CSV are in `benchmarks/results-ccp-alpha-10k/`. |
+| 2026-09-26 | v1.3.0 | Monotonic constraints complete | Added bounded split selection and leaf votes for increasing/decreasing constraints on binary classification, in exact and histogram modes. Reference probability invariants, invalid values, multiclass rejection, zero-constraint regression, `apply`/`decision_path`, TreeSHAP, joblib, ccp_alpha interaction, and sklearn estimator checks pass. Full suites report 112 Python and 19 Rust tests. Release benchmarks with warmups stayed below 1% regression when unset; enabled-feature cost and raw results are in `benchmarks/results-monotonic-10k/`. |

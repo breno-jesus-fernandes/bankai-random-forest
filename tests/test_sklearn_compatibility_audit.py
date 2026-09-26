@@ -200,3 +200,79 @@ def test_ccp_alpha_zero_preserves_unpruned_predictions_and_importances(max_bins)
     assert [tree.tree_.node_count for tree in explicit_zero.estimators_] == [
         tree.tree_.node_count for tree in default.estimators_
     ]
+
+
+@pytest.mark.parametrize("max_bins", [None, 8])
+@pytest.mark.parametrize("ccp_alpha", [0.0, 0.05])
+@pytest.mark.parametrize("constraint,direction", [(1, 1), (-1, -1)])
+def test_monotonic_constraints_bound_positive_class_probability(max_bins, ccp_alpha, constraint, direction):
+    rng = np.random.RandomState(119)
+    x0 = rng.uniform(-2, 2, 320)
+    x1 = rng.normal(size=320)
+    probability = 1 / (1 + np.exp(-direction * (x0 + 0.8 * x1)))
+    y = (rng.uniform(size=320) < probability).astype(int)
+    x = np.column_stack([x0, x1])
+    model = BankaiRandomForestClassifier(
+        n_estimators=21,
+        max_features=None,
+        max_depth=6,
+        monotonic_cst=[constraint, constraint],
+        max_bins=max_bins,
+        ccp_alpha=ccp_alpha,
+        random_state=123,
+    ).fit(x, y)
+    reference = RandomForestClassifier(
+        n_estimators=21,
+        max_features=None,
+        max_depth=6,
+        ccp_alpha=ccp_alpha,
+        monotonic_cst=[constraint, constraint],
+        random_state=123,
+    ).fit(x, y)
+
+    values = np.linspace(-2.5, 2.5, 101)
+    for nuisance_value in np.linspace(-2, 2, 7):
+        grid = np.column_stack([values, np.full_like(values, nuisance_value)])
+        positive_probability = model.predict_proba(grid)[:, 1]
+        reference_probability = reference.predict_proba(grid)[:, 1]
+        assert np.all(direction * np.diff(positive_probability) >= -1e-15)
+        assert np.all(direction * np.diff(reference_probability) >= -1e-15)
+        grid = np.column_stack([np.full_like(values, nuisance_value), values])
+        positive_probability = model.predict_proba(grid)[:, 1]
+        reference_probability = reference.predict_proba(grid)[:, 1]
+        assert np.all(direction * np.diff(positive_probability) >= -1e-15)
+        assert np.all(direction * np.diff(reference_probability) >= -1e-15)
+
+
+@pytest.mark.parametrize("max_bins", [None, 8])
+def test_zero_monotonic_constraints_preserve_default_predictions(max_bins):
+    x, y = audit_data(seed=137)
+    parameters = dict(n_estimators=11, max_bins=max_bins, random_state=139)
+    default = BankaiRandomForestClassifier(**parameters).fit(x, y)
+    unconstrained = BankaiRandomForestClassifier(
+        monotonic_cst=np.zeros(x.shape[1], dtype=int), **parameters
+    ).fit(x, y)
+    np.testing.assert_array_equal(unconstrained.predict(x), default.predict(x))
+    np.testing.assert_array_equal(unconstrained.predict_proba(x), default.predict_proba(x))
+    assert unconstrained.apply(x).shape == (len(x), unconstrained.n_estimators)
+    path, node_ptr = unconstrained.decision_path(x)
+    assert path.shape[0] == len(x)
+    assert node_ptr.shape == (unconstrained.n_estimators + 1,)
+
+
+@pytest.mark.parametrize("constraints", [[2, 0], [1], [1, 0, 0], [1.5, 0.0]])
+def test_monotonic_constraints_validate_values_and_feature_count(constraints):
+    x, y = audit_data()
+    with pytest.raises(ValueError, match="monotonic_cst"):
+        BankaiRandomForestClassifier(
+            n_estimators=3, monotonic_cst=constraints, random_state=127
+        ).fit(x, y)
+
+
+def test_monotonic_constraints_reject_multiclass_targets():
+    x, y = audit_data()
+    y = np.arange(len(y)) % 3
+    with pytest.raises(ValueError, match="binary"):
+        BankaiRandomForestClassifier(
+            n_estimators=3, monotonic_cst=[1, 0, 0, 0, 0], random_state=131
+        ).fit(x, y)

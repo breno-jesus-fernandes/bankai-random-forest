@@ -63,6 +63,23 @@ pub trait RfInput: Sized {
         split_cache: &Self::SplitCache,
         rng: &mut RfRng,
     ) -> Option<(Self::Pivot, f64)>;
+    /// Find a split under inherited positive-class probability bounds.
+    fn new_split_with_bounds(
+        &self,
+        on: &Mask,
+        using: Self::FeatureId,
+        y: &Self::DecisionSlice,
+        split_cache: &Self::SplitCache,
+        rng: &mut RfRng,
+        _lower_bound: f64,
+        _upper_bound: f64,
+    ) -> Option<(Self::Pivot, f64)> {
+        self.new_split(on, using, y, split_cache, rng)
+    }
+    /// Monotonicity direction for a feature: -1, 0, or 1.
+    fn monotonic_constraint(&self, _feature: Self::FeatureId) -> i8 {
+        0
+    }
     /// Application of pivot to a given subset of the data; returns of iterator that sends observations left (for true) or right (for false).
     fn split_iter(
         &self,
@@ -88,6 +105,14 @@ pub trait DecisionSlice<Vote> {
     fn is_pure(&self) -> bool;
     /// Generates a value for the leaf; note that condense may happen not only after is_pure is true but also when leaf is enforced by other circumstances, in particular the exhaustion of the allowed tree depth or failure to generate any split in the tree level scan.
     fn condense(&self, rng: &mut RfRng) -> Vote;
+    /// Condense a leaf while respecting inherited positive-class bounds.
+    fn condense_with_bounds(&self, rng: &mut RfRng, _lower_bound: f64, _upper_bound: f64) -> Vote {
+        self.condense(rng)
+    }
+    /// Weighted fraction of the positive class, when supported.
+    fn positive_probability(&self) -> Option<f64> {
+        None
+    }
     /// Total training weight used to normalize cost-complexity risk.
     fn pruning_weight(&self) -> Option<f64> {
         None

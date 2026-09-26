@@ -42,7 +42,7 @@ impl NativeForest {
         self.forest.is_some()
     }
 
-    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1, max_bins=None, balanced_subsample=false, ccp_alpha=0.0))]
+    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1, max_bins=None, balanced_subsample=false, ccp_alpha=0.0, monotonic_cst=None))]
     fn fit(
         &mut self,
         x: PyReadonlyArray2<'_, f64>,
@@ -66,6 +66,7 @@ impl NativeForest {
         max_bins: Option<usize>,
         balanced_subsample: bool,
         ccp_alpha: f64,
+        monotonic_cst: Option<Vec<i8>>,
     ) -> PyResult<()> {
         if n_estimators == 0 {
             return Err(PyValueError::new_err("n_estimators must be at least 1"));
@@ -122,11 +123,26 @@ impl NativeForest {
             max_bins,
         )
         .map_err(PyValueError::new_err)?;
-        let input = if balanced_subsample {
+        let mut input = if balanced_subsample {
             input.with_balanced_subsample()
         } else {
             input
         };
+        if let Some(constraints) = monotonic_cst {
+            if constraints.len() != columns
+                || constraints.iter().any(|value| !(-1..=1).contains(value))
+            {
+                return Err(PyValueError::new_err(
+                    "monotonic_cst must contain one value from {-1, 0, 1} per feature",
+                ));
+            }
+            if n_classes != 2 {
+                return Err(PyValueError::new_err(
+                    "monotonic_cst is supported only for binary classification",
+                ));
+            }
+            input = input.with_monotonic_constraints(constraints);
+        }
         let input = input.with_ccp_alpha(ccp_alpha);
 
         self.forest = Some(if n_jobs == 1 {

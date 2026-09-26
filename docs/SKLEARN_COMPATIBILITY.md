@@ -15,7 +15,7 @@ tests are in `tests/test_sklearn_compatibility_audit.py`.
 | Classifier estimator tags | Supported | Bankai provides sklearn classifier and single-output target tags; `is_classifier` recognizes the estimator. |
 | `class_weight="balanced_subsample"` | Supported | With bootstrap enabled, each tree computes class factors from its own bootstrap multiplicities; with bootstrap disabled, behavior matches `balanced`. User sample weights are multiplied by the class factors. |
 | `ccp_alpha` | Supported | Cost-complexity pruning supports exact and histogram trees; nonnegative finite values are accepted and `ccp_alpha=0` preserves unpruned behavior. |
-| `monotonic_cst` | Unsupported beyond defaults | Non-default values raise `NotImplementedError`; `None` is accepted. Existing rejection tests are in `tests/test_estimator_fit.py`. |
+| `monotonic_cst` | Supported for dense binary single-output classification | Accepts one `-1`, `0`, or `1` value per feature. Constraints apply to the probability of the positive class; exact and histogram split searches enforce inherited bounds. Multiclass is rejected. Sparse, NaN, and multioutput boundaries remain unchanged. |
 | `max_samples` | Supported for supported inputs | Fractional sample counts use floor and weighted data uses the effective sum of sample weights, matching sklearn's sample-count rule. |
 | `oob_score` | Supported | Boolean scoring and callable scoring are supported; callables receive encoded targets and OOB argmax predictions. |
 | `warm_start` | Partial | Increasing `n_estimators` rebuilds the deterministic forest instead of appending only the new trees. Final predictions are covered, but incremental-fit performance differs. |
@@ -24,9 +24,8 @@ tests are in `tests/test_sklearn_compatibility_audit.py`.
 
 ## Priorities
 
-1. Keep pruning, monotonic constraints, sparse/NaN input, and multioutput as
-   explicit follow-up decisions. They require backend or scope changes beyond
-   this audit.
+1. Keep sparse/NaN input and multioutput as explicit follow-up decisions.
+   They require backend or scope changes beyond this audit.
 2. Preserve the current `apply` and `decision_path` behavior with regression
    coverage; these inherited methods work in the tested sklearn version.
 
@@ -34,7 +33,9 @@ tests are in `tests/test_sklearn_compatibility_audit.py`.
 
 Verification ran against scikit-learn 1.9.1 and Python 3.11.11. The release
 extension build, sklearn estimator checks, Rust tests, and full Python suite
-passed (94 tests). Cost-complexity pruning is covered for exact and histogram
-trees, including parity against sklearn's pruning path for a single-feature
-forest. Two existing
-`divide by zero` warnings from `log(0)` remain in `predict_log_proba` coverage.
+passed (112 Python tests and 19 Rust tests). Monotonicity coverage compares
+increasing and decreasing constraints against sklearn's probability invariants
+in exact and histogram modes, and checks joblib and TreeSHAP compatibility.
+Two existing `divide by zero` warnings from `log(0)` remain in
+`predict_log_proba` coverage. The v1.3.0 release benchmark is documented in
+`benchmarks/results-monotonic-10k/`.

@@ -24,6 +24,7 @@ pub struct DenseInput {
     active_features: Vec<usize>,
     balanced_subsample: bool,
     ccp_alpha: f64,
+    monotonic_constraints: Option<Arc<Vec<i8>>>,
 }
 
 #[derive(Clone)]
@@ -142,6 +143,7 @@ impl DenseInput {
             active_features,
             balanced_subsample: false,
             ccp_alpha: 0.0,
+            monotonic_constraints: None,
         })
     }
 
@@ -187,6 +189,7 @@ impl DenseInput {
             active_features: (0..columns).collect(),
             balanced_subsample: false,
             ccp_alpha: 0.0,
+            monotonic_constraints: None,
         })
     }
 
@@ -209,6 +212,11 @@ impl DenseInput {
 
     pub fn with_ccp_alpha(mut self, ccp_alpha: f64) -> Self {
         self.ccp_alpha = ccp_alpha;
+        self
+    }
+
+    pub fn with_monotonic_constraints(mut self, constraints: Vec<i8>) -> Self {
+        self.monotonic_constraints = Some(Arc::new(constraints));
         self
     }
 
@@ -255,6 +263,7 @@ impl DenseInput {
             min_leaf_weight: min_leaf_fraction * tree_total_weight,
             balanced_subsample: false,
             ccp_alpha: self.ccp_alpha,
+            monotonic_constraints: self.monotonic_constraints.clone(),
             ..self.clone()
         }
     }
@@ -516,6 +525,20 @@ impl DecisionSlice<usize> for DenseDecisionSlice {
         best.consume().map(|(_, class)| class).unwrap_or(0)
     }
 
+    fn condense_with_bounds(&self, rng: &mut RfRng, lower_bound: f64, upper_bound: f64) -> usize {
+        if self.class_weights.len() != 2 || self.total_weight <= 0.0 {
+            return self.condense(rng);
+        }
+        let probability =
+            (self.class_weights[1] / self.total_weight).clamp(lower_bound, upper_bound);
+        usize::from(probability > 0.5)
+    }
+
+    fn positive_probability(&self) -> Option<f64> {
+        (self.class_weights.len() == 2 && self.total_weight > 0.0)
+            .then(|| self.class_weights[1] / self.total_weight)
+    }
+
     fn pruning_weight(&self) -> Option<f64> {
         Some(self.total_weight)
     }
@@ -572,11 +595,29 @@ fn best_split(
     feature: usize,
     target: &DenseDecisionSlice,
     split_cache: &DenseSplitCache,
+    monotonic_constraint: i8,
+    lower_bound: f64,
+    upper_bound: f64,
 ) -> Option<(f64, f64)> {
     let best = if input.histogram_bins.is_some() {
-        best_split_histogram(input, target, &split_cache.0.as_ref()?.features[feature])
+        best_split_histogram(
+            input,
+            target,
+            &split_cache.0.as_ref()?.features[feature],
+            monotonic_constraint,
+            lower_bound,
+            upper_bound,
+        )
     } else {
-        best_split_exact(input, mask, feature, target)
+        best_split_exact(
+            input,
+            mask,
+            feature,
+            target,
+            monotonic_constraint,
+            lower_bound,
+            upper_bound,
+        )
     }?;
     Some((best.0, best.1 * target.total_weight / input.total_weight))
 }
@@ -586,6 +627,9 @@ fn best_split_exact(
     mask: &Mask,
     feature: usize,
     target: &DenseDecisionSlice,
+    monotonic_constraint: i8,
+    lower_bound: f64,
+    upper_bound: f64,
 ) -> Option<(f64, f64)> {
     let mut ranked: Vec<(f64, usize, f64)> = mask
         .iter()
@@ -620,6 +664,18 @@ fn best_split_exact(
         if left_weight == 0.0 || right_weight == 0.0 {
             continue;
         }
+        if monotonic_constraint != 0 {
+            let left_positive = left[1] / left_weight;
+            let right_positive = right[1] / right_weight;
+            if left_positive < lower_bound
+                || left_positive > upper_bound
+                || right_positive < lower_bound
+                || right_positive > upper_bound
+                || (left_positive - right_positive) * monotonic_constraint as f64 > 0.0
+            {
+                continue;
+            }
+        }
         let left_count = index + 1;
         let right_count = ranked.len() - left_count;
         if left_count < input.min_samples_leaf || right_count < input.min_samples_leaf {
@@ -653,6 +709,9 @@ fn best_split_histogram(
     input: &DenseInput,
     target: &DenseDecisionSlice,
     histogram: &FeatureHistogram,
+    monotonic_constraint: i8,
+    lower_bound: f64,
+    upper_bound: f64,
 ) -> Option<(f64, f64)> {
     let bin_count = histogram.sample_counts.len();
     if bin_count < 2 {
@@ -688,6 +747,18 @@ fn best_split_histogram(
             || right_weight < input.min_leaf_weight
         {
             continue;
+        }
+        if monotonic_constraint != 0 {
+            let left_positive = left[1] / left_weight;
+            let right_positive = right[1] / right_weight;
+            if left_positive < lower_bound
+                || left_positive > upper_bound
+                || right_positive < lower_bound
+                || right_positive > upper_bound
+                || (left_positive - right_positive) * monotonic_constraint as f64 > 0.0
+            {
+                continue;
+            }
         }
         let child_impurity = (left_weight / total_weight)
             * impurity(input.criterion, &left, left_weight)
@@ -862,7 +933,37 @@ impl RfInput for DenseInput {
         split_cache: &Self::SplitCache,
         _: &mut RfRng,
     ) -> Option<(Self::Pivot, f64)> {
-        best_split(self, mask, feature, target, split_cache)
+        best_split(self, mask, feature, target, split_cache, 0, 0.0, 1.0)
+    }
+
+    fn new_split_with_bounds(
+        &self,
+        mask: &Mask,
+        feature: Self::FeatureId,
+        target: &Self::DecisionSlice,
+        split_cache: &Self::SplitCache,
+        _: &mut RfRng,
+        lower_bound: f64,
+        upper_bound: f64,
+    ) -> Option<(Self::Pivot, f64)> {
+        best_split(
+            self,
+            mask,
+            feature,
+            target,
+            split_cache,
+            self.monotonic_constraints
+                .as_ref()
+                .map_or(0, |c| c[feature]),
+            lower_bound,
+            upper_bound,
+        )
+    }
+
+    fn monotonic_constraint(&self, feature: Self::FeatureId) -> i8 {
+        self.monotonic_constraints
+            .as_ref()
+            .map_or(0, |c| c[feature])
     }
 
     fn split_iter(

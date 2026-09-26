@@ -159,21 +159,6 @@ def test_rejects_unknown_importance_type(separable_data):
         BankaiRandomForestClassifier(importance_type="unknown").fit(x, y)
 
 
-@pytest.mark.parametrize(
-    ("parameters", "name"),
-    [
-        ({"monotonic_cst": [1]}, "monotonic_cst"),
-    ],
-)
-def test_rejects_parameter_semantics_not_implemented_by_the_baseline(
-    separable_data, parameters, name
-):
-    x, y = separable_data
-
-    with pytest.raises(NotImplementedError, match=name):
-        BankaiRandomForestClassifier(**parameters).fit(x, y)
-
-
 def test_fit_accepts_uniform_sample_weight(separable_data):
     x, y = separable_data
     classifier = BankaiRandomForestClassifier(n_estimators=25, random_state=42)

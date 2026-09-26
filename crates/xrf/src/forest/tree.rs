@@ -5,7 +5,14 @@ use crate::{FairBest, FeatureSampler, Mask, MaskCache, RfRng, XrfError};
 pub enum Tree<I: RfInput> {
     /// Node cover is retained for path-dependent tree explainers.
     Leaf(I::Vote, usize),
-    Branch(I::FeatureId, I::Pivot, f64, usize, Box<Tree<I>>, Box<Tree<I>>),
+    Branch(
+        I::FeatureId,
+        I::Pivot,
+        f64,
+        usize,
+        Box<Tree<I>>,
+        Box<Tree<I>>,
+    ),
 }
 
 use crate::walk::{Walk, WalkIter};
@@ -35,6 +42,8 @@ impl<I: RfInput> Tree<I> {
             mask_cache,
             &split_cache,
             rng,
+            0.0,
+            1.0,
         )
     }
 
@@ -81,14 +90,8 @@ impl<I: RfInput> Tree<I> {
                     &mut left_mask,
                     &mut right_mask,
                 );
-                let (left_risk, left_leaves) = Self::prune_rec(
-                    left,
-                    input,
-                    &left_mask,
-                    root_weight,
-                    ccp_alpha,
-                    mask_cache,
-                );
+                let (left_risk, left_leaves) =
+                    Self::prune_rec(left, input, &left_mask, root_weight, ccp_alpha, mask_cache);
                 let (right_risk, right_leaves) = Self::prune_rec(
                     right,
                     input,
@@ -101,8 +104,8 @@ impl<I: RfInput> Tree<I> {
                 mask_cache.release(left_mask);
 
                 let leaves = left_leaves + right_leaves;
-                let effective_alpha = (node_risk - left_risk - right_risk)
-                    / (leaves.saturating_sub(1) as f64);
+                let effective_alpha =
+                    (node_risk - left_risk - right_risk) / (leaves.saturating_sub(1) as f64);
                 let collapse_vote = if effective_alpha <= ccp_alpha {
                     node_slice.pruning_vote()
                 } else {
@@ -131,18 +134,29 @@ impl<I: RfInput> Tree<I> {
         mask_cache: &mut MaskCache,
         split_cache: &I::SplitCache,
         rng: &mut RfRng,
+        lower_bound: f64,
+        upper_bound: f64,
     ) -> Self {
         let y = input.decision_slice(mask);
         if depth_left == 0 || y.is_pure() || !input.can_split(mask) || *leaf_count >= max_leaves {
-            Self::Leaf(y.condense(rng), mask.len())
+            Self::Leaf(
+                y.condense_with_bounds(rng, lower_bound, upper_bound),
+                mask.len(),
+            )
         } else {
             feature_sampler.reload();
             std::iter::repeat_n((), tries)
                 .fold(FairBest::new(), |mut fair_best: FairBest<_, f64>, _| {
                     let feature = feature_sampler.random_feature(rng);
-                    if let Some((pivot, score)) =
-                        input.new_split(mask, feature, &y, split_cache, rng)
-                    {
+                    if let Some((pivot, score)) = input.new_split_with_bounds(
+                        mask,
+                        feature,
+                        &y,
+                        split_cache,
+                        rng,
+                        lower_bound,
+                        upper_bound,
+                    ) {
                         fair_best.ingest(score, (feature, pivot), rng);
                     }
                     fair_best
@@ -160,6 +174,26 @@ impl<I: RfInput> Tree<I> {
                     );
                     let (left_split_cache, right_split_cache) =
                         input.split_cache_children(split_cache, mask, &left, &right);
+                    let constraint = input.monotonic_constraint(feature);
+                    let (left_bounds, right_bounds) = if constraint == 0 {
+                        ((lower_bound, upper_bound), (lower_bound, upper_bound))
+                    } else {
+                        let left_probability = input
+                            .decision_slice(&left)
+                            .positive_probability()
+                            .unwrap_or(lower_bound);
+                        let right_probability = input
+                            .decision_slice(&right)
+                            .positive_probability()
+                            .unwrap_or(upper_bound);
+                        let middle = (left_probability + right_probability) / 2.0;
+                        if constraint > 0 {
+                            // XRF routes values above the pivot to the left child.
+                            ((middle, upper_bound), (lower_bound, middle))
+                        } else {
+                            ((lower_bound, middle), (middle, upper_bound))
+                        }
+                    };
                     let branch = Self::Branch(
                         feature,
                         pivot,
@@ -176,6 +210,8 @@ impl<I: RfInput> Tree<I> {
                             mask_cache,
                             &left_split_cache,
                             rng,
+                            left_bounds.0,
+                            left_bounds.1,
                         )),
                         Box::new(Self::new_rec(
                             input,
@@ -188,6 +224,8 @@ impl<I: RfInput> Tree<I> {
                             mask_cache,
                             &right_split_cache,
                             rng,
+                            right_bounds.0,
+                            right_bounds.1,
                         )),
                     );
                     mask_cache.release(left);
@@ -195,7 +233,12 @@ impl<I: RfInput> Tree<I> {
                     branch
                 })
                 //No split mean a third way to make a leaf
-                .unwrap_or_else(|| Self::Leaf(y.condense(rng), mask.len()))
+                .unwrap_or_else(|| {
+                    Self::Leaf(
+                        y.condense_with_bounds(rng, lower_bound, upper_bound),
+                        mask.len(),
+                    )
+                })
         }
     }
     pub fn from_walk<W: Iterator<Item = Walk<I>>>(iter: &mut W) -> Result<Self, XrfError> {

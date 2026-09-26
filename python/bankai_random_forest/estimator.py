@@ -182,6 +182,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         sample_weight = self._validate_sample_weight(sample_weight, X.shape[0])
         self.classes_, encoded_y = np.unique(y, return_inverse=True)
         self.n_classes_ = int(self.classes_.shape[0])
+        self._fit_monotonic_cst = self._resolve_monotonic_cst(X.shape[1])
         sample_weight = self._combine_class_weight(y, sample_weight)
         min_leaf_weight = self._validate_min_weight_fraction_leaf(
             sample_weight, X.shape[0]
@@ -241,6 +242,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
                 self.class_weight == "balanced_subsample" and self.bootstrap is True
             ),
             ccp_alpha=self.ccp_alpha,
+            monotonic_cst=self._fit_monotonic_cst,
         )
         self._forest = forest
         self._shap_estimators_cache = None
@@ -313,6 +315,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
                 self.class_weight == "balanced_subsample" and self.bootstrap is True
             ),
             ccp_alpha=self.ccp_alpha,
+            monotonic_cst=self._fit_monotonic_cst,
         )
         self._forest = forest
         self._shap_estimators_cache = None
@@ -323,12 +326,6 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         return int(random_state.randint(0, np.iinfo(np.uint32).max))
 
     def _reject_unsupported_baseline_parameters(self, sample_weight):
-        unsupported = (
-            ("monotonic_cst", self.monotonic_cst is not None),
-        )
-        for name, is_unsupported in unsupported:
-            if is_unsupported:
-                raise NotImplementedError(f"{name} is not implemented yet")
         if (
             not isinstance(self.ccp_alpha, (int, float, np.integer, np.floating))
             or isinstance(self.ccp_alpha, (bool, np.bool_))
@@ -340,6 +337,24 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             raise ValueError("Out of bag estimation only available if bootstrap=True")
         if not isinstance(self.oob_score, (bool, np.bool_)) and not callable(self.oob_score):
             raise ValueError("oob_score must be a boolean or callable")
+
+    def _resolve_monotonic_cst(self, n_features):
+        if self.monotonic_cst is None:
+            return None
+        if self.n_classes_ != 2:
+            raise ValueError("monotonic_cst is supported only for binary classification")
+        constraints = np.asarray(self.monotonic_cst)
+        if constraints.ndim != 1 or constraints.shape[0] != n_features:
+            raise ValueError(
+                "monotonic_cst must have one value per feature (" + str(n_features) + ")"
+            )
+        try:
+            constraints = constraints.astype(np.float64)
+        except (TypeError, ValueError) as error:
+            raise ValueError("monotonic_cst values must be -1, 0, or 1") from error
+        if not np.isfinite(constraints).all() or not np.isin(constraints, [-1, 0, 1]).all():
+            raise ValueError("monotonic_cst values must be -1, 0, or 1")
+        return constraints.astype(np.int8).tolist()
 
     def _resolve_max_depth(self):
         if self.max_depth is None:
