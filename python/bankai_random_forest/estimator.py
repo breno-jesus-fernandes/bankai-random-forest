@@ -86,6 +86,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         self._fit_min_samples_leaf = self._resolve_min_samples(
             self.min_samples_leaf, 1, "min_samples_leaf", X.shape[0]
         )
+        self._fit_max_samples = self._resolve_max_samples(X.shape[0])
 
         forest = _core.NativeForest()
         forest.fit(
@@ -101,6 +102,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             min_samples_split=self._fit_min_samples_split,
             min_samples_leaf=self._fit_min_samples_leaf,
             bootstrap=self.bootstrap,
+            max_samples=self._fit_max_samples,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -152,6 +154,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             min_samples_split=self._fit_min_samples_split,
             min_samples_leaf=self._fit_min_samples_leaf,
             bootstrap=self.bootstrap,
+            max_samples=self._fit_max_samples,
         )
         self._forest = forest
         self.feature_importances_ = np.asarray(
@@ -171,7 +174,6 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             ("verbose", self.verbose != 0),
             ("warm_start", self.warm_start is not False),
             ("ccp_alpha", self.ccp_alpha != 0.0),
-            ("max_samples", self.max_samples is not None),
             ("monotonic_cst", self.monotonic_cst is not None),
         )
         for name, is_unsupported in unsupported:
@@ -211,6 +213,19 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         raise ValueError(
             "max_features must be an integer in [1, n_features], a float in (0, 1], "
             "'sqrt', 'log2', or None"
+        )
+
+    def _resolve_max_samples(self, n_samples):
+        if self.max_samples is None:
+            return None
+        if self.bootstrap is not True:
+            raise ValueError("max_samples can only be set if bootstrap=True")
+        if isinstance(self.max_samples, (int, np.integer)) and 1 <= self.max_samples <= n_samples:
+            return int(self.max_samples)
+        if isinstance(self.max_samples, (float, np.floating)) and 0.0 < self.max_samples <= 1.0:
+            return max(1, int(round(self.max_samples * n_samples)))
+        raise ValueError(
+            "max_samples must be an integer in [1, n_samples] or a float in (0, 1]"
         )
 
     def _combine_class_weight(self, y, sample_weight):

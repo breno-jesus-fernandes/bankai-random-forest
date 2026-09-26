@@ -61,7 +61,6 @@ def test_fit_sets_normalized_feature_importances(separable_data):
         ({"verbose": 1}, "verbose"),
         ({"warm_start": True}, "warm_start"),
         ({"ccp_alpha": 0.1}, "ccp_alpha"),
-        ({"max_samples": 0.5}, "max_samples"),
         ({"monotonic_cst": [1]}, "monotonic_cst"),
     ],
 )
@@ -155,6 +154,17 @@ def test_fit_supports_training_without_bootstrap(separable_data):
 
     classifier = BankaiRandomForestClassifier(
         n_estimators=25, bootstrap=False, random_state=42
+    ).fit(x, y)
+
+    np.testing.assert_array_equal(classifier.predict(x), y)
+
+
+@pytest.mark.parametrize("max_samples", [4, 0.5])
+def test_fit_supports_bootstrap_sample_limits(separable_data, max_samples):
+    x, y = separable_data
+
+    classifier = BankaiRandomForestClassifier(
+        n_estimators=25, max_samples=max_samples, random_state=42
     ).fit(x, y)
 
     np.testing.assert_array_equal(classifier.predict(x), y)

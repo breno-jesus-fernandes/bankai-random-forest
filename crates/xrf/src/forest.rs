@@ -57,7 +57,7 @@ impl<I: RfInput> Forest<I> {
         max_depth: usize,
     ) -> Self {
         Self::new_with_settings(
-            input, trees, tries, save_forest, importance, oob, seed, max_depth, true,
+            input, trees, tries, save_forest, importance, oob, seed, max_depth, true, None,
         )
     }
 
@@ -73,6 +73,7 @@ impl<I: RfInput> Forest<I> {
         seed: u64,
         max_depth: usize,
         bootstrap: bool,
+        sample_size: Option<usize>,
     ) -> Self {
         let num_trees = trees;
         let mut trees = MaybeVec::new(save_forest);
@@ -95,7 +96,11 @@ impl<I: RfInput> Forest<I> {
         for tree_id in 0..num_trees {
             let mut rng = RfRng::from_seed(seed, 1 + tree_id as u64);
             let (bag, oob) = if bootstrap {
-                Mask::new_bag_oob(input.observation_count(), &mut rng)
+                Mask::new_bag_oob_with_size(
+                    input.observation_count(),
+                    sample_size.unwrap_or(input.observation_count()),
+                    &mut rng,
+                )
             } else {
                 (Mask::new_all(input.observation_count()), Mask::new_all(0))
             };

@@ -69,11 +69,15 @@ impl Mask {
     /// Bag contains as many observations as in the original mask, but sampled with resampling, thus only about 63.2% of unique observation remain there, yet they are multiplied.
     /// The other about 36.8% is called OOB and stored in the second slot of the resulting pair.
     pub fn new_bag_oob(n: usize, rng: &mut RfRng) -> (Self, Self) {
+        Self::new_bag_oob_with_size(n, n, rng)
+    }
+    /// Same as `new_bag_oob`, with an explicit bootstrap sample size.
+    pub fn new_bag_oob_with_size(n: usize, sample_size: usize, rng: &mut RfRng) -> (Self, Self) {
         let mut bag = Vec::with_capacity(n);
         let mut hits: Vec<usize> = vec![0; n];
         // Hits[e] is the number of times e is in bag]
         // this can be optimised for large n and make both the bag & oob masks to be sorted for some cache locality maybe
-        for _ in 0..n {
+        for _ in 0..sample_size {
             hits[rng.up_to(n)] += 1;
         }
 
