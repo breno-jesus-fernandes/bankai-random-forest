@@ -125,8 +125,8 @@ interface.
       F1, probability RMSE, agreement, and environment metadata.
 - [ ] Build signed release artifacts with Maturin.
   - [x] Automate optimized Linux/macOS/Windows wheels, an sdist, and GitHub
-        OIDC-backed Sigstore signatures for published releases; allow manual
-        signing and verification of candidates without publishing.
+        OIDC-backed Sigstore signing and identity verification for published
+        releases; allow manual signing and verification without publishing.
   - [ ] Run a tagged release or manual GitHub Actions build and verify its
         Sigstore bundles against the expected workflow identity.
 
