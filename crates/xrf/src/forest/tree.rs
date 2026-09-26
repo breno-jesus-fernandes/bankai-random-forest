@@ -3,8 +3,9 @@ use crate::rfinput::{DecisionSlice, RfInput};
 use crate::{FairBest, FeatureSampler, Mask, MaskCache, RfRng, XrfError};
 
 pub enum Tree<I: RfInput> {
-    Leaf(I::Vote),
-    Branch(I::FeatureId, I::Pivot, f64, Box<Tree<I>>, Box<Tree<I>>),
+    /// Node cover is retained for path-dependent tree explainers.
+    Leaf(I::Vote, usize),
+    Branch(I::FeatureId, I::Pivot, f64, usize, Box<Tree<I>>, Box<Tree<I>>),
 }
 
 use crate::walk::{Walk, WalkIter};
@@ -50,7 +51,7 @@ impl<I: RfInput> Tree<I> {
     ) -> Self {
         let y = input.decision_slice(mask);
         if depth_left == 0 || y.is_pure() || !input.can_split(mask) || *leaf_count >= max_leaves {
-            Self::Leaf(y.condense(rng))
+            Self::Leaf(y.condense(rng), mask.len())
         } else {
             feature_sampler.reload();
             std::iter::repeat_n((), tries)
@@ -80,6 +81,7 @@ impl<I: RfInput> Tree<I> {
                         feature,
                         pivot,
                         best_score,
+                        mask.len(),
                         Box::new(Self::new_rec(
                             input,
                             &left,
@@ -110,13 +112,13 @@ impl<I: RfInput> Tree<I> {
                     branch
                 })
                 //No split mean a third way to make a leaf
-                .unwrap_or_else(|| Self::Leaf(y.condense(rng)))
+                .unwrap_or_else(|| Self::Leaf(y.condense(rng), mask.len()))
         }
     }
     pub fn from_walk<W: Iterator<Item = Walk<I>>>(iter: &mut W) -> Result<Self, XrfError> {
         let b = iter.next();
         match b {
-            Some(Walk::VisitLeaf(v)) => Ok(Tree::Leaf(v)),
+            Some(Walk::VisitLeaf(v)) => Ok(Tree::Leaf(v, 0)),
             Some(Walk::VisitBranch(fid, piv, score)) => {
                 let left = Self::from_walk(iter)?;
                 let right = Self::from_walk(iter)?;
@@ -124,6 +126,7 @@ impl<I: RfInput> Tree<I> {
                     fid,
                     piv,
                     score,
+                    0,
                     Box::new(left),
                     Box::new(right),
                 ))
@@ -139,8 +142,8 @@ impl<I: RfInput> Tree<I> {
         mask_cache: &mut MaskCache,
     ) {
         match self {
-            Self::Leaf(vote) => on.iter().for_each(|e| onto[*e].ingest_vote(*vote)),
-            Self::Branch(feature_id, pivot, _, left, right) => {
+            Self::Leaf(vote, _) => on.iter().for_each(|e| onto[*e].ingest_vote(*vote)),
+            Self::Branch(feature_id, pivot, _, _, left, right) => {
                 let mut left_on = mask_cache.provide();
                 let mut right_on = mask_cache.provide();
                 on.split_into(

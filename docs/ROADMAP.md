@@ -152,11 +152,21 @@ loads the PyO3 wrapper.
 
 - [x] Verify model-agnostic SHAP permutation explanations through
       `predict_proba`, including binary class output shapes and additivity.
-- [x] Confirm and document the current `TreeExplainer` incompatibility.
-- [ ] Expose or adapt Bankai's native tree structure for SHAP's fast TreeSHAP
-      path without making SHAP a runtime dependency.
-- [ ] Validate binary and multiclass TreeSHAP additivity for exact and
+- [x] Expose Bankai's native tree structure through sklearn's tree view so
+      `shap.TreeExplainer(classifier)` uses the direct route.
+- [x] Validate binary and multiclass TreeSHAP additivity for exact and
       histogram-trained forests.
+
+### v0.8.0: Joblib Serialization Compatibility
+
+- [x] Verify `joblib.dump` and `joblib.load` round trips for fitted Bankai
+      classifiers using exact and histogram training.
+- [x] Check that restored estimators preserve parameters, class labels,
+      predictions, probabilities, and feature importances.
+- [x] Assess artifact behavior with compression and `mmap_mode`, and record
+      any supported-use constraints.
+- [x] Document the tested joblib, Python, and Bankai versions and the
+      serialization compatibility policy.
 
 ## Progress Log
 
@@ -189,4 +199,10 @@ loads the PyO3 wrapper.
 | 2026-09-26 | v0.6.0 | Histogram mode implemented | Added opt-in `max_bins` preprocessing and histogram split search; exact sorting remains the default when `max_bins=None`. |
 | 2026-09-26 | v0.6.0 | Histogram benchmark complete | Optimized 10k-row/20-feature/100-tree matrix measures fit plus permutation importance (no prediction): `max_bins=16` took 0.628 s vs exact 1.562 s (2.49x faster); LightGBM RF boosting took 0.841 s and sklearn RF 3.443 s. Higher histogram resolutions did not beat exact. Results are in `benchmarks/results-histogram-10k/`. Bankai OOB permutation is included in fit, while sklearn/LightGBM external permutation passes are added to fit; their model algorithms and Bankai's native OOB importance methodology differ. |
 | 2026-09-26 | v0.6.0 | Histogram internals optimized | Added node histogram caching/subtraction, `u8` bin storage, and histogram-mode filtering of globally constant features; original feature indices remain stable. Full Python and Rust suites pass. The optimized run reduced 255-bin time from 2.883 s to 1.616 s and 128-bin time from 1.633 s to 1.073 s; updated report is in `benchmarks/results-histogram-10k/`. |
-| 2026-09-26 | v0.7.0 | SHAP API compatibility assessed | Verified SHAP 0.51.0's model-agnostic permutation explainer with `predict_proba` and additivity; `TreeExplainer` currently raises `InvalidModelError` because Bankai does not export supported tree objects. Details and the passing integration test are in `docs/SHAP_COMPATIBILITY.md` and `tests/test_shap_compatibility.py`. |
+| 2026-09-26 | v0.7.0 | SHAP API compatibility assessed | Verified SHAP 0.51.0's model-agnostic permutation explainer with `predict_proba` and additivity. Initial `TreeExplainer` use raised `InvalidModelError`; Bankai's native tree export later enabled the direct route. Details are in `docs/SHAP_COMPATIBILITY.md` and `tests/test_shap_compatibility.py`. |
+| 2026-09-26 | v0.7.0 | Experimental TreeSHAP benchmark complete | Added native Rust TreeSHAP plus sklearn-shaped direct and adapter routes; release benchmark on 1k rows, 20 features, 100 trees, and three seeds measured exact and `max_bins=16` with a permutation baseline. Reports are in `benchmarks/results-tree-shap-1k/`; multiclass TreeSHAP additivity error stayed below `5e-14`. |
+| 2026-09-26 | v0.7.0 | Direct TreeSHAP selected | `shap.TreeExplainer(classifier)` is the recommended integration; explicit adapter and native methods are retained only for benchmark comparisons. |
+| 2026-09-26 | v0.7.0 | sklearn vs Bankai TreeSHAP benchmark complete | Compared SHAP 0.51.0 on sklearn 1.9.1 and Bankai release (`target-cpu=native`) using 1k rows, 20 features, 100 trees, three seeds, and 100 explained rows. Median calculation times were 0.237 s for sklearn, 0.259 s for Bankai exact, and 0.288 s for Bankai `max_bins=16`; all maximum additivity errors were below `5e-14`. Reports are in `benchmarks/results-tree-shap-sklearn-vs-bankai-1k/`. |
+| 2026-09-26 | v0.7.0 | Larger sklearn vs Bankai TreeSHAP benchmark complete | Repeated the direct comparison at 10k rows and 40 features, with 100 trees, three seeds, and 100 explained rows. Median calculation times were 4.258 s for sklearn, 4.511 s for Bankai exact, and 4.648 s for Bankai `max_bins=16`; maximum additivity error stayed below `2.2e-12`. Reports are in `benchmarks/results-tree-shap-sklearn-vs-bankai-10k-40f/`. |
+| 2026-09-26 | v0.7.0 | TreeSHAP milestone complete | Direct `TreeExplainer(classifier)` support and binary/multiclass additivity validation pass for exact and histogram forests; the focused suite reports 4 passed. |
+| 2026-09-26 | v0.8.0 | Joblib compatibility complete | Joblib round trips pass for exact and histogram models, preserving estimator parameters, classes, predictions, probabilities, and importances. Uncompressed `mmap_mode="r"` works; compressed files load with joblib's mmap-unavailable warning. Bankai reconstructs the native forest from saved training arrays. Tested with joblib 1.6.0, Python 3.11.11, Bankai 0.1.0, and sklearn 1.9.1; policy is documented in `docs/JOBLIB_COMPATIBILITY.md`. |

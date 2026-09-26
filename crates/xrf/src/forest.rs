@@ -347,6 +347,10 @@ impl<I: RfInput> Forest<I> {
     pub fn trees(&self) -> usize {
         self.trees.len()
     }
+    /// References to saved trees for analysis and model export.
+    pub fn tree_refs(&self) -> impl Iterator<Item = &Tree<I>> {
+        self.trees.iter()
+    }
     pub fn predict(&self, input: &I) -> Prediction<I> {
         Prediction::new(self, input)
     }

@@ -179,6 +179,10 @@ impl DenseInput {
         self.bin_edges.as_deref()
     }
 
+    pub fn value_at(&self, row: usize, column: usize) -> f64 {
+        self.value(row, column)
+    }
+
     fn labels(&self) -> &[usize] {
         self.labels
             .as_deref()

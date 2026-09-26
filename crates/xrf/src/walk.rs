@@ -40,11 +40,11 @@ where
     type Item = Walk<I>;
     fn next(&mut self) -> Option<Self::Item> {
         match self.on? {
-            Tree::Leaf(v) => {
+            Tree::Leaf(v, _) => {
                 self.on = self.stack.pop();
                 Some(Walk::VisitLeaf(*v))
             }
-            Tree::Branch(fid, pivot, score, left, right) => {
+            Tree::Branch(fid, pivot, score, _, left, right) => {
                 self.stack.push(right);
                 self.on = Some(left);
                 Some(Walk::VisitBranch(*fid, (*pivot).clone(), *score))

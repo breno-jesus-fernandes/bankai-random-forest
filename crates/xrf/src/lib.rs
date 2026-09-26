@@ -22,7 +22,7 @@ pub use rfinput::{
 };
 
 mod forest;
-pub use forest::{Forest, ImportanceAggregator, Prediction};
+pub use forest::{Forest, ImportanceAggregator, Prediction, Tree};
 
 mod walk;
 pub use walk::Walk;

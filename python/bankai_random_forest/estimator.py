@@ -1,6 +1,9 @@
 import numpy as np
 from scipy import sparse
 from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.tree import _tree
 from sklearn.utils.class_weight import compute_sample_weight
 from sklearn.utils.multiclass import type_of_target
 from sklearn.utils import check_random_state
@@ -9,7 +12,62 @@ from sklearn.utils.validation import check_is_fitted, column_or_1d, validate_dat
 from . import _core
 
 
-class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
+class _TreeSHAPAdapter(RandomForestClassifier):
+    """Benchmark-only sklearn facade for comparing the adapter route."""
+
+    def __init__(self, estimators, n_features, n_classes, criterion):
+        self.estimators_ = estimators
+        self.n_features_in_ = n_features
+        self.n_classes_ = n_classes
+        self.classes_ = np.arange(n_classes)
+        self.criterion = criterion
+
+
+def _make_sklearn_trees(tree_arrays, n_features, n_classes):
+    """Reconstruct minimal sklearn Tree objects from Rust's exported arrays."""
+    trees = []
+    for left, right, feature, threshold, cover, flat_values in tree_arrays:
+        n_nodes = len(feature)
+        nodes = np.zeros(n_nodes, dtype=_tree.NODE_DTYPE)
+        nodes["left_child"] = left
+        nodes["right_child"] = right
+        nodes["feature"] = feature
+        nodes["threshold"] = threshold
+        nodes["impurity"] = 0.0
+        nodes["n_node_samples"] = np.asarray(cover, dtype=np.intp)
+        nodes["weighted_n_node_samples"] = cover
+        values = np.asarray(flat_values, dtype=np.float64).reshape(n_nodes, 1, n_classes)
+        # SHAP recomputes every internal value from child covers. Give the
+        # transient sklearn representation a non-zero placeholder so its
+        # initial normalization does not emit a divide-by-zero warning.
+        internal = np.asarray(feature) >= 0
+        values[internal, 0, 0] = 1.0
+        tree = _tree.Tree(n_features, np.array([n_classes], dtype=np.intp), 1)
+        tree.__setstate__({"max_depth": n_nodes, "node_count": n_nodes, "nodes": nodes, "values": values})
+        estimator = DecisionTreeClassifier()
+        estimator.tree_ = tree
+        estimator.n_features_in_ = n_features
+        estimator.n_outputs_ = 1
+        estimator.n_classes_ = n_classes
+        estimator.classes_ = np.arange(n_classes)
+        trees.append(estimator)
+    return trees
+
+
+class BankaiRandomForestClassifier(RandomForestClassifier):
+    def __sklearn_tags__(self):
+        # SHAP recognizes this estimator through sklearn's forest tags;
+        # fitting and prediction remain implemented by Bankai's native core.
+        return BaseEstimator.__sklearn_tags__(self)
+
+    @property
+    def feature_importances_(self):
+        return self._bankai_feature_importances
+
+    @feature_importances_.setter
+    def feature_importances_(self, value):
+        self._bankai_feature_importances = value
+
     def __init__(
         self,
         n_estimators=100,
@@ -56,6 +114,32 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         self.monotonic_cst = monotonic_cst
         self.importance_type = importance_type
         self.max_bins = max_bins
+
+    @property
+    def estimators_(self):
+        """Lazily expose native trees in sklearn's format for SHAP TreeExplainer."""
+        check_is_fitted(self, "_forest")
+        if getattr(self, "_shap_estimators_cache", None) is None:
+            self._shap_estimators_cache = _make_sklearn_trees(
+                self._forest.shap_tree_arrays(), self.n_features_in_, self.n_classes_
+            )
+        return self._shap_estimators_cache
+
+    def _tree_shap_adapter_for_benchmark(self):
+        """Build the benchmark-only adapter facade accepted by TreeExplainer."""
+        check_is_fitted(self, "_forest")
+        return _TreeSHAPAdapter(
+            _make_sklearn_trees(
+                self._forest.shap_tree_arrays(), self.n_features_in_, self.n_classes_
+            ), self.n_features_in_, self.n_classes_, self.criterion
+        )
+
+    def _native_tree_shap_for_benchmark(self, X):
+        """Return native Rust TreeSHAP values for benchmark comparisons."""
+        check_is_fitted(self, "_forest")
+        X = validate_data(self, X, reset=False, dtype=np.float64, ensure_2d=True)
+        values, base_values = self._forest.tree_shap(X)
+        return np.asarray(values, dtype=np.float64), np.asarray(base_values, dtype=np.float64)
 
     def fit(self, X, y, sample_weight=None):
         self._reject_unsupported_baseline_parameters(sample_weight)
@@ -148,6 +232,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             max_bins=self._fit_max_bins,
         )
         self._forest = forest
+        self._shap_estimators_cache = None
         self._fitted_n_estimators = self.n_estimators
         self.feature_importances_ = self._selected_feature_importances(forest)
         if self.oob_score is True:
@@ -216,6 +301,7 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
             max_bins=self._fit_max_bins,
         )
         self._forest = forest
+        self._shap_estimators_cache = None
         self.feature_importances_ = self._selected_feature_importances(forest)
 
     def _next_seed(self):
