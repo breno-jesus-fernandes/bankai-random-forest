@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.inspection import permutation_importance
+from lightgbm import LGBMClassifier
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from benchmarks.run_benchmark import generate_dataset, prepare_optimized_binaries
@@ -73,31 +74,63 @@ def benchmark(rows, features, trees, bins, repeats, x, y, validation_x, validati
             exact_importance, record["_importance"]
         )
 
-    sklearn = RandomForestClassifier(
-        n_estimators=trees, max_features="sqrt", n_jobs=1, random_state=42
-    )
-    fit_time, _ = elapsed(lambda: sklearn.fit(x, y))
-    importance_time, result = elapsed(lambda: permutation_importance(
-        sklearn, validation_x, validation_y, scoring="f1", n_repeats=1,
-        n_jobs=1, random_state=42,
-    ))
-    sklearn_record = {
-        "implementation": "sklearn",
-        "mode": "external_permutation",
-        "max_bins": "",
-        "rows": rows,
-        "validation_rows": len(validation_y),
-        "features": features,
-        "trees": trees,
-        "repeats": repeats,
-        "fit_seconds": fit_time,
-        "feature_importance_seconds": importance_time,
-        "fit_plus_importance_seconds": fit_time + importance_time,
-        "importance_rank_correlation_vs_exact": rank_correlation(
-            exact_importance, result.importances_mean
+    external_models = [
+        (
+            "sklearn",
+            "random_forest",
+            lambda seed: RandomForestClassifier(
+                n_estimators=trees,
+                max_features="sqrt",
+                n_jobs=1,
+                random_state=seed,
+            ),
         ),
-    }
-    records.append(sklearn_record)
+        (
+            "lightgbm",
+            "random_forest_boosting",
+            lambda seed: LGBMClassifier(
+                boosting_type="rf",
+                n_estimators=trees,
+                bagging_freq=1,
+                bagging_fraction=0.8,
+                feature_fraction=1.0,
+                n_jobs=1,
+                random_state=seed,
+                verbosity=-1,
+            ),
+        ),
+    ]
+    for implementation, mode, model_factory in external_models:
+        fit_samples, importance_samples, total_samples, importance_values = [], [], [], []
+        for seed in range(repeats):
+            model = model_factory(42 + seed)
+            fit_time, _ = elapsed(lambda: model.fit(x, y))
+            importance_time, result = elapsed(lambda: permutation_importance(
+                model, validation_x, validation_y, scoring="f1", n_repeats=1,
+                n_jobs=1, random_state=42 + seed,
+            ))
+            fit_samples.append(fit_time)
+            importance_samples.append(importance_time)
+            total_samples.append(fit_time + importance_time)
+            importance_values.append(result.importances_mean)
+
+        external_importance = np.median(np.stack(importance_values), axis=0)
+        records.append({
+            "implementation": implementation,
+            "mode": mode,
+            "max_bins": "",
+            "rows": rows,
+            "validation_rows": len(validation_y),
+            "features": features,
+            "trees": trees,
+            "repeats": repeats,
+            "fit_seconds": statistics.median(fit_samples),
+            "feature_importance_seconds": statistics.median(importance_samples),
+            "fit_plus_importance_seconds": statistics.median(total_samples),
+            "importance_rank_correlation_vs_exact": rank_correlation(
+                exact_importance, external_importance
+            ),
+        })
     for record in records:
         record.pop("_importance", None)
     return records
@@ -130,10 +163,10 @@ def main():
         writer.writerows(rows)
     with (args.output_dir / "histogram_importance.md").open("w") as handle:
         handle.write("# Histogram and permutation importance benchmark\n\n")
-        handle.write("Times are median Bankai results across seeds; sklearn uses one fit and one external permutation pass. Bankai computes native OOB permutation importance during fit, so its fit time already includes the importance calculation; `feature_importance_seconds` measures only public attribute access. The comparable workload is `fit_plus_importance_seconds`.\n\n")
-        handle.write("| mode | bins | fit s (includes Bankai OOB permutation) | importance access/calculation s | fit + importance s | rank corr vs exact |\n| --- | ---: | ---: | ---: | ---: | ---: |\n")
+        handle.write("Times are medians across model seeds; external permutation importance uses one repeat per feature. Bankai computes native OOB permutation importance during fit, so its fit time already includes the importance calculation; `feature_importance_seconds` measures only public attribute access. Scikit-learn and LightGBM calculate permutation importance externally on the same validation set. LightGBM uses `boosting_type='rf'`, 80% row bagging, all features per tree, and one thread. The comparable workload is `fit_plus_importance_seconds`.\n\n")
+        handle.write("| implementation | mode | bins | fit s (Bankai includes OOB permutation) | importance access/calculation s | fit + importance s | rank corr vs Bankai exact |\n| --- | --- | ---: | ---: | ---: | ---: | ---: |\n")
         for row in rows:
-            handle.write("| {mode} | {max_bins} | {fit_seconds:.6f} | {feature_importance_seconds:.6f} | {fit_plus_importance_seconds:.6f} | {importance_rank_correlation_vs_exact:.6f} |\n".format(**row))
+            handle.write("| {implementation} | {mode} | {max_bins} | {fit_seconds:.6f} | {feature_importance_seconds:.6f} | {fit_plus_importance_seconds:.6f} | {importance_rank_correlation_vs_exact:.6f} |\n".format(**row))
     print(f"Wrote {args.output_dir / 'histogram_importance.csv'} and Markdown report")
 
 

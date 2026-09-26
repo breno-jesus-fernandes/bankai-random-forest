@@ -1,13 +1,14 @@
 # Histogram and permutation importance benchmark
 
-Times are median Bankai results across seeds; sklearn uses one fit and one external permutation pass. Bankai computes native OOB permutation importance during fit, so its fit time already includes the importance calculation; `feature_importance_seconds` measures only public attribute access. The comparable workload is `fit_plus_importance_seconds`.
+Times are medians across model seeds; external permutation importance uses one repeat per feature. Bankai computes native OOB permutation importance during fit, so its fit time already includes the importance calculation; `feature_importance_seconds` measures only public attribute access. Scikit-learn and LightGBM calculate permutation importance externally on the same validation set. LightGBM uses `boosting_type='rf'`, 80% row bagging, all features per tree, and one thread. The comparable workload is `fit_plus_importance_seconds`.
 
-| mode | bins | fit s (includes Bankai OOB permutation) | importance access/calculation s | fit + importance s | rank corr vs exact |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| exact |  | 1.488400 | 0.000000 | 1.488400 | 1.000000 |
-| histogram_16 | 16 | 0.626534 | 0.000001 | 0.626535 | 0.581955 |
-| histogram_32 | 32 | 0.752621 | 0.000001 | 0.752622 | 0.351880 |
-| histogram_64 | 64 | 1.041664 | 0.000001 | 1.041664 | 0.583459 |
-| histogram_128 | 128 | 1.493642 | 0.000000 | 1.493642 | 0.703759 |
-| histogram_255 | 255 | 2.532817 | 0.000001 | 2.532818 | 0.687218 |
-| external_permutation |  | 1.752414 | 1.414104 | 3.166518 | 0.505263 |
+| implementation | mode | bins | fit s (Bankai includes OOB permutation) | importance access/calculation s | fit + importance s | rank corr vs Bankai exact |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| bankai | exact |  | 1.562304 | 0.000001 | 1.562305 | 1.000000 |
+| bankai | histogram_16 | 16 | 0.628252 | 0.000002 | 0.628254 | 0.581955 |
+| bankai | histogram_32 | 32 | 0.757848 | 0.000001 | 0.757849 | 0.351880 |
+| bankai | histogram_64 | 64 | 1.039536 | 0.000001 | 1.039536 | 0.583459 |
+| bankai | histogram_128 | 128 | 1.633072 | 0.000002 | 1.633074 | 0.703759 |
+| bankai | histogram_255 | 255 | 2.883380 | 0.000002 | 2.883381 | 0.687218 |
+| sklearn | random_forest |  | 1.945818 | 1.497165 | 3.442983 | 0.545865 |
+| lightgbm | random_forest_boosting |  | 0.170452 | 0.623542 | 0.841442 | 0.407519 |
