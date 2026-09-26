@@ -114,11 +114,15 @@ interface.
 ### v0.5.0: Benchmark and Distribution
 
 - [ ] Implement the pure Rust `bankai-xrf-cli` benchmark runner.
-- [ ] Benchmark sklearn, CLI, and PyO3 wrapper at 10k, 100k, and 1M rows.
+- [ ] Benchmark sklearn, CLI, and PyO3 wrapper at 10k and 100k rows.
 - [ ] Export raw CSV and Markdown reports with timings, peak RSS, FFI overhead,
       F1, probability RMSE, agreement, and environment metadata.
 - [ ] Build signed release artifacts with Maturin.
 - [ ] Publish first to TestPyPI and then PyPI with `uv publish`.
+
+Benchmark policy: 100k rows is the largest dataset because of the available RAM.
+Every Rust benchmark binary must use the release profile above and be built with
+`RUSTFLAGS="-C target-cpu=native" cargo build --release` on the benchmark host.
 
 ### Future: Histogram Backend
 
@@ -149,3 +153,4 @@ interface.
 | 2026-09-25 | v0.4.0 | Imbalance suite complete | Added a noisy DataFrame 99:1 balanced-weight classifier suite. |
 | 2026-09-25 | v0.4.0 | Transfer telemetry complete | Records input/core dtypes, contiguity, and float64 casts. |
 | 2026-09-25 | v0.4.0 | Reproducibility complete | Seeded predictions, probabilities, and importances are reproducible. |
+| 2026-09-25 | v0.5.0 | Benchmark scope adjusted | Capped datasets at 100k rows and locked optimized native Rust benchmark builds. |
