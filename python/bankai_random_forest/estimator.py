@@ -4,7 +4,7 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.utils.class_weight import compute_sample_weight
 from sklearn.utils.multiclass import type_of_target
 from sklearn.utils import check_random_state
-from sklearn.utils.validation import check_is_fitted, validate_data
+from sklearn.utils.validation import check_is_fitted, column_or_1d, validate_data
 
 from . import _core
 
@@ -57,6 +57,13 @@ class BankaiRandomForestClassifier(ClassifierMixin, BaseEstimator):
         self._reject_unsupported_baseline_parameters(sample_weight)
         if sparse.issparse(X):
             raise TypeError("sparse input is not supported")
+        if y is None:
+            raise ValueError("requires y to be passed, but the target y is None")
+        y_array = np.asarray(y)
+        if y_array.ndim == 2 and y_array.shape[1] == 1:
+            y = column_or_1d(y, warn=True)
+        elif y_array.ndim != 1:
+            raise ValueError("multioutput targets are not supported")
 
         warm_refit = self.warm_start and hasattr(self, "_forest")
         if warm_refit and self.n_estimators < self._fitted_n_estimators:

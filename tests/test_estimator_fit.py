@@ -267,6 +267,24 @@ def test_rejects_sparse_input_without_implicit_densification(separable_data):
         BankaiRandomForestClassifier().fit(sparse.csr_matrix(x), y)
 
 
+def test_rejects_multioutput_targets_explicitly(separable_data):
+    x, y = separable_data
+
+    with pytest.raises(ValueError, match="multioutput"):
+        BankaiRandomForestClassifier().fit(x, np.column_stack([y, y]))
+
+
+def test_dataframe_column_names_are_preserved(separable_data):
+    x, y = separable_data
+    frame = pd.DataFrame(x, columns=["temperature"])
+
+    classifier = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(
+        frame, y
+    )
+
+    np.testing.assert_array_equal(classifier.feature_names_in_, ["temperature"])
+
+
 def test_pickle_round_trip_preserves_predictions(separable_data):
     x, y = separable_data
     classifier = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(x, y)

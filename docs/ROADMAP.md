@@ -106,6 +106,8 @@ interface.
 
 - [ ] DataFrame noise and 99:1 imbalance suites.
 - [ ] Sparse, NaN, multioutput, dimensionality, dtype, and feature-name errors.
+  - [x] Sparse and multioutput rejection; DataFrame feature-name preservation.
+  - [ ] NaN, dimensionality, dtype, and feature-name error coverage.
 - [ ] Float32/float64 transfer tests with copy telemetry.
 - [ ] Deterministic trees, predictions, serialization, and thread counts.
 
@@ -141,3 +143,4 @@ interface.
 | 2026-09-25 | v0.3.0 | Warm start complete | Rebuilds the deterministic forest when the tree count increases. |
 | 2026-09-25 | v0.3.0 | Impurity threshold complete | Rejects candidate splits below `min_impurity_decrease`. |
 | 2026-09-25 | v0.3.0 | Tree limits complete | Added structural `max_leaf_nodes` enforcement. |
+| 2026-09-25 | v0.4.0 | Data boundaries in progress | Added explicit multioutput rejection and DataFrame feature-name coverage. |
