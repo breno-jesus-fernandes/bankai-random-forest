@@ -11,4 +11,6 @@ Bankai's `importance_type='permutation'` is native out-of-bag accuracy decrease 
 | histogram_16 | 8.038 | 0.000 | 0.000 | 8.038 | 0.94013 | 0.94056 | 0.000e+00 | 0.295399 |
 | random_forest_boosting_tree_shap_raw_margin | 1.644 | 0.041 | 1.627 | 3.337 | 0.94085 | 0.94070 | 3.792e-06 | 0.295399 |
 
+The three synthetic signal features (indices 0, 1, and 2) occupy the top three positions under both methods. Overall Spearman correlation is 0.295; this is descriptive because Bankai OOB permutation uses accuracy decrease, while LightGBM SHAP uses mean absolute raw-margin contributions. Bankai fit plus permutation was 2.41x the LightGBM fit plus SHAP time in this run.
+
 Raw seed measurements are in `permutation_vs_shap_raw.csv`; summary medians are in `permutation_vs_shap.csv`; per-feature importances and average ranks are in `feature_importance.csv`.

@@ -307,6 +307,7 @@ loads the PyO3 wrapper.
 
 | Date | Version | Progress | Notes |
 | --- | --- | --- | --- |
+| 2026-09-26 | v1.7.0 | Permutation vs SHAP benchmark complete | Compared Bankai histogram_16 fit with native OOB permutation importance against LightGBM RF fit plus direct interventional TreeSHAP on 100k×100 data, 100 trees, three seeds, one full warmup, and eight fit cores. Bankai total median was 8.04 s; LightGBM was 3.34 s. Top-three signal features matched; Spearman rho was 0.295. SHAP uses raw margin because probability output fails additivity. Results: `benchmarks/results-permutation-vs-shap-100k-100f/`. |
 | 2026-09-26 | v1.7.0 | TreeSHAP bottleneck profiled | On 100k×100, 100-tree Bankai default trees averaged 18,060 nodes. Direct interventional TreeSHAP took 23.08 s for 100 rows, almost entirely inside SHAP C++ (`dense_tree_shap`); eight Python threads did not improve speed. Limiting Bankai and LightGBM to 31 leaves produced about 1.64 s per 1k Bankai rows, but Bankai accuracy/F1 fell by 14.87/18.13 percentage points from its same-seed default. SHAP 0.51 LightGBM RF probability additivity failed by 0.482, so cross-model importance values cannot be compared in one scale. Raw data and profile are in `benchmarks/results-shap-capacity-31-100k-100f/`. Exact-preserving kernel acceleration remains open. |
 | 2026-09-25 | v0.1.0 | Started | Scope, licensing, ABI, and TDD contract agreed. |
 | 2026-09-25 | v0.1.0 | Import cycle complete | The empty `cp311-abi3` PyO3 module passed its red/green pytest cycle. |
