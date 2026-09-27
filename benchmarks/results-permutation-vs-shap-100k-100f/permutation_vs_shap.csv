@@ -1,0 +1,3 @@
+implementation,mode,fit_seconds,importance_setup_seconds,importance_calculation_seconds,importance_access_seconds,fit_plus_importance_seconds,validation_predict_seconds,validation_accuracy,validation_f1,additivity_max_error,importance_rank_correlation_vs_other_method
+bankai,histogram_16,8.038247832999332,0.0,0.0,1.2920027074869722e-06,8.038248957996984,0.7990919580006448,0.94013,0.9405550315245991,0.0,0.2953992906480519
+lightgbm,random_forest_boosting_tree_shap_raw_margin,1.643565333000879,0.04053854200174101,1.6271259999994072,0.0,3.336828000003152,0.06441399999675923,0.94085,0.9406964036855455,3.7920725901585683e-06,0.2953992906480519
