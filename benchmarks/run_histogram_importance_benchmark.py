@@ -50,7 +50,10 @@ class Progress:
         elapsed = now - self.started
         fraction = self.completed / self.total
         overall_average = elapsed / self.completed
-        external_groups = ("sklearn", "lightgbm")
+        external_groups = tuple(
+            name for name in self.group_completed
+            if name.lower() in ("sklearn", "lightgbm")
+        )
         known_external = [
             self.group_elapsed[name] / self.group_completed[name]
             for name in external_groups if self.group_completed[name]
