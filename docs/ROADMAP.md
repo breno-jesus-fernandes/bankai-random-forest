@@ -284,10 +284,30 @@ loads the PyO3 wrapper.
       benchmark's worst regression was +2.42%; multioutput measurements and
       raw data are in `benchmarks/results-multioutput-10k-20f/`.
 
+### v1.7.0: TreeSHAP Performance
+
+- [x] Establish a release-mode, warmed, capacity-matched Bankai vs LightGBM
+      TreeSHAP benchmark with per-seed predictive quality, tree-size, timing,
+      and additivity results. Record output scales explicitly; compare SHAP
+      importance only when both explain the same additive output. Results in
+      `benchmarks/results-shap-capacity-31-100k-100f/`; SHAP 0.51 LightGBM RF
+      probability additivity failed, so importance scales are incomparable.
+- [x] Profile direct TreeSHAP on default unbounded Bankai trees to locate
+      export and explanation costs separately. The profile in
+      `benchmarks/results-shap-capacity-31-100k-100f/default-profile.txt` shows
+      23.08 s in SHAP's C++ `dense_tree_shap` over 100 explained rows, versus
+      0.66 s exporting 100 trees averaging 18,060 nodes each.
+- [ ] Optimize the direct SHAP path without changing default tree structures,
+      predictions, probabilities, or SHAP values; retain regression tests and
+      demonstrate repeatable release speedups against the baseline.
+- [ ] Document when a leaf cap is a user-selected capacity/performance tradeoff
+      and preserve existing defaults and benchmark warmup policy.
+
 ## Progress Log
 
 | Date | Version | Progress | Notes |
 | --- | --- | --- | --- |
+| 2026-09-26 | v1.7.0 | TreeSHAP bottleneck profiled | On 100k×100, 100-tree Bankai default trees averaged 18,060 nodes. Direct interventional TreeSHAP took 23.08 s for 100 rows, almost entirely inside SHAP C++ (`dense_tree_shap`); eight Python threads did not improve speed. Limiting Bankai and LightGBM to 31 leaves produced about 1.64 s per 1k Bankai rows, but Bankai accuracy/F1 fell by 14.87/18.13 percentage points from its same-seed default. SHAP 0.51 LightGBM RF probability additivity failed by 0.482, so cross-model importance values cannot be compared in one scale. Raw data and profile are in `benchmarks/results-shap-capacity-31-100k-100f/`. Exact-preserving kernel acceleration remains open. |
 | 2026-09-25 | v0.1.0 | Started | Scope, licensing, ABI, and TDD contract agreed. |
 | 2026-09-25 | v0.1.0 | Import cycle complete | The empty `cp311-abi3` PyO3 module passed its red/green pytest cycle. |
 | 2026-09-25 | v0.1.0 | XRF vendor complete | Pinned XRF source, upstream attribution, NOTICE, and GPL-3.0 text added. |

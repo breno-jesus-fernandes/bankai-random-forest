@@ -1,0 +1,44 @@
+Warmup: one full fit and 100-row interventional probability TreeSHAP explanation.
+Measured profiled SHAP elapsed: 23.800782 sec for 100 rows.
+Tree nodes: mean=18059.8, max=21697, leaves_mean=9030.4.
+
+         6643 function calls (6641 primitive calls) in 23.801 seconds
+
+   Ordered by: cumulative time
+   List reduced from 112 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000   23.801   23.801 <stdin>:9(shap_calc)
+        1    0.000    0.000   23.076   23.076 ./.venv/lib/python3.11/site-packages/shap/explainers/_tree.py:507(shap_values)
+        1   23.075   23.075   23.075   23.075 {built-in method shap._cext.dense_tree_shap}
+        1    0.000    0.000    0.725    0.725 ./.venv/lib/python3.11/site-packages/shap/explainers/_tree.py:137(__init__)
+        5    0.061    0.012    0.657    0.131 ./python/bankai_random_forest/estimator.py:128(estimators_)
+        1    0.000    0.000    0.657    0.657 ./.venv/lib/python3.11/site-packages/shap/explainers/_tree.py:59(_safe_check_tree_instance_experimental)
+        1    0.000    0.000    0.657    0.657 ./.venv/lib/python3.11/site-packages/sklearn/ensemble/_base.py:158(__len__)
+        1    0.248    0.248    0.459    0.459 ./python/bankai_random_forest/estimator.py:27(_make_sklearn_trees)
+      300    0.166    0.001    0.166    0.001 {built-in method numpy.asarray}
+        1    0.136    0.136    0.136    0.136 {method 'shap_tree_arrays' of 'builtins.NativeForest' objects}
+        1    0.006    0.006    0.063    0.063 ./.venv/lib/python3.11/site-packages/shap/explainers/_tree.py:955(__init__)
+        1    0.000    0.000    0.045    0.045 ./.venv/lib/python3.11/site-packages/shap/explainers/_tree.py:1124(<listcomp>)
+      100    0.011    0.000    0.044    0.000 ./.venv/lib/python3.11/site-packages/shap/explainers/_tree.py:1795(__init__)
+      202    0.000    0.000    0.041    0.000 ./.venv/lib/python3.11/site-packages/numpy/_core/fromnumeric.py:66(_wrapreduction)
+      102    0.000    0.000    0.041    0.000 ./.venv/lib/python3.11/site-packages/numpy/_core/fromnumeric.py:3011(max)
+      202    0.040    0.000    0.040    0.000 ./.venv/lib/python3.11/site-packages/numpy/_core/fromnumeric.py:67(<dictcomp>)
+      403    0.012    0.000    0.012    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+      100    0.000    0.000    0.011    0.000 {method 'sum' of 'numpy.ndarray' objects}
+      100    0.000    0.000    0.011    0.000 ./.venv/lib/python3.11/site-packages/numpy/_core/_methods.py:47(_sum)
+      207    0.011    0.000    0.011    0.000 {built-in method numpy.zeros}
+      100    0.011    0.000    0.011    0.000 {built-in method shap._cext.compute_expectations}
+      503    0.009    0.000    0.009    0.000 {method 'astype' of 'numpy.ndarray' objects}
+        1    0.000    0.000    0.005    0.005 ./.venv/lib/python3.11/site-packages/shap/explainers/_tree.py:1645(predict)
+        1    0.005    0.005    0.005    0.005 {built-in method shap._cext.dense_tree_predict}
+        5    0.004    0.001    0.004    0.001 ./.venv/lib/python3.11/site-packages/numpy/_core/numeric.py:170(ones)
+      100    0.002    0.000    0.002    0.000 {built-in method shap._cext.dense_tree_update_weights}
+      100    0.000    0.000    0.001    0.000 ./.venv/lib/python3.11/site-packages/numpy/_core/fromnumeric.py:3149(min)
+      100    0.000    0.000    0.000    0.000 ./.venv/lib/python3.11/site-packages/numpy/_core/numeric.py:97(zeros_like)
+      100    0.000    0.000    0.000    0.000 ./.venv/lib/python3.11/site-packages/sklearn/tree/_classes.py:951(__init__)
+      112    0.000    0.000    0.000    0.000 ./.venv/lib/python3.11/site-packages/shap/utils/_general.py:224(safe_isinstance)
+
+
+
+Thread scaling experiment (same warmed fitted model/explainer, 100 rows split into 1, 4, or 8 concurrent calls): 1 worker 22.183 s, 4 workers 22.967 s, and 8 workers 23.752 s. All outputs matched the serial values exactly. This SHAP C++ route does not benefit from Python thread-level parallel calls on this host.
