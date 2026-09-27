@@ -1,0 +1,3 @@
+implementation,mode,repeats,warmups_per_seed,rows,explained_rows,background_rows,features,trees,available_cores,importance_rank_correlation_vs_other_model,fit_seconds,tree_export_seconds,explainer_seconds,shap_calculation_seconds,fit_plus_shap_seconds,additivity_max_error
+bankai,histogram_16,3,1,100000,1000,100,100,100,8,0.2954805112393767,6.6803261669992935,0.6556974999984959,0.06628899999850546,228.11129695800264,235.55940562500473,5.047453455198081e-09
+lightgbm,random_forest_boosting,3,1,100000,1000,100,100,100,8,0.2954805112393767,1.7051065420018858,0.0,0.03801495900188456,1.6408468759946118,3.4037537920048635,3.7920725901585683e-06
