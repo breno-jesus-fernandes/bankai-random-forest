@@ -76,7 +76,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install project and test dependencies
-        run: uv sync --locked --no-install-project
+        run: uv sync --python 3.11 --locked --no-install-project
 
       - name: Add uv Python shared library to runtime path
         if: matrix.runner == 'ubuntu-24.04-arm'
