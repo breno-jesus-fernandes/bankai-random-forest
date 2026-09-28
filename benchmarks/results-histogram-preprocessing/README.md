@@ -1,6 +1,6 @@
 # Histogram preprocessing: base vs. parallel branch
 
-Measured on the same Mac arm64 host (8 logical CPUs), Python 3.11.11, NumPy 2.4.6, scikit-learn 1.9.1. Both Rust extensions were built with the repository's release profile. Input is the deterministic `make_classification` workload: 100,000 rows, 100 dense features, binary target, seed 42, and 16 bins. Fits use gain importance, all features, and seeds 100 onward. Each reported run had one warmup and five timed fits; the benchmark alternated `n_jobs=1` and `n_jobs=-1` order across repetitions.
+Measured on the same Apple M1 host (8 logical CPUs), Python 3.11.11, NumPy 2.4.6, scikit-learn 1.9.1. Both Rust extensions were built with the repository's release profile. Input is the deterministic `make_classification` workload: 100,000 rows, 100 dense features, binary target, seed 42, and 16 bins. Fits use gain importance, all features, and seeds 100 onward. Each reported run had one warmup and five timed fits; the benchmark alternated `n_jobs=1` and `n_jobs=-1` order across repetitions.
 
 The base (`4c7b833`) was measured before and after the feature branch to reduce temporal/thermal bias. The feature branch had two runs. `fit_summary.csv` records each run's median and observed range. The comparison below uses the median of the run medians, giving equal weight to the two runs per revision.
 
@@ -30,4 +30,15 @@ uv run python benchmarks/run_histogram_preprocessing_benchmark.py \
 
 I also measured one-tree fits with 20 features and 16 or 255 bins. At 1,000 rows (20,000 cells), `n_jobs=-1` did not improve fit time over `n_jobs=1`; the difference was smaller than the observed run ranges. At 10,000 rows (200,000 cells), all-core fits were 10.4% faster with 16 bins and 9.7% faster with 255 bins. Serial results stayed within a few percent across versions.
 
-Based on that crossover, the implementation now keeps preprocessing serial below 32,768 dense matrix cells and enables worker threads above it. This threshold is a conservative initial cutoff: tested points are 20,000 and 200,000 cells, so future tuning should measure the interval between them and include more feature counts. Small-load measurements, including before and after the cutoff, are in `small_workloads.csv`. They are full-fit timings; one tree makes preprocessing a larger share but does not isolate its timer.
+Based on that crossover, the implementation keeps preprocessing serial below 32,768 dense matrix cells and enables worker threads above it. The follow-up sweep below tests the boundary with additional shapes. These are full-fit timings; one tree makes preprocessing a larger share but does not isolate its timer. Small-load measurements, including before and after the cutoff, are in `small_workloads.csv`.
+
+The follow-up sweep narrowed the boundary with 10 repetitions on one-tree, 16-bin fits:
+
+| Rows × features | Cells | Base `n_jobs=-1` (s) | Branch `n_jobs=-1` (s) | Change |
+|---:|---:|---:|---:|---:|
+| 3,000 × 10 | 30,000 | 0.003040 | 0.003026 | −0.4% |
+| 2,000 × 20 | 40,000 | 0.004174 | 0.003941 | −5.6% |
+| 5,000 × 20 | 100,000 | 0.010613 | 0.009661 | −9.0% |
+| 2,000 × 100 | 200,000 | 0.018391 | 0.016142 | −12.2% |
+
+Serial `n_jobs=1` differences were under 1.4% in these cases. The 30k-cell point showed no parallel gain; 40k and above showed a repeatable improvement in this workload. That supports the 32,768-cell cutoff for this machine and workload family, but it remains a heuristic rather than a universal crossover. Detailed medians and ranges are in `crossover_sweep.csv`.
