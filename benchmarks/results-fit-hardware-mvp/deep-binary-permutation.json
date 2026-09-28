@@ -1,0 +1,295 @@
+{
+  "case": "deep_binary",
+  "rows": 20000,
+  "validation_rows": 4000,
+  "features": 32,
+  "trees": 40,
+  "max_depth": 20,
+  "max_leaves": 511,
+  "min_samples_leaf": 5,
+  "bins": 63,
+  "threads": -1,
+  "warmups": 1,
+  "repeats": 5,
+  "bankai_importance": "OOB permutation during fit",
+  "lightgbm_importance": "not calculated",
+  "lightgbm_configurations": {
+    "lightgbm_rf": "RF boosting, 80% row bagging",
+    "lightgbm_gbdt": "GBDT, learning_rate=0.1, 80% row bagging",
+    "lightgbm_dart": "DART, learning_rate=0.1, 80% row bagging",
+    "lightgbm_goss": "GOSS, learning_rate=0.1, top_rate=0.2, other_rate=0.1"
+  },
+  "source_sha256": "1f22ceabbd35224b4a7cd0749a1d198601eca20a8175d52f75f83602428d6be2",
+  "extension_sha256": "bb9fdd7f097700dffa6b5cba993c7fb705955db329bc5203d2348828d09d1c7c",
+  "commit": "ae573ef543fb68d9ef9013d3f5e3a61174735e42",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "cpus": 8,
+  "python": "3.11.11",
+  "numpy": "2.4.6",
+  "lightgbm": "4.7.0",
+  "summary_medians": {
+    "bankai": {
+      "fit_seconds": 0.2741214590059826,
+      "accuracy": 0.942,
+      "precision": 0.9572953736654805,
+      "recall": 0.9271294928606598,
+      "f1": 0.9419709854927464
+    },
+    "lightgbm_rf": {
+      "fit_seconds": 2.3347513750049984,
+      "accuracy": 0.923,
+      "precision": 0.925852694018784,
+      "recall": 0.9222058099458394,
+      "f1": 0.9240256536753824
+    },
+    "lightgbm_gbdt": {
+      "fit_seconds": 2.337925540996366,
+      "accuracy": 0.961,
+      "precision": 0.9652605459057072,
+      "recall": 0.9576563269325455,
+      "f1": 0.9614434008897677
+    },
+    "lightgbm_dart": {
+      "fit_seconds": 2.4123159580049105,
+      "accuracy": 0.94525,
+      "precision": 0.9489593657086224,
+      "recall": 0.9428852781880847,
+      "f1": 0.9459125710051864
+    },
+    "lightgbm_goss": {
+      "fit_seconds": 2.265524374990491,
+      "accuracy": 0.955,
+      "precision": 0.9565860878145042,
+      "recall": 0.9547021171836534,
+      "f1": 0.9556431739773288
+    }
+  },
+  "records": [
+    {
+      "implementation": "bankai",
+      "repeat": 0,
+      "fit_seconds": 0.3014560830051778,
+      "accuracy": 0.942,
+      "precision": 0.9572953736654805,
+      "recall": 0.9271294928606598,
+      "f1": 0.9419709854927464
+    },
+    {
+      "implementation": "lightgbm_rf",
+      "repeat": 0,
+      "fit_seconds": 2.4128485410037683,
+      "accuracy": 0.923,
+      "precision": 0.925852694018784,
+      "recall": 0.9222058099458394,
+      "f1": 0.9240256536753824
+    },
+    {
+      "implementation": "lightgbm_gbdt",
+      "repeat": 0,
+      "fit_seconds": 2.3619547499984037,
+      "accuracy": 0.961,
+      "precision": 0.9652605459057072,
+      "recall": 0.9576563269325455,
+      "f1": 0.9614434008897677
+    },
+    {
+      "implementation": "lightgbm_dart",
+      "repeat": 0,
+      "fit_seconds": 2.3798553330125287,
+      "accuracy": 0.94525,
+      "precision": 0.9489593657086224,
+      "recall": 0.9428852781880847,
+      "f1": 0.9459125710051864
+    },
+    {
+      "implementation": "lightgbm_goss",
+      "repeat": 0,
+      "fit_seconds": 2.573714708996704,
+      "accuracy": 0.955,
+      "precision": 0.9565860878145042,
+      "recall": 0.9547021171836534,
+      "f1": 0.9556431739773288
+    },
+    {
+      "implementation": "lightgbm_goss",
+      "repeat": 1,
+      "fit_seconds": 2.720696249991306,
+      "accuracy": 0.955,
+      "precision": 0.9565860878145042,
+      "recall": 0.9547021171836534,
+      "f1": 0.9556431739773288
+    },
+    {
+      "implementation": "lightgbm_dart",
+      "repeat": 1,
+      "fit_seconds": 2.396060832994408,
+      "accuracy": 0.94525,
+      "precision": 0.9489593657086224,
+      "recall": 0.9428852781880847,
+      "f1": 0.9459125710051864
+    },
+    {
+      "implementation": "lightgbm_gbdt",
+      "repeat": 1,
+      "fit_seconds": 2.3815722079889383,
+      "accuracy": 0.961,
+      "precision": 0.9652605459057072,
+      "recall": 0.9576563269325455,
+      "f1": 0.9614434008897677
+    },
+    {
+      "implementation": "lightgbm_rf",
+      "repeat": 1,
+      "fit_seconds": 2.397706957999617,
+      "accuracy": 0.923,
+      "precision": 0.925852694018784,
+      "recall": 0.9222058099458394,
+      "f1": 0.9240256536753824
+    },
+    {
+      "implementation": "bankai",
+      "repeat": 1,
+      "fit_seconds": 0.2989570409990847,
+      "accuracy": 0.942,
+      "precision": 0.9572953736654805,
+      "recall": 0.9271294928606598,
+      "f1": 0.9419709854927464
+    },
+    {
+      "implementation": "bankai",
+      "repeat": 2,
+      "fit_seconds": 0.2741214590059826,
+      "accuracy": 0.942,
+      "precision": 0.9572953736654805,
+      "recall": 0.9271294928606598,
+      "f1": 0.9419709854927464
+    },
+    {
+      "implementation": "lightgbm_rf",
+      "repeat": 2,
+      "fit_seconds": 2.3347513750049984,
+      "accuracy": 0.923,
+      "precision": 0.925852694018784,
+      "recall": 0.9222058099458394,
+      "f1": 0.9240256536753824
+    },
+    {
+      "implementation": "lightgbm_gbdt",
+      "repeat": 2,
+      "fit_seconds": 2.325667875004001,
+      "accuracy": 0.961,
+      "precision": 0.9652605459057072,
+      "recall": 0.9576563269325455,
+      "f1": 0.9614434008897677
+    },
+    {
+      "implementation": "lightgbm_dart",
+      "repeat": 2,
+      "fit_seconds": 2.4123159580049105,
+      "accuracy": 0.94525,
+      "precision": 0.9489593657086224,
+      "recall": 0.9428852781880847,
+      "f1": 0.9459125710051864
+    },
+    {
+      "implementation": "lightgbm_goss",
+      "repeat": 2,
+      "fit_seconds": 2.265524374990491,
+      "accuracy": 0.955,
+      "precision": 0.9565860878145042,
+      "recall": 0.9547021171836534,
+      "f1": 0.9556431739773288
+    },
+    {
+      "implementation": "lightgbm_goss",
+      "repeat": 3,
+      "fit_seconds": 2.236493165997672,
+      "accuracy": 0.955,
+      "precision": 0.9565860878145042,
+      "recall": 0.9547021171836534,
+      "f1": 0.9556431739773288
+    },
+    {
+      "implementation": "lightgbm_dart",
+      "repeat": 3,
+      "fit_seconds": 2.8081297499884386,
+      "accuracy": 0.94525,
+      "precision": 0.9489593657086224,
+      "recall": 0.9428852781880847,
+      "f1": 0.9459125710051864
+    },
+    {
+      "implementation": "lightgbm_gbdt",
+      "repeat": 3,
+      "fit_seconds": 2.3280485830036923,
+      "accuracy": 0.961,
+      "precision": 0.9652605459057072,
+      "recall": 0.9576563269325455,
+      "f1": 0.9614434008897677
+    },
+    {
+      "implementation": "lightgbm_rf",
+      "repeat": 3,
+      "fit_seconds": 2.3029727910034126,
+      "accuracy": 0.923,
+      "precision": 0.925852694018784,
+      "recall": 0.9222058099458394,
+      "f1": 0.9240256536753824
+    },
+    {
+      "implementation": "bankai",
+      "repeat": 3,
+      "fit_seconds": 0.26195216599444393,
+      "accuracy": 0.942,
+      "precision": 0.9572953736654805,
+      "recall": 0.9271294928606598,
+      "f1": 0.9419709854927464
+    },
+    {
+      "implementation": "bankai",
+      "repeat": 4,
+      "fit_seconds": 0.2561764999991283,
+      "accuracy": 0.942,
+      "precision": 0.9572953736654805,
+      "recall": 0.9271294928606598,
+      "f1": 0.9419709854927464
+    },
+    {
+      "implementation": "lightgbm_rf",
+      "repeat": 4,
+      "fit_seconds": 2.3114472500019474,
+      "accuracy": 0.923,
+      "precision": 0.925852694018784,
+      "recall": 0.9222058099458394,
+      "f1": 0.9240256536753824
+    },
+    {
+      "implementation": "lightgbm_gbdt",
+      "repeat": 4,
+      "fit_seconds": 2.337925540996366,
+      "accuracy": 0.961,
+      "precision": 0.9652605459057072,
+      "recall": 0.9576563269325455,
+      "f1": 0.9614434008897677
+    },
+    {
+      "implementation": "lightgbm_dart",
+      "repeat": 4,
+      "fit_seconds": 2.7025590000121156,
+      "accuracy": 0.94525,
+      "precision": 0.9489593657086224,
+      "recall": 0.9428852781880847,
+      "f1": 0.9459125710051864
+    },
+    {
+      "implementation": "lightgbm_goss",
+      "repeat": 4,
+      "fit_seconds": 2.2525582920061424,
+      "accuracy": 0.955,
+      "precision": 0.9565860878145042,
+      "recall": 0.9547021171836534,
+      "f1": 0.9556431739773288
+    }
+  ]
+}
