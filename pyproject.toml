@@ -30,7 +30,6 @@ dependencies = [
 bindings = "pyo3"
 python-source = "python"
 module-name = "bankai_random_forest._core"
-compatibility = "pypi"
 
 [dependency-groups]
 dev = [
