@@ -1,5 +1,7 @@
 # Investigação da acurácia
 
+**Atualização:** a correção por maior ganho foi implementada e validada; veja [BEST_FIRST.md](BEST_FIRST.md). Os resultados abaixo descrevem a etapa anterior.
+
 Não houve queda de acurácia introduzida pelo MVP de hardware: as previsões coincidiram com a baseline nos benchmarks anteriores. A diferença observada era entre Bankai e LightGBM.
 
 ## Causa principal confirmada: orçamento de folhas consumido em profundidade

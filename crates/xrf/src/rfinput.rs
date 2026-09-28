@@ -65,6 +65,8 @@ pub trait RfInput: Sized {
         rng: &mut RfRng,
     ) -> Option<(Self::Pivot, bool, f64)>;
     /// Find a split under inherited positive-class probability bounds.
+    /// Scores must be comparable across nodes (e.g. impurity decrease weighted
+    /// by node weight / root weight) for growth with a leaf budget.
     fn new_split_with_bounds(
         &self,
         on: &Mask,

@@ -2,7 +2,7 @@ use crate::rfinput::VoteAggregator;
 use crate::rfinput::{DecisionSlice, RfInput};
 use crate::{FairBest, FeatureSampler, Mask, MaskCache, RfRng, XrfError};
 
-/// Nodes are appended in postorder; child indices survive arena growth.
+/// Child indices survive arena growth for either tree growth policy.
 pub struct Tree<I: RfInput> {
     pub nodes: Vec<Node<I>>,
     pub root: usize,
@@ -12,6 +12,42 @@ pub enum Node<I: RfInput> {
     /// Node cover is retained for path-dependent tree explainers.
     Leaf(I::Vote, usize),
     Branch(I::FeatureId, I::Pivot, f64, usize, usize, usize),
+}
+
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
+
+// The heap owns only expandable leaves. Terminal leaves release their masks and
+// histograms immediately; consuming a candidate transfers its parent histogram.
+struct Candidate<I: RfInput> {
+    node: usize,
+    score: f64,
+    feature: I::FeatureId,
+    pivot: I::Pivot,
+    missing_left: bool,
+    mask: Mask,
+    cache: I::SplitCache,
+    depth_left: usize,
+    bounds: (f64, f64),
+}
+
+impl<I: RfInput> PartialEq for Candidate<I> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+impl<I: RfInput> Eq for Candidate<I> {}
+impl<I: RfInput> PartialOrd for Candidate<I> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl<I: RfInput> Ord for Candidate<I> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.score
+            .total_cmp(&other.score)
+            .then_with(|| other.node.cmp(&self.node))
+    }
 }
 
 use crate::walk::{Walk, WalkIter};
@@ -28,6 +64,18 @@ impl<I: RfInput> Tree<I> {
         rng: &mut RfRng,
     ) -> Self {
         feature_sampler.reset();
+        if max_leaves != usize::MAX {
+            return Self::new_best_first(
+                input,
+                bag,
+                tries,
+                feature_sampler,
+                max_depth,
+                max_leaves,
+                mask_cache,
+                rng,
+            );
+        }
         let mut leaf_count = 1;
         let split_cache = input.split_cache(bag);
         // Bound the initial reservation for unrestricted trees. Larger trees grow
@@ -55,6 +103,191 @@ impl<I: RfInput> Tree<I> {
             1.0,
         );
         Self { nodes, root }
+    }
+
+    fn new_best_first(
+        input: &I,
+        bag: &Mask,
+        tries: usize,
+        sampler: &mut I::FeatureSampler,
+        max_depth: usize,
+        max_leaves: usize,
+        masks: &mut MaskCache,
+        rng: &mut RfRng,
+    ) -> Self {
+        let mut tree = Self {
+            nodes: Vec::with_capacity(
+                bag.len()
+                    .min(max_leaves)
+                    .saturating_mul(2)
+                    .saturating_sub(1)
+                    .min(8191),
+            ),
+            root: 0,
+        };
+        let mut heap = BinaryHeap::new();
+        tree.append_candidate(
+            input,
+            Mask::from_vec(bag.to_vec()),
+            None,
+            max_depth,
+            (0.0, 1.0),
+            max_leaves > 1,
+            tries,
+            sampler,
+            masks,
+            rng,
+            &mut heap,
+        );
+        let mut leaves = 1;
+        while leaves < max_leaves {
+            let Some(candidate) = heap.pop() else {
+                break;
+            };
+            let Candidate {
+                node,
+                score,
+                feature,
+                pivot,
+                missing_left,
+                mask,
+                cache,
+                depth_left,
+                bounds,
+            } = candidate;
+            let mut left = masks.provide();
+            let mut right = masks.provide();
+            mask.split_into(
+                input.split_iter(&mask, feature, &pivot, missing_left),
+                &mut left,
+                &mut right,
+            );
+            let constraint = input.monotonic_constraint(feature);
+            let (left_bounds, right_bounds) = if constraint == 0 {
+                (bounds, bounds)
+            } else {
+                let lp = input
+                    .decision_slice(&left)
+                    .positive_probability()
+                    .unwrap_or(bounds.0);
+                let rp = input
+                    .decision_slice(&right)
+                    .positive_probability()
+                    .unwrap_or(bounds.1);
+                let middle = (lp + rp) / 2.0;
+                if constraint > 0 {
+                    ((middle, bounds.1), (bounds.0, middle))
+                } else {
+                    ((bounds.0, middle), (middle, bounds.1))
+                }
+            };
+            leaves += 1;
+            let search = leaves < max_leaves;
+            let (left_cache, right_cache) = if search {
+                let (l, r) = input.split_cache_children(cache, &mask, &left, &right);
+                (Some(l), Some(r))
+            } else {
+                (None, None)
+            };
+            let cover = mask.len();
+            masks.release(mask);
+            let left_index = tree.append_candidate(
+                input,
+                left,
+                left_cache,
+                depth_left - 1,
+                left_bounds,
+                search,
+                tries,
+                sampler,
+                masks,
+                rng,
+                &mut heap,
+            );
+            let right_index = tree.append_candidate(
+                input,
+                right,
+                right_cache,
+                depth_left - 1,
+                right_bounds,
+                search,
+                tries,
+                sampler,
+                masks,
+                rng,
+                &mut heap,
+            );
+            tree.nodes[node] = Node::Branch(
+                feature,
+                pivot,
+                if missing_left {
+                    -score.abs()
+                } else {
+                    score.abs()
+                },
+                cover,
+                left_index,
+                right_index,
+            );
+        }
+        // Candidates that lost the budget competition remain valid leaves.
+        for candidate in heap {
+            masks.release(candidate.mask);
+        }
+        tree
+    }
+
+    fn append_candidate(
+        &mut self,
+        input: &I,
+        mask: Mask,
+        cache: Option<I::SplitCache>,
+        depth_left: usize,
+        bounds: (f64, f64),
+        search: bool,
+        tries: usize,
+        sampler: &mut I::FeatureSampler,
+        masks: &mut MaskCache,
+        rng: &mut RfRng,
+        heap: &mut BinaryHeap<Candidate<I>>,
+    ) -> usize {
+        let target = input.decision_slice(&mask);
+        let node = self.nodes.len();
+        self.nodes.push(Node::Leaf(
+            target.condense_with_bounds(rng, bounds.0, bounds.1),
+            mask.len(),
+        ));
+        if search && depth_left > 0 && !target.is_pure() && input.can_split(&mask) {
+            let cache = cache.unwrap_or_else(|| input.split_cache(&mask));
+            sampler.reload();
+            let mut best = FairBest::new();
+            for _ in 0..tries {
+                let feature = sampler.random_feature(rng);
+                if let Some((pivot, missing_left, score)) = input
+                    .new_split_with_bounds(&mask, feature, &target, &cache, rng, bounds.0, bounds.1)
+                {
+                    if score.is_finite() {
+                        best.ingest(score, (feature, pivot, missing_left), rng);
+                    }
+                }
+            }
+            if let Some((score, (feature, pivot, missing_left))) = best.consume() {
+                heap.push(Candidate {
+                    node,
+                    score,
+                    feature,
+                    pivot,
+                    missing_left,
+                    mask,
+                    cache,
+                    depth_left,
+                    bounds,
+                });
+                return node;
+            }
+        }
+        masks.release(mask);
+        node
     }
 
     /// Prune this tree using the normalized cost-complexity threshold.

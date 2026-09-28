@@ -1,5 +1,7 @@
 # MVP de construção de árvores: arena, histogramas e localidade
 
+**Atualização:** a correção por maior ganho foi implementada e validada; veja [BEST_FIRST.md](BEST_FIRST.md). Os resultados abaixo descrevem a etapa anterior.
+
 Branch: `feature/fit-hardware-mvp`. Baseline: `964710b153ae6ac55db8bcaf5a00f86181342253`.
 
 O MVP reduziu a mediana do tempo de `fit` entre **9,6% e 16,3%** nos seis cenários medidos (speedup de aproximadamente **1,11× a 1,19×**). As previsões e quantidades de folhas do Bankai coincidiram com a baseline em todas as 30 medições do Bankai. Os ganhos são do conjunto de alterações; não houve ablação para atribuir percentuais a cada técnica.
