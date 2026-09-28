@@ -4,6 +4,8 @@ Branch: `feature/fit-hardware-mvp`. Baseline: `964710b153ae6ac55db8bcaf5a00f8618
 
 O MVP reduziu a mediana do tempo de `fit` entre **9,6% e 16,3%** nos seis cenários medidos (speedup de aproximadamente **1,11× a 1,19×**). As previsões e quantidades de folhas do Bankai coincidiram com a baseline em todas as 30 medições do Bankai. Os ganhos são do conjunto de alterações; não houve ablação para atribuir percentuais a cada técnica.
 
+Veja também a [investigação posterior da acurácia](ACCURACY.md): foi confirmado um problema preexistente na distribuição do orçamento de folhas.
+
 ## Implementação
 
 - **Arena por árvore:** `crates/xrf/src/forest/tree.rs` guarda `Node<I>` em um `Vec`, com filhos `usize`. A inserção em pós-ordem preserva a sequência de construção e o consumo do RNG. A reserva considera amostras e limite de folhas, com teto inicial de 8.191 nós e crescimento geométrico posterior. Predição, poda, percurso, importância por permutação e exportação SHAP usam os índices.

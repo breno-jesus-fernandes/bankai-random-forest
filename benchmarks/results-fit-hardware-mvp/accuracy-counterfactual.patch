@@ -1,0 +1,22 @@
+--- a/crates/xrf/src/forest/tree.rs
++++ b/crates/xrf/src/forest/tree.rs
+@@ -232,6 +232,10 @@
+                     } else {
+                         best_score.abs()
+                     };
++                    // Diagnostic only: reserve a proportional part of the remaining
++                    // leaf expansions for the sibling before descending left.
++                    let reserved_for_right = (max_leaves - *leaf_count) * right.len() / mask.len();
++                    let left_limit = max_leaves - reserved_for_right;
+                     let left_index = Self::new_rec(
+                         nodes,
+                         input,
+@@ -239,7 +243,7 @@
+                         tries,
+                         feature_sampler,
+                         depth_left - 1,
+-                        max_leaves,
++                        left_limit,
+                         leaf_count,
+                         mask_cache,
+                         left_split_cache,
