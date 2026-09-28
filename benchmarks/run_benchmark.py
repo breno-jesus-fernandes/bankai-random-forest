@@ -5,7 +5,6 @@ import argparse
 import csv
 import os
 import platform
-import resource
 import subprocess
 import sys
 import tempfile
@@ -17,6 +16,11 @@ import sklearn
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import f1_score
 
+try:
+    import resource
+except ImportError:  # Windows does not provide the resource module.
+    resource = None
+
 PROFILES = {
     "default": {},
     "entropy": {"criterion": "entropy"},
@@ -27,6 +31,16 @@ PROFILES = {
     "no_bootstrap": {"bootstrap": False},
     "balanced": {"class_weight": "balanced"},
 }
+
+
+def peak_rss_kib():
+    """Return process peak RSS in KiB where the platform exposes it."""
+    if resource is None:
+        return None
+    peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    # macOS reports bytes; Linux and the BSDs report KiB.
+    return peak_rss / 1024 if sys.platform == "darwin" else peak_rss
+
 
 def generate_dataset(rows, features):
     state = 42
@@ -150,7 +164,7 @@ def benchmark(rows, features, trees, binary, profile, parameters):
                 "implementation": result["implementation"],
                 "train_seconds": result["train_seconds"],
                 "predict_seconds": result["predict_seconds"],
-                "peak_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                "peak_rss_kib": peak_rss_kib(),
                 "ffi_overhead_seconds": (
                     result["train_seconds"] + result["predict_seconds"]
                     - results[2]["train_seconds"]

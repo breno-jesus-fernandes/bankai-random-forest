@@ -78,6 +78,10 @@ jobs:
       - name: Install project and test dependencies
         run: uv sync --locked --no-install-project
 
+      - name: Add uv Python shared library to runtime path
+        if: matrix.runner == 'ubuntu-24.04-arm'
+        run: echo "LD_LIBRARY_PATH=$(uv run --no-sync python -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR"))'):${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+
       - name: Build and install the native extension
         run: uv run --no-sync maturin develop --release --locked
 
