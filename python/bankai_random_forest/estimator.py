@@ -528,7 +528,8 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
 
     def _next_seed(self):
         random_state = check_random_state(self.random_state)
-        return int(random_state.randint(0, np.iinfo(np.uint32).max))
+        # RandomState's default integer dtype is int32 on 32-bit Python.
+        return int(random_state.randint(0, np.iinfo(np.int32).max))
 
     def _reject_unsupported_baseline_parameters(self, sample_weight):
         if (
