@@ -27,48 +27,56 @@ def timed_fit(factory, x, y):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--rows", type=int, default=20_000, help="number of training rows")
+    parser.add_argument("--validation-rows", type=int, default=4_000)
+    parser.add_argument("--features", type=int, default=32)
+    parser.add_argument("--jobs", type=int, default=-1, help="thread count passed to both libraries")
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--output", type=Path, default=Path("benchmarks/results-fit-hardware-mvp/deep-binary-permutation.json"))
     args = parser.parse_args()
 
-    # Same synthetic workload/split and tree limits as the prior deep_binary run.
+    if args.rows < 1 or args.validation_rows < 1 or args.features < 16:
+        parser.error("rows and validation-rows must be positive; features must be at least 16")
+
+    # Same synthetic workload and tree limits as the prior deep_binary run.
     x, y = make_classification(
-        n_samples=24000, n_features=32, n_informative=16, n_classes=2,
+        n_samples=args.rows + args.validation_rows,
+        n_features=args.features, n_informative=16, n_classes=2,
         random_state=1729,
     )
     x = np.ascontiguousarray(x)
-    x_train, y_train = x[:20000], y[:20000]
-    x_valid, y_valid = x[20000:], y[20000:]
+    x_train, y_train = x[:args.rows], y[:args.rows]
+    x_valid, y_valid = x[args.rows:], y[args.rows:]
     common = dict(n_estimators=40, max_depth=20, random_state=42)
     bankai_factory = lambda: BankaiRandomForestClassifier(
         **common, max_bins=63, max_leaf_nodes=511, min_samples_leaf=5,
         max_features=None, max_samples=0.8, importance_type="permutation",
-        n_jobs=-1,
+        n_jobs=args.jobs,
     )
     lightgbm_factories = {
         "lightgbm_rf": lambda: LGBMClassifier(
             **common, boosting_type="rf", max_bin=63, num_leaves=511,
             min_child_samples=5, bagging_freq=1, bagging_fraction=0.8,
-            feature_fraction=1.0, n_jobs=-1, verbosity=-1,
+            feature_fraction=1.0, n_jobs=args.jobs, verbosity=-1,
         ),
         "lightgbm_gbdt": lambda: LGBMClassifier(
             **common, boosting_type="gbdt", learning_rate=0.1,
             max_bin=63, num_leaves=511, min_child_samples=5,
             bagging_freq=1, bagging_fraction=0.8,
-            feature_fraction=1.0, n_jobs=-1, verbosity=-1,
+            feature_fraction=1.0, n_jobs=args.jobs, verbosity=-1,
         ),
         "lightgbm_dart": lambda: LGBMClassifier(
             **common, boosting_type="dart", learning_rate=0.1,
             max_bin=63, num_leaves=511, min_child_samples=5,
             bagging_freq=1, bagging_fraction=0.8,
-            feature_fraction=1.0, n_jobs=-1, verbosity=-1,
+            feature_fraction=1.0, n_jobs=args.jobs, verbosity=-1,
         ),
         "lightgbm_goss": lambda: LGBMClassifier(
             **common, boosting_type="goss", learning_rate=0.1,
             max_bin=63, num_leaves=511, min_child_samples=5,
             feature_fraction=1.0, top_rate=0.2, other_rate=0.1,
-            n_jobs=-1, verbosity=-1,
+            n_jobs=args.jobs, verbosity=-1,
         ),
     }
     factories = {"bankai": bankai_factory, **lightgbm_factories}
@@ -116,9 +124,10 @@ def main():
         digest.update(path.read_bytes())
     from bankai_random_forest import _core
     result = {
-        "case": "deep_binary", "rows": 20000, "validation_rows": 4000,
-        "features": 32, "trees": 40, "max_depth": 20, "max_leaves": 511,
-        "min_samples_leaf": 5, "bins": 63, "threads": -1,
+        "case": "deep_binary", "rows": args.rows, "validation_rows": args.validation_rows,
+        "features": args.features, "trees": common["n_estimators"],
+        "max_depth": common["max_depth"], "max_leaves": 511,
+        "min_samples_leaf": 5, "bins": 63, "threads": args.jobs,
         "warmups": args.warmups, "repeats": args.repeats,
         "bankai_importance": "OOB permutation during fit",
         "lightgbm_importance": "not calculated",
