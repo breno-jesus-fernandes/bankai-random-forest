@@ -1,0 +1,17 @@
+revision,run,rows,features,bins,trees,n_jobs,repeats,median_seconds,min_seconds,max_seconds
+base-4c7b833,base_before,100000,100,16,1,1,5,1.321690,1.310526,1.335263
+base-4c7b833,base_before,100000,100,16,1,-1,5,1.325459,1.311225,1.332835
+base-4c7b833,base_before,100000,100,16,16,1,5,4.109080,4.079921,4.133859
+base-4c7b833,base_before,100000,100,16,16,-1,5,1.803775,1.769931,1.808012
+feature-parallel-histogram-preprocessing,feature,100000,100,16,1,1,5,1.368947,1.353380,1.566989
+feature-parallel-histogram-preprocessing,feature,100000,100,16,1,-1,5,1.185590,1.177344,1.253627
+feature-parallel-histogram-preprocessing,feature,100000,100,16,16,1,5,4.137812,4.111649,4.179445
+feature-parallel-histogram-preprocessing,feature,100000,100,16,16,-1,5,1.689342,1.674765,1.727935
+base-4c7b833,base_after,100000,100,16,1,1,5,1.348305,1.321789,1.375617
+base-4c7b833,base_after,100000,100,16,1,-1,5,1.337513,1.321628,1.520241
+base-4c7b833,base_after,100000,100,16,16,1,5,4.059495,4.033856,4.098109
+base-4c7b833,base_after,100000,100,16,16,-1,5,1.809387,1.794539,1.846811
+feature-parallel-histogram-preprocessing,feature_repeat,100000,100,16,1,1,5,1.345179,1.317211,1.354160
+feature-parallel-histogram-preprocessing,feature_repeat,100000,100,16,1,-1,5,1.164546,1.149647,1.177246
+feature-parallel-histogram-preprocessing,feature_repeat,100000,100,16,16,1,5,4.046936,4.044494,4.051454
+feature-parallel-histogram-preprocessing,feature_repeat,100000,100,16,16,-1,5,1.689717,1.640628,1.696036

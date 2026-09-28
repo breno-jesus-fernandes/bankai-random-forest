@@ -115,6 +115,42 @@ impl DenseInput {
         min_impurity_decrease: f64,
         max_bins: Option<usize>,
     ) -> Result<Self, String> {
+        Self::training_with_threads(
+            values,
+            rows,
+            columns,
+            labels,
+            sample_weights,
+            n_classes,
+            min_leaf_weight,
+            criterion,
+            min_samples_split,
+            min_samples_leaf,
+            min_impurity_decrease,
+            max_bins,
+            1,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn training_with_threads(
+        values: Vec<f64>,
+        rows: usize,
+        columns: usize,
+        labels: Vec<usize>,
+        sample_weights: Vec<f64>,
+        n_classes: usize,
+        min_leaf_weight: f64,
+        criterion: Criterion,
+        min_samples_split: usize,
+        min_samples_leaf: usize,
+        min_impurity_decrease: f64,
+        max_bins: Option<usize>,
+        threads: usize,
+    ) -> Result<Self, String> {
+        if threads == 0 {
+            return Err("histogram preprocessing requires at least one thread".into());
+        }
         let has_missing_values = values.iter().any(|value| value.is_nan());
         validate_matrix(&values, rows, columns)?;
         if labels.len() != rows {
@@ -154,7 +190,7 @@ impl DenseInput {
         let total_weight = sample_weights.iter().sum();
         let (values, bin_edges, active_features) = match max_bins {
             Some(max_bins) => {
-                let (binned, edges) = histogramize(&values, rows, columns, max_bins);
+                let (binned, edges) = histogramize(&values, rows, columns, max_bins, threads);
                 let active = edges
                     .iter()
                     .enumerate()
@@ -261,6 +297,46 @@ impl DenseInput {
         min_impurity_decrease: f64,
         max_bins: Option<usize>,
     ) -> Result<Self, String> {
+        Self::training_csr_with_threads(
+            indptr,
+            indices,
+            data,
+            rows,
+            columns,
+            labels,
+            sample_weights,
+            n_classes,
+            min_leaf_weight,
+            criterion,
+            min_samples_split,
+            min_samples_leaf,
+            min_impurity_decrease,
+            max_bins,
+            1,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn training_csr_with_threads(
+        indptr: Vec<usize>,
+        indices: Vec<usize>,
+        data: Vec<f64>,
+        rows: usize,
+        columns: usize,
+        labels: Vec<usize>,
+        sample_weights: Vec<f64>,
+        n_classes: usize,
+        min_leaf_weight: f64,
+        criterion: Criterion,
+        min_samples_split: usize,
+        min_samples_leaf: usize,
+        min_impurity_decrease: f64,
+        max_bins: Option<usize>,
+        threads: usize,
+    ) -> Result<Self, String> {
+        if threads == 0 {
+            return Err("histogram preprocessing requires at least one thread".into());
+        }
         let has_missing_values = data.iter().any(|value| value.is_nan());
         let sparse = validate_csr(indptr, indices, data, rows, columns)?;
         if labels.len() != rows {
@@ -291,7 +367,8 @@ impl DenseInput {
             return Err("max_bins must be None or an integer in [2, 255]".into());
         }
         let total_weight = sample_weights.iter().sum();
-        let bin_edges = max_bins.map(|bins| sparse_histogram_edges(&sparse, rows, columns, bins));
+        let bin_edges =
+            max_bins.map(|bins| sparse_histogram_edges(&sparse, rows, columns, bins, threads));
         let active_features = bin_edges.as_ref().map_or_else(
             || (0..columns).collect(),
             |edges| {
@@ -569,34 +646,52 @@ fn sparse_histogram_edges(
     rows: usize,
     columns: usize,
     max_bins: usize,
+    threads: usize,
 ) -> Vec<Vec<f64>> {
-    (0..columns)
-        .map(|column| {
-            let mut sorted = (0..rows)
-                .map(|row| values.get(row, column))
-                .filter(|value| !value.is_nan())
-                .collect::<Vec<_>>();
-            sorted.sort_unstable_by(f64::total_cmp);
-            sorted.dedup_by(|a, b| a.total_cmp(b).is_eq());
-            let mut edges = Vec::new();
-            if sorted.len() <= max_bins {
-                for pair in sorted.windows(2) {
-                    edges.push(midpoint(pair[0], pair[1]));
-                }
-            } else {
-                for bin in 1..max_bins {
-                    let index = bin * sorted.len() / max_bins;
-                    if index > 0 && index < sorted.len() {
-                        let edge = midpoint(sorted[index - 1], sorted[index]);
-                        if edges.last().is_none_or(|prev| *prev < edge) {
-                            edges.push(edge);
-                        }
+    let workers = threads.max(1).min(columns);
+    let build = |column| {
+        let mut sorted = (0..rows)
+            .map(|row| values.get(row, column))
+            .filter(|value| !value.is_nan())
+            .collect::<Vec<_>>();
+        sorted.sort_unstable_by(f64::total_cmp);
+        sorted.dedup_by(|a, b| a.total_cmp(b).is_eq());
+        let mut edges = Vec::new();
+        if sorted.len() <= max_bins {
+            for pair in sorted.windows(2) {
+                edges.push(midpoint(pair[0], pair[1]));
+            }
+        } else {
+            for bin in 1..max_bins {
+                let index = bin * sorted.len() / max_bins;
+                if index > 0 && index < sorted.len() {
+                    let edge = midpoint(sorted[index - 1], sorted[index]);
+                    if edges.last().is_none_or(|prev| *prev < edge) {
+                        edges.push(edge);
                     }
                 }
             }
-            edges
-        })
-        .collect()
+        }
+        edges
+    };
+    if workers == 1 {
+        return (0..columns).map(build).collect();
+    }
+    let chunk_size = columns.div_ceil(workers);
+    std::thread::scope(|scope| {
+        let handles = (0..columns)
+            .step_by(chunk_size)
+            .map(|start| {
+                let end = (start + chunk_size).min(columns);
+                let build = &build;
+                scope.spawn(move || (start..end).map(build).collect::<Vec<_>>())
+            })
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().expect("sparse histogram worker panicked"))
+            .collect()
+    })
 }
 
 fn validate_matrix(values: &[f64], rows: usize, columns: usize) -> Result<(), String> {
@@ -624,39 +719,73 @@ fn histogramize(
     rows: usize,
     columns: usize,
     max_bins: usize,
+    threads: usize,
 ) -> (Vec<u8>, Vec<Vec<f64>>) {
-    let mut edges_by_feature = Vec::with_capacity(columns);
-    for feature in 0..columns {
-        let mut sorted: Vec<_> = (0..rows)
-            .map(|row| values[row * columns + feature])
-            .filter(|value| !value.is_nan())
-            .collect();
-        sorted.sort_unstable_by(f64::total_cmp);
-        sorted.dedup_by(|left, right| left.total_cmp(right).is_eq());
+    let workers = threads.max(1).min(columns);
+    let edges_by_feature: Vec<Vec<f64>> = if workers == 1 {
+        (0..columns)
+            .map(|feature| histogram_edges_for_feature(values, rows, columns, feature, max_bins))
+            .collect()
+    } else {
+        let chunk_size = columns.div_ceil(workers);
+        std::thread::scope(|scope| {
+            let handles = (0..columns)
+                .step_by(chunk_size)
+                .map(|start| {
+                    let end = (start + chunk_size).min(columns);
+                    scope.spawn(move || {
+                        (start..end)
+                            .map(|feature| {
+                                histogram_edges_for_feature(
+                                    values, rows, columns, feature, max_bins,
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect::<Vec<_>>();
+            handles
+                .into_iter()
+                .flat_map(|handle| handle.join().expect("histogram edge worker panicked"))
+                .collect()
+        })
+    };
 
-        let mut edges = Vec::with_capacity(max_bins.saturating_sub(1));
-        if sorted.len() <= max_bins {
-            for adjacent in sorted.windows(2) {
-                edges.push(midpoint(adjacent[0], adjacent[1]));
-            }
-        } else {
-            for bin in 1..max_bins {
-                let index = bin * sorted.len() / max_bins;
-                if index > 0 && index < sorted.len() {
-                    let edge = midpoint(sorted[index - 1], sorted[index]);
-                    if edges.last().is_none_or(|previous| *previous < edge) {
-                        edges.push(edge);
-                    }
+    let binned = apply_histogram_edges_parallel(values, rows, columns, &edges_by_feature, threads);
+    (binned, edges_by_feature)
+}
+
+fn histogram_edges_for_feature(
+    values: &[f64],
+    rows: usize,
+    columns: usize,
+    feature: usize,
+    max_bins: usize,
+) -> Vec<f64> {
+    let mut sorted: Vec<_> = (0..rows)
+        .map(|row| values[row * columns + feature])
+        .filter(|value| !value.is_nan())
+        .collect();
+    sorted.sort_unstable_by(f64::total_cmp);
+    sorted.dedup_by(|left, right| left.total_cmp(right).is_eq());
+
+    let mut edges = Vec::with_capacity(max_bins.saturating_sub(1));
+    if sorted.len() <= max_bins {
+        for adjacent in sorted.windows(2) {
+            edges.push(midpoint(adjacent[0], adjacent[1]));
+        }
+    } else {
+        for bin in 1..max_bins {
+            let index = bin * sorted.len() / max_bins;
+            if index > 0 && index < sorted.len() {
+                let edge = midpoint(sorted[index - 1], sorted[index]);
+                if edges.last().is_none_or(|previous| *previous < edge) {
+                    edges.push(edge);
                 }
             }
         }
-        edges_by_feature.push(edges);
     }
-
-    (
-        apply_histogram_edges(values, rows, columns, &edges_by_feature),
-        edges_by_feature,
-    )
+    edges
 }
 
 fn midpoint(left: f64, right: f64) -> f64 {
@@ -682,6 +811,41 @@ fn apply_histogram_edges(
             binned.push(bin as u8);
         }
     }
+    binned
+}
+
+fn apply_histogram_edges_parallel(
+    values: &[f64],
+    rows: usize,
+    columns: usize,
+    edges_by_feature: &[Vec<f64>],
+    threads: usize,
+) -> Vec<u8> {
+    let workers = threads.max(1).min(rows);
+    if workers == 1 {
+        return apply_histogram_edges(values, rows, columns, edges_by_feature);
+    }
+    let rows_per_worker = rows.div_ceil(workers);
+    let output_len = values.len();
+    let mut binned = vec![0u8; output_len];
+    let chunk_len = rows_per_worker * columns;
+    std::thread::scope(|scope| {
+        for (chunk_index, output) in binned.chunks_mut(chunk_len).enumerate() {
+            let start_row = chunk_index * rows_per_worker;
+            let chunk_rows = output.len() / columns;
+            let input = &values[start_row * columns..(start_row + chunk_rows) * columns];
+            scope.spawn(move || {
+                for (index, (&value, bin_out)) in input.iter().zip(output.iter_mut()).enumerate() {
+                    let feature = index % columns;
+                    *bin_out = if value.is_nan() {
+                        (edges_by_feature[feature].len() + 1) as u8
+                    } else {
+                        edges_by_feature[feature].partition_point(|edge| value > *edge) as u8
+                    };
+                }
+            });
+        }
+    });
     binned
 }
 
@@ -1429,6 +1593,73 @@ mod histogram_optimization_tests {
     fn histogram_bins_use_compact_storage() {
         let input = training_input();
         assert!(matches!(input.values, DenseValues::Binned(ref values) if values.len() == 12));
+    }
+
+    #[test]
+    fn parallel_histogram_preprocessing_matches_serial() {
+        let rows = 37;
+        let columns = 5;
+        let values = (0..rows * columns)
+            .map(|i| {
+                if i % 29 == 0 {
+                    f64::NAN
+                } else {
+                    ((i * 17) % 41) as f64 / 3.0
+                }
+            })
+            .collect::<Vec<_>>();
+        let make = |threads| {
+            DenseInput::training_with_threads(
+                values.clone(),
+                rows,
+                columns,
+                (0..rows).map(|i| i % 3).collect(),
+                vec![1.0; rows],
+                3,
+                0.0,
+                Criterion::Gini,
+                2,
+                1,
+                0.0,
+                Some(16),
+                threads,
+            )
+            .unwrap()
+        };
+        let serial = make(1);
+        let parallel = make(4);
+        assert_eq!(serial.bin_edges(), parallel.bin_edges());
+        match (serial.values, parallel.values) {
+            (DenseValues::Binned(left), DenseValues::Binned(right)) => assert_eq!(left, right),
+            _ => panic!("histogram inputs must use compact binned storage"),
+        }
+    }
+
+    #[test]
+    fn parallel_sparse_histogram_edges_match_serial() {
+        let make = |threads| {
+            DenseInput::training_csr_with_threads(
+                vec![0, 2, 4, 6, 8],
+                vec![0, 1, 0, 2, 1, 2, 0, 2],
+                vec![1.0, 2.0, 2.0, 1.0, 3.0, 4.0, 4.0, 2.0],
+                4,
+                3,
+                vec![0, 0, 1, 1],
+                vec![1.0; 4],
+                2,
+                0.0,
+                Criterion::Gini,
+                2,
+                1,
+                0.0,
+                Some(4),
+                threads,
+            )
+            .unwrap()
+        };
+        let serial = make(1);
+        let parallel = make(3);
+        assert_eq!(serial.bin_edges(), parallel.bin_edges());
     }
 
     #[test]

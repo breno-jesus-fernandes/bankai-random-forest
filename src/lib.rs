@@ -111,8 +111,8 @@ impl NativeForest {
             _ => return Err(PyValueError::new_err("unsupported criterion")),
         };
         let input = match matrix {
-            MatrixData::Dense(values, ..) => DenseInput::training(values, rows, columns, labels, sample_weights, n_classes, min_leaf_weight, criterion, min_samples_split, min_samples_leaf, min_impurity_decrease, max_bins),
-            MatrixData::Csr { indptr, indices, data, .. } => DenseInput::training_csr(indptr, indices, data, rows, columns, labels, sample_weights, n_classes, min_leaf_weight, criterion, min_samples_split, min_samples_leaf, min_impurity_decrease, max_bins),
+            MatrixData::Dense(values, ..) => DenseInput::training_with_threads(values, rows, columns, labels, sample_weights, n_classes, min_leaf_weight, criterion, min_samples_split, min_samples_leaf, min_impurity_decrease, max_bins, n_jobs.max(1)),
+            MatrixData::Csr { indptr, indices, data, .. } => DenseInput::training_csr_with_threads(indptr, indices, data, rows, columns, labels, sample_weights, n_classes, min_leaf_weight, criterion, min_samples_split, min_samples_leaf, min_impurity_decrease, max_bins, n_jobs.max(1)),
         }
         .map_err(PyValueError::new_err)?;
         let mut input = if balanced_subsample {
