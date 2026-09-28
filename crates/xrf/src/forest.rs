@@ -5,7 +5,7 @@ mod maybe_vec;
 use maybe_vec::MaybeVec;
 
 mod tree;
-pub use tree::Tree;
+pub use tree::{Node, Tree};
 
 mod importance;
 

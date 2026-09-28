@@ -347,13 +347,17 @@ impl NativeForest {
 }
 
 fn flatten_tree(tree: &xrf::Tree<DenseInput>, nodes: &mut Vec<ShapNode>) -> usize {
+    flatten_tree_at(tree, tree.root, nodes)
+}
+
+fn flatten_tree_at(tree: &xrf::Tree<DenseInput>, node: usize, nodes: &mut Vec<ShapNode>) -> usize {
     let index = nodes.len();
-    match tree {
-        xrf::Tree::Leaf(vote, cover) => nodes.push(ShapNode { feature: -1, threshold: 0.0, missing_left: false, left: 0, right: 0, cover: *cover as f64, vote: Some(*vote) }),
-        xrf::Tree::Branch(feature, pivot, score, cover, left, right) => {
+    match &tree.nodes[node] {
+        xrf::Node::Leaf(vote, cover) => nodes.push(ShapNode { feature: -1, threshold: 0.0, missing_left: false, left: 0, right: 0, cover: *cover as f64, vote: Some(*vote) }),
+        xrf::Node::Branch(feature, pivot, score, cover, left, right) => {
             nodes.push(ShapNode { feature: *feature as i32, threshold: *pivot, missing_left: score.is_sign_negative(), left: 0, right: 0, cover: *cover as f64, vote: None });
-            let left_index = flatten_tree(left, nodes);
-            let right_index = flatten_tree(right, nodes);
+            let left_index = flatten_tree_at(tree, *left, nodes);
+            let right_index = flatten_tree_at(tree, *right, nodes);
             nodes[index].left = left_index; nodes[index].right = right_index;
         }
     }

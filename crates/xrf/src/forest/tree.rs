@@ -2,17 +2,16 @@ use crate::rfinput::VoteAggregator;
 use crate::rfinput::{DecisionSlice, RfInput};
 use crate::{FairBest, FeatureSampler, Mask, MaskCache, RfRng, XrfError};
 
-pub enum Tree<I: RfInput> {
+/// Nodes are appended in postorder; child indices survive arena growth.
+pub struct Tree<I: RfInput> {
+    pub nodes: Vec<Node<I>>,
+    pub root: usize,
+}
+
+pub enum Node<I: RfInput> {
     /// Node cover is retained for path-dependent tree explainers.
     Leaf(I::Vote, usize),
-    Branch(
-        I::FeatureId,
-        I::Pivot,
-        f64,
-        usize,
-        Box<Tree<I>>,
-        Box<Tree<I>>,
-    ),
+    Branch(I::FeatureId, I::Pivot, f64, usize, usize, usize),
 }
 
 use crate::walk::{Walk, WalkIter};
@@ -31,7 +30,17 @@ impl<I: RfInput> Tree<I> {
         feature_sampler.reset();
         let mut leaf_count = 1;
         let split_cache = input.split_cache(bag);
-        Self::new_rec(
+        // Bound the initial reservation for unrestricted trees. Larger trees grow
+        // geometrically without invalidating indices or allocating individual nodes.
+        let mut nodes = Vec::with_capacity(
+            bag.len()
+                .min(max_leaves)
+                .saturating_mul(2)
+                .saturating_sub(1)
+                .min(8191),
+        );
+        let root = Self::new_rec(
+            &mut nodes,
             input,
             bag,
             tries,
@@ -40,11 +49,12 @@ impl<I: RfInput> Tree<I> {
             max_leaves,
             &mut leaf_count,
             mask_cache,
-            &split_cache,
+            split_cache,
             rng,
             0.0,
             1.0,
-        )
+        );
+        Self { nodes, root }
     }
 
     /// Prune this tree using the normalized cost-complexity threshold.
@@ -65,11 +75,20 @@ impl<I: RfInput> Tree<I> {
         if root.pruning_risk(root_weight).is_none() {
             return;
         }
-        Self::prune_rec(self, input, bag, root_weight, ccp_alpha, mask_cache);
+        Self::prune_rec(
+            &mut self.nodes,
+            self.root,
+            input,
+            bag,
+            root_weight,
+            ccp_alpha,
+            mask_cache,
+        );
     }
 
     fn prune_rec(
-        tree: &mut Self,
+        nodes: &mut [Node<I>],
+        index: usize,
         input: &I,
         mask: &Mask,
         root_weight: f64,
@@ -80,9 +99,10 @@ impl<I: RfInput> Tree<I> {
         let Some(node_risk) = node_slice.pruning_risk(root_weight) else {
             return (0.0, 1);
         };
-        let (subtree_risk, leaf_count, collapse_vote) = match tree {
-            Self::Leaf(_, _) => return (node_risk, 1),
-            Self::Branch(feature, pivot, score, _, left, right) => {
+        let (subtree_risk, leaf_count, collapse_vote) = match &nodes[index] {
+            Node::Leaf(_, _) => return (node_risk, 1),
+            Node::Branch(feature, pivot, score, _, left, right) => {
+                let (left, right) = (*left, *right);
                 let mut left_mask = mask_cache.provide();
                 let mut right_mask = mask_cache.provide();
                 mask.split_into(
@@ -90,9 +110,17 @@ impl<I: RfInput> Tree<I> {
                     &mut left_mask,
                     &mut right_mask,
                 );
-                let (left_risk, left_leaves) =
-                    Self::prune_rec(left, input, &left_mask, root_weight, ccp_alpha, mask_cache);
+                let (left_risk, left_leaves) = Self::prune_rec(
+                    nodes,
+                    left,
+                    input,
+                    &left_mask,
+                    root_weight,
+                    ccp_alpha,
+                    mask_cache,
+                );
                 let (right_risk, right_leaves) = Self::prune_rec(
+                    nodes,
                     right,
                     input,
                     &right_mask,
@@ -116,7 +144,7 @@ impl<I: RfInput> Tree<I> {
         };
 
         if let Some(vote) = collapse_vote {
-            *tree = Self::Leaf(vote, mask.len());
+            nodes[index] = Node::Leaf(vote, mask.len());
             (node_risk, 1)
         } else {
             (subtree_risk, leaf_count)
@@ -124,6 +152,7 @@ impl<I: RfInput> Tree<I> {
     }
 
     fn new_rec(
+        nodes: &mut Vec<Node<I>>,
         input: &I,
         mask: &Mask,
         tries: usize,
@@ -132,14 +161,18 @@ impl<I: RfInput> Tree<I> {
         max_leaves: usize,
         leaf_count: &mut usize,
         mask_cache: &mut MaskCache,
-        split_cache: &I::SplitCache,
+        split_cache: I::SplitCache,
         rng: &mut RfRng,
         lower_bound: f64,
         upper_bound: f64,
-    ) -> Self {
+    ) -> usize {
         let y = input.decision_slice(mask);
-        if depth_left == 0 || y.is_pure() || !input.can_split(mask) || *leaf_count >= max_leaves {
-            Self::Leaf(
+        let node = if depth_left == 0
+            || y.is_pure()
+            || !input.can_split(mask)
+            || *leaf_count >= max_leaves
+        {
+            Node::Leaf(
                 y.condense_with_bounds(rng, lower_bound, upper_bound),
                 mask.len(),
             )
@@ -152,7 +185,7 @@ impl<I: RfInput> Tree<I> {
                         mask,
                         feature,
                         &y,
-                        split_cache,
+                        &split_cache,
                         rng,
                         lower_bound,
                         upper_bound,
@@ -194,40 +227,48 @@ impl<I: RfInput> Tree<I> {
                             ((lower_bound, middle), (middle, upper_bound))
                         }
                     };
-                    let stored_score = if missing_left { -best_score.abs() } else { best_score.abs() };
-                    let branch = Self::Branch(
+                    let stored_score = if missing_left {
+                        -best_score.abs()
+                    } else {
+                        best_score.abs()
+                    };
+                    let left_index = Self::new_rec(
+                        nodes,
+                        input,
+                        &left,
+                        tries,
+                        feature_sampler,
+                        depth_left - 1,
+                        max_leaves,
+                        leaf_count,
+                        mask_cache,
+                        left_split_cache,
+                        rng,
+                        left_bounds.0,
+                        left_bounds.1,
+                    );
+                    let right_index = Self::new_rec(
+                        nodes,
+                        input,
+                        &right,
+                        tries,
+                        feature_sampler,
+                        depth_left - 1,
+                        max_leaves,
+                        leaf_count,
+                        mask_cache,
+                        right_split_cache,
+                        rng,
+                        right_bounds.0,
+                        right_bounds.1,
+                    );
+                    let branch = Node::Branch(
                         feature,
                         pivot,
                         stored_score,
                         mask.len(),
-                        Box::new(Self::new_rec(
-                            input,
-                            &left,
-                            tries,
-                            feature_sampler,
-                            depth_left - 1,
-                            max_leaves,
-                            leaf_count,
-                            mask_cache,
-                            &left_split_cache,
-                            rng,
-                            left_bounds.0,
-                            left_bounds.1,
-                        )),
-                        Box::new(Self::new_rec(
-                            input,
-                            &right,
-                            tries,
-                            feature_sampler,
-                            depth_left - 1,
-                            max_leaves,
-                            leaf_count,
-                            mask_cache,
-                            &right_split_cache,
-                            rng,
-                            right_bounds.0,
-                            right_bounds.1,
-                        )),
+                        left_index,
+                        right_index,
                     );
                     mask_cache.release(left);
                     mask_cache.release(right);
@@ -235,31 +276,37 @@ impl<I: RfInput> Tree<I> {
                 })
                 //No split mean a third way to make a leaf
                 .unwrap_or_else(|| {
-                    Self::Leaf(
+                    Node::Leaf(
                         y.condense_with_bounds(rng, lower_bound, upper_bound),
                         mask.len(),
                     )
                 })
-        }
+        };
+        let index = nodes.len();
+        nodes.push(node);
+        index
     }
     pub fn from_walk<W: Iterator<Item = Walk<I>>>(iter: &mut W) -> Result<Self, XrfError> {
-        let b = iter.next();
-        match b {
-            Some(Walk::VisitLeaf(v)) => Ok(Tree::Leaf(v, 0)),
-            Some(Walk::VisitBranch(fid, piv, score)) => {
-                let left = Self::from_walk(iter)?;
-                let right = Self::from_walk(iter)?;
-                Ok(Tree::Branch(
-                    fid,
-                    piv,
-                    score,
-                    0,
-                    Box::new(left),
-                    Box::new(right),
-                ))
-            }
-            None => Err(XrfError::WalkAggregationFailure),
+        fn append<I: RfInput, W: Iterator<Item = Walk<I>>>(
+            iter: &mut W,
+            nodes: &mut Vec<Node<I>>,
+        ) -> Result<usize, XrfError> {
+            let node = match iter.next() {
+                Some(Walk::VisitLeaf(v)) => Node::Leaf(v, 0),
+                Some(Walk::VisitBranch(fid, pivot, score)) => {
+                    let left = append(iter, nodes)?;
+                    let right = append(iter, nodes)?;
+                    Node::Branch(fid, pivot, score, 0, left, right)
+                }
+                None => return Err(XrfError::WalkAggregationFailure),
+            };
+            let index = nodes.len();
+            nodes.push(node);
+            Ok(index)
         }
+        let mut nodes = Vec::new();
+        let root = append(iter, &mut nodes)?;
+        Ok(Self { nodes, root })
     }
     pub fn cast_votes(
         &self,
@@ -268,9 +315,20 @@ impl<I: RfInput> Tree<I> {
         onto: &mut [I::VoteAggregator],
         mask_cache: &mut MaskCache,
     ) {
-        match self {
-            Self::Leaf(vote, _) => on.iter().for_each(|e| onto[*e].ingest_vote(*vote)),
-            Self::Branch(feature_id, pivot, score, _, left, right) => {
+        self.cast_votes_at(self.root, input, on, onto, mask_cache);
+    }
+
+    fn cast_votes_at(
+        &self,
+        index: usize,
+        input: &I,
+        on: &Mask,
+        onto: &mut [I::VoteAggregator],
+        mask_cache: &mut MaskCache,
+    ) {
+        match &self.nodes[index] {
+            Node::Leaf(vote, _) => on.iter().for_each(|e| onto[*e].ingest_vote(*vote)),
+            Node::Branch(feature_id, pivot, score, _, left, right) => {
                 let mut left_on = mask_cache.provide();
                 let mut right_on = mask_cache.provide();
                 on.split_into(
@@ -279,10 +337,10 @@ impl<I: RfInput> Tree<I> {
                     &mut right_on,
                 );
                 if !left_on.is_empty() {
-                    left.cast_votes(input, &left_on, onto, mask_cache);
+                    self.cast_votes_at(*left, input, &left_on, onto, mask_cache);
                 }
                 if !right_on.is_empty() {
-                    right.cast_votes(input, &right_on, onto, mask_cache);
+                    self.cast_votes_at(*right, input, &right_on, onto, mask_cache);
                 }
                 mask_cache.release(right_on);
                 mask_cache.release(left_on);
@@ -322,6 +380,14 @@ mod tests {
             &mut rng,
         );
         let tw: Vec<_> = tree.walk().collect();
+        assert_eq!(tree.nodes.len(), 7);
+        for (index, node) in tree.nodes.iter().enumerate() {
+            if let Node::Branch(_, _, _, _, left, right) = node {
+                assert!(*left < index && *right < index);
+            }
+        }
+        let restored = Tree::from_walk(&mut tree.walk()).unwrap();
+        assert_eq!(restored.walk().count(), tw.len());
 
         use crate::mockups::simple_cls::DataFrame;
         let ref_walk = vec![

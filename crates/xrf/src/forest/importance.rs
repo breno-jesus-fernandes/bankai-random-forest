@@ -6,7 +6,7 @@ use crate::{Mask, MaskCache, RfRng};
 use std::collections::HashMap;
 
 use super::ImportanceAggregator;
-use super::tree::Tree;
+use super::tree::{Node, Tree};
 
 impl<I: RfInput> Tree<I> {
     pub fn permutational_importance(
@@ -22,6 +22,7 @@ impl<I: RfInput> Tree<I> {
             <I::AccuracyDecreaseAggregator>::new(input, on, input.observation_count());
         let perm = on.permute(rng);
         self.cast_votes_permutational(
+            self.root,
             input,
             on,
             &perm,
@@ -46,6 +47,7 @@ impl<I: RfInput> Tree<I> {
     #[allow(clippy::too_many_arguments)]
     fn cast_votes_permutational<F>(
         &self,
+        index: usize,
         input: &I,
         on: &Mask,
         perm: &Mask,
@@ -56,9 +58,9 @@ impl<I: RfInput> Tree<I> {
     ) where
         F: FnMut(Option<I::FeatureId>, &Mask, &I::Vote),
     {
-        match self {
-            Self::Leaf(vote, _) => collector(upstream_permuted, on, vote),
-            Self::Branch(feature_id, pivot, score, _, left, right) => {
+        match &self.nodes[index] {
+            Node::Leaf(vote, _) => collector(upstream_permuted, on, vote),
+            Node::Branch(feature_id, pivot, score, _, left, right) => {
                 let mut left_mask = mask_cache.provide();
                 let mut right_mask = mask_cache.provide();
                 let mut left_perm = mask_cache.provide();
@@ -76,7 +78,8 @@ impl<I: RfInput> Tree<I> {
                         &mut right_perm,
                     );
                     if !left_mask.is_empty() {
-                        left.cast_votes_permutational(
+                        self.cast_votes_permutational(
+                            *left,
                             input,
                             &left_mask,
                             &left_perm,
@@ -87,7 +90,8 @@ impl<I: RfInput> Tree<I> {
                         );
                     }
                     if !right_mask.is_empty() {
-                        right.cast_votes_permutational(
+                        self.cast_votes_permutational(
+                            *right,
                             input,
                             &right_mask,
                             &right_perm,
@@ -113,7 +117,8 @@ impl<I: RfInput> Tree<I> {
                         &mut right_perm,
                     );
                     if !left_mask.is_empty() {
-                        left.cast_votes_permutational(
+                        self.cast_votes_permutational(
+                            *left,
                             input,
                             &left_mask,
                             &left_perm,
@@ -124,7 +129,8 @@ impl<I: RfInput> Tree<I> {
                         );
                     }
                     if !right_mask.is_empty() {
-                        right.cast_votes_permutational(
+                        self.cast_votes_permutational(
+                            *right,
                             input,
                             &right_mask,
                             &right_perm,

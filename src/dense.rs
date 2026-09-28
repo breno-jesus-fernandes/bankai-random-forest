@@ -42,15 +42,28 @@ struct CsrValues {
     data: Vec<f64>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-struct FeatureHistogram {
-    class_weights: Vec<f64>,
-    sample_counts: Vec<usize>,
+struct FeatureHistogram<'a> {
+    class_weights: &'a [f64],
+    sample_counts: &'a [usize],
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct HistogramCache {
-    features: Vec<FeatureHistogram>,
+    // One contiguous allocation per statistic, shared feature boundaries.
+    bin_offsets: Vec<usize>,
+    class_weights: Vec<f64>,
+    sample_counts: Vec<usize>,
+}
+
+impl HistogramCache {
+    fn feature(&self, feature: usize, classes: usize) -> FeatureHistogram<'_> {
+        let start = self.bin_offsets[feature];
+        let end = self.bin_offsets[feature + 1];
+        FeatureHistogram {
+            class_weights: &self.class_weights[start * classes..end * classes],
+            sample_counts: &self.sample_counts[start..end],
+        }
+    }
 }
 
 pub struct DenseSplitCache(Option<HistogramCache>);
@@ -673,39 +686,31 @@ fn apply_histogram_edges(
 }
 
 fn build_histograms(input: &DenseInput, mask: &Mask) -> HistogramCache {
-    let mut features = input
-        .bin_edges
-        .as_ref()
-        .expect("histogram cache requires fitted bin edges")
-        .iter()
-        .map(|edges| {
-            let bins = edges.len() + 1 + usize::from(input.has_missing_values);
-            FeatureHistogram {
-                class_weights: vec![0.0; bins * input.n_classes],
-                sample_counts: vec![0; bins],
-            }
-        })
-        .collect::<Vec<_>>();
-
+    let edges = input.bin_edges.as_ref().expect("histogram cache requires fitted bin edges");
+    let mut bin_offsets = Vec::with_capacity(edges.len() + 1);
+    bin_offsets.push(0);
+    for feature_edges in edges.iter() {
+        bin_offsets.push(bin_offsets.last().unwrap() + feature_edges.len() + 1
+            + usize::from(input.has_missing_values));
+    }
+    let bins = *bin_offsets.last().unwrap();
+    let mut histogram = HistogramCache {
+        bin_offsets,
+        class_weights: vec![0.0; bins * input.n_classes],
+        sample_counts: vec![0; bins],
+    };
     match &input.values {
-        DenseValues::Binned(values) => {
-            for &row in mask.iter() {
-                let label = input.labels()[row];
-                let weight = input.sample_weight(row);
-                let offset = row * input.columns;
-                for (feature, histogram) in features.iter_mut().enumerate() {
-                    let bin = values[offset + feature] as usize;
-                    histogram.class_weights[bin * input.n_classes + label] += weight;
-                    histogram.sample_counts[bin] += 1;
-                }
-            }
-        }
+        DenseValues::Binned(values) => match input.n_classes {
+            2 => accumulate_dense_histograms::<2>(input, mask, values, &mut histogram),
+            4 => accumulate_dense_histograms::<4>(input, mask, values, &mut histogram),
+            _ => accumulate_dense_histograms::<0>(input, mask, values, &mut histogram),
+        },
         DenseValues::Sparse(_) => {
             for &row in mask.iter() {
                 let label = input.labels()[row];
                 let weight = input.sample_weight(row);
-                for (feature, histogram) in features.iter_mut().enumerate() {
-                    let bin = input.bin_value(row, feature);
+                for feature in 0..input.columns {
+                    let bin = histogram.bin_offsets[feature] + input.bin_value(row, feature);
                     histogram.class_weights[bin * input.n_classes + label] += weight;
                     histogram.sample_counts[bin] += 1;
                 }
@@ -713,30 +718,38 @@ fn build_histograms(input: &DenseInput, mask: &Mask) -> HistogramCache {
         }
         DenseValues::Exact(_) => unreachable!("histograms require binned input"),
     }
-    HistogramCache { features }
+    histogram
 }
 
-fn subtract_histograms(parent: &HistogramCache, smaller_child: &HistogramCache) -> HistogramCache {
-    let features = parent
-        .features
-        .iter()
-        .zip(&smaller_child.features)
-        .map(|(parent, smaller)| FeatureHistogram {
-            class_weights: parent
-                .class_weights
-                .iter()
-                .zip(&smaller.class_weights)
-                .map(|(parent, smaller)| (parent - smaller).max(0.0))
-                .collect(),
-            sample_counts: parent
-                .sample_counts
-                .iter()
-                .zip(&smaller.sample_counts)
-                .map(|(parent, smaller)| parent - smaller)
-                .collect(),
-        })
-        .collect();
-    HistogramCache { features }
+fn accumulate_dense_histograms<const CLASSES: usize>(
+    input: &DenseInput, mask: &Mask, values: &[u8], histogram: &mut HistogramCache,
+) {
+    let classes = if CLASSES == 0 { input.n_classes } else { CLASSES };
+    let labels = input.labels();
+    for &row in mask.iter() {
+        let label = labels[row];
+        let weight = input.sample_weight(row);
+        let offset = row * input.columns;
+        let row_bins = &values[offset..offset + input.columns];
+        for (&bin, &start) in row_bins.iter().zip(&histogram.bin_offsets) {
+            let index = start + bin as usize;
+            histogram.class_weights[index * classes + label] += weight;
+            histogram.sample_counts[index] += 1;
+        }
+    }
+}
+
+fn subtract_histograms(mut parent: HistogramCache, smaller_child: &HistogramCache) -> HistogramCache {
+    debug_assert_eq!(parent.bin_offsets, smaller_child.bin_offsets);
+    // The parent buffer becomes the larger child's buffer. These independent,
+    // contiguous elementwise loops are suitable for LLVM auto-vectorization.
+    for (parent, smaller) in parent.class_weights.iter_mut().zip(&smaller_child.class_weights) {
+        *parent = (*parent - smaller).max(0.0);
+    }
+    for (parent, smaller) in parent.sample_counts.iter_mut().zip(&smaller_child.sample_counts) {
+        *parent -= smaller;
+    }
+    parent
 }
 
 #[derive(Clone)]
@@ -915,7 +928,7 @@ fn best_split(
         best_split_histogram(
             input,
             target,
-            &split_cache.0.as_ref()?.features[feature],
+            &split_cache.0.as_ref()?.feature(feature, input.n_classes),
             monotonic_constraint,
             lower_bound,
             upper_bound,
@@ -1074,7 +1087,7 @@ fn best_split_exact(
 fn best_split_histogram(
     input: &DenseInput,
     target: &DenseDecisionSlice,
-    histogram: &FeatureHistogram,
+    histogram: &FeatureHistogram<'_>,
     monotonic_constraint: i8,
     lower_bound: f64,
     upper_bound: f64,
@@ -1099,6 +1112,8 @@ fn best_split_histogram(
     let total_count = histogram.sample_counts[..missing_bin].iter().sum::<usize>();
     let mut best: Option<(f64, bool, f64)> = None;
 
+    let mut candidate_left = if missing_count > 0 { vec![0.0; input.n_classes] } else { Vec::new() };
+    let mut candidate_right = if missing_count > 0 { vec![0.0; input.n_classes] } else { Vec::new() };
     let split_bin_end = if input.has_missing_values { missing_bin.saturating_sub(1) } else { bin_count.saturating_sub(1) };
     for bin in 0..split_bin_end {
         for class in 0..input.n_classes {
@@ -1130,16 +1145,18 @@ fn best_split_histogram(
         }
         for missing_left in [false, true] {
             if missing_count == 0 && missing_left != (left_count > total_count - left_count) { continue; }
-            let (lc, rc, lcount, rcount, lw) = if missing_left {
-                let mut lc = left.clone();
+            candidate_left.copy_from_slice(&left);
+            candidate_right.copy_from_slice(&right);
+            let (lcount, rcount, lw) = if missing_left {
                 let missing_classes = missing_classes.as_ref().unwrap();
-                for class in 0..input.n_classes { lc[class] += missing_classes[class]; }
-                (lc, right.clone(), left_count + missing_count, total_count - left_count, left_weight + missing_classes.iter().sum::<f64>())
+                for class in 0..input.n_classes { candidate_left[class] += missing_classes[class]; }
+                (left_count + missing_count, total_count - left_count, left_weight + missing_classes.iter().sum::<f64>())
             } else {
-                let mut rc = right.clone();
-                for class in 0..input.n_classes { rc[class] += missing_classes.as_ref().unwrap()[class]; }
-                (left.clone(), rc, left_count, total_count - left_count + missing_count, left_weight)
+                for class in 0..input.n_classes { candidate_right[class] += missing_classes.as_ref().unwrap()[class]; }
+                (left_count, total_count - left_count + missing_count, left_weight)
             };
+            let lc = &candidate_left;
+            let rc = &candidate_right;
             let rw = total_weight - lw;
             if lcount < input.min_samples_leaf || rcount < input.min_samples_leaf || lw == 0.0 || rw == 0.0
                 || lw < input.min_leaf_weight || rw < input.min_leaf_weight { continue; }
@@ -1281,12 +1298,12 @@ impl RfInput for DenseInput {
 
     fn split_cache_children(
         &self,
-        parent_cache: &Self::SplitCache,
+        parent_cache: Self::SplitCache,
         _: &Mask,
         left: &Mask,
         right: &Mask,
     ) -> (Self::SplitCache, Self::SplitCache) {
-        let Some(parent_histograms) = &parent_cache.0 else {
+        let Some(parent_histograms) = parent_cache.0 else {
             return (DenseSplitCache(None), DenseSplitCache(None));
         };
         if left.len() <= right.len() {
@@ -1428,11 +1445,33 @@ mod histogram_optimization_tests {
         let left = Mask::from_vec(vec![0, 1, 2]);
         let right = Mask::from_vec(vec![3, 4, 5]);
         let parent_histogram = build_histograms(&input, &parent);
+        let weights_ptr = parent_histogram.class_weights.as_ptr();
+        let counts_ptr = parent_histogram.sample_counts.as_ptr();
         let left_histogram = build_histograms(&input, &left);
-        let derived_right = subtract_histograms(&parent_histogram, &left_histogram);
+        let derived_right = subtract_histograms(parent_histogram, &left_histogram);
         let direct_right = build_histograms(&input, &right);
 
         assert_eq!(derived_right, direct_right);
+        assert_eq!(derived_right.class_weights.as_ptr(), weights_ptr);
+        assert_eq!(derived_right.sample_counts.as_ptr(), counts_ptr);
+    }
+
+    #[test]
+    fn child_caches_preserve_bootstrap_counts_in_both_size_orders() {
+        let input = training_input();
+        for (left_rows, right_rows) in [
+            (vec![0, 0], vec![1, 2, 3, 3, 4, 5]),
+            (vec![1, 2, 3, 3, 4, 5], vec![0, 0]),
+        ] {
+            let parent = Mask::from_vec([left_rows.clone(), right_rows.clone()].concat());
+            let left = Mask::from_vec(left_rows);
+            let right = Mask::from_vec(right_rows);
+            let (left_cache, right_cache) = input.split_cache_children(
+                input.split_cache(&parent), &parent, &left, &right,
+            );
+            assert_eq!(left_cache.0.unwrap(), build_histograms(&input, &left));
+            assert_eq!(right_cache.0.unwrap(), build_histograms(&input, &right));
+        }
     }
 
     #[test]

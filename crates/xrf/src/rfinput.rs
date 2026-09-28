@@ -46,10 +46,11 @@ pub trait RfInput: Sized {
     /// Build split-search state for a node.
     fn split_cache(&self, on: &Mask) -> Self::SplitCache;
     /// Derive child state after a node is split. Implementations can reuse the
-    /// parent state to avoid rebuilding statistics for both child nodes.
+    /// parent state to avoid rebuilding statistics for both child nodes. Ownership
+    /// is transferred so the parent's storage can become the larger child's cache.
     fn split_cache_children(
         &self,
-        parent_cache: &Self::SplitCache,
+        parent_cache: Self::SplitCache,
         parent: &Mask,
         left: &Mask,
         right: &Mask,

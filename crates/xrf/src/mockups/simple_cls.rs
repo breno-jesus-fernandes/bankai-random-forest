@@ -30,7 +30,7 @@ impl RfInput for DataFrame {
     fn split_cache(&self, _: &Mask) -> Self::SplitCache {}
     fn split_cache_children(
         &self,
-        _: &Self::SplitCache,
+        _: Self::SplitCache,
         _: &Mask,
         _: &Mask,
         _: &Mask,

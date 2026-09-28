@@ -1,4 +1,4 @@
-use crate::forest::Tree;
+use crate::forest::{Node, Tree};
 use crate::rfinput::RfInput;
 
 /// A portable representation of a vertex of a trained forest; useful for serialisation or model analysis
@@ -16,8 +16,9 @@ where
     I: RfInput,
     I::Pivot: Clone,
 {
-    on: Option<&'a Tree<I>>,
-    stack: Vec<&'a Tree<I>>,
+    tree: &'a Tree<I>,
+    on: Option<usize>,
+    stack: Vec<usize>,
 }
 
 impl<'a, I> WalkIter<'a, I>
@@ -27,7 +28,8 @@ where
 {
     pub fn new(tree: &'a Tree<I>) -> Self {
         Self {
-            on: Some(tree),
+            tree,
+            on: Some(tree.root),
             stack: Vec::new(),
         }
     }
@@ -39,14 +41,14 @@ where
 {
     type Item = Walk<I>;
     fn next(&mut self) -> Option<Self::Item> {
-        match self.on? {
-            Tree::Leaf(v, _) => {
+        match &self.tree.nodes[self.on?] {
+            Node::Leaf(v, _) => {
                 self.on = self.stack.pop();
                 Some(Walk::VisitLeaf(*v))
             }
-            Tree::Branch(fid, pivot, score, _, left, right) => {
-                self.stack.push(right);
-                self.on = Some(left);
+            Node::Branch(fid, pivot, score, _, left, right) => {
+                self.stack.push(*right);
+                self.on = Some(*left);
                 Some(Walk::VisitBranch(*fid, (*pivot).clone(), *score))
             }
         }
