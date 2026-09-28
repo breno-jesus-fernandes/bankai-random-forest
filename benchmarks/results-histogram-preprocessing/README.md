@@ -25,3 +25,9 @@ uv run python benchmarks/run_histogram_preprocessing_benchmark.py \
   --rows 100000 --features 100 --bins 16 --trees 1 16 \
   --repeats 5 --warmups 1 --output /tmp/fit.csv
 ```
+
+## Small-workload crossover
+
+I also measured one-tree fits with 20 features and 16 or 255 bins. At 1,000 rows (20,000 cells), `n_jobs=-1` did not improve fit time over `n_jobs=1`; the difference was smaller than the observed run ranges. At 10,000 rows (200,000 cells), all-core fits were 10.4% faster with 16 bins and 9.7% faster with 255 bins. Serial results stayed within a few percent across versions.
+
+Based on that crossover, the implementation now keeps preprocessing serial below 32,768 dense matrix cells and enables worker threads above it. This threshold is a conservative initial cutoff: tested points are 20,000 and 200,000 cells, so future tuning should measure the interval between them and include more feature counts. Small-load measurements, including before and after the cutoff, are in `small_workloads.csv`. They are full-fit timings; one tree makes preprocessing a larger share but does not isolate its timer.

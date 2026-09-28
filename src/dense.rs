@@ -55,6 +55,8 @@ struct HistogramCache {
     sample_counts: Vec<usize>,
 }
 
+const HISTOGRAM_PARALLEL_MIN_CELLS: usize = 32 * 1024;
+
 impl HistogramCache {
     fn feature(&self, feature: usize, classes: usize) -> FeatureHistogram<'_> {
         let start = self.bin_offsets[feature];
@@ -648,7 +650,12 @@ fn sparse_histogram_edges(
     max_bins: usize,
     threads: usize,
 ) -> Vec<Vec<f64>> {
-    let workers = threads.max(1).min(columns);
+    let preprocessing_threads = if rows.saturating_mul(columns) >= HISTOGRAM_PARALLEL_MIN_CELLS {
+        threads
+    } else {
+        1
+    };
+    let workers = preprocessing_threads.max(1).min(columns);
     let build = |column| {
         let mut sorted = (0..rows)
             .map(|row| values.get(row, column))
@@ -721,7 +728,12 @@ fn histogramize(
     max_bins: usize,
     threads: usize,
 ) -> (Vec<u8>, Vec<Vec<f64>>) {
-    let workers = threads.max(1).min(columns);
+    let preprocessing_threads = if values.len() >= HISTOGRAM_PARALLEL_MIN_CELLS {
+        threads
+    } else {
+        1
+    };
+    let workers = preprocessing_threads.max(1).min(columns);
     let edges_by_feature: Vec<Vec<f64>> = if workers == 1 {
         (0..columns)
             .map(|feature| histogram_edges_for_feature(values, rows, columns, feature, max_bins))
@@ -751,7 +763,13 @@ fn histogramize(
         })
     };
 
-    let binned = apply_histogram_edges_parallel(values, rows, columns, &edges_by_feature, threads);
+    let binned = apply_histogram_edges_parallel(
+        values,
+        rows,
+        columns,
+        &edges_by_feature,
+        preprocessing_threads,
+    );
     (binned, edges_by_feature)
 }
 
