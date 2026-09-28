@@ -17,7 +17,7 @@ resolution-markers = [
 
 [[package]]
 name = "bankai-random-forest"
-version = "0.1.0"
+version = "0.1.0a1"
 source = { editable = "." }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -27,10 +27,12 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
-dev = [
+benchmark = [
     { name = "lightgbm" },
-    { name = "maturin" },
     { name = "memory-profiler" },
+]
+dev = [
+    { name = "maturin" },
     { name = "pytest" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -46,10 +48,12 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [
+benchmark = [
     { name = "lightgbm", specifier = ">=4.7.0" },
-    { name = "maturin", specifier = ">=1.9,<2" },
     { name = "memory-profiler", specifier = ">=0.61" },
+]
+dev = [
+    { name = "maturin", specifier = ">=1.9,<2" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "scipy", specifier = ">=1.14" },
     { name = "shap", specifier = ">=0.51.0" },

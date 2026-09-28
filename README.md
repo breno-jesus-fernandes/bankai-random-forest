@@ -1,7 +1,7 @@
 # Bankai Random Forest
 
 Bankai is a scikit-learn-compatible random forest classifier with a native Rust
-backend. The project is pre-alpha; APIs and serialized models may change. The
+backend. The project is in alpha; APIs and serialized models may change. The
 roadmap and compatibility details are in [`docs/ROADMAP.md`](docs/ROADMAP.md)
 and [`docs/SKLEARN_COMPATIBILITY.md`](docs/SKLEARN_COMPATIBILITY.md).
 
@@ -114,8 +114,10 @@ uv run pytest -q
 uv run cargo test --workspace
 ```
 
+Install benchmark-only dependencies with `uv sync --group benchmark`.
+
 Optimized `cp311-abi3` wheels were built and tested locally on Python 3.11,
 3.12, and 3.13. The full Python suite passed (147 tests) against each installed
-wheel. Release signing and CI/CD automation are separate future work.
+wheel. Release signing remains future work.
 
 The project is licensed under GPL-3.0-or-later; see [`COPYING`](COPYING).

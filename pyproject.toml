@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "bankai-random-forest"
-version = "0.1.0"
+version = "0.1.0a1"
 description = "Scikit-learn-compatible random forest backed by a fork of XRF."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,7 +12,7 @@ license = { text = "GPL-3.0-or-later" }
 license-files = ["COPYING", "NOTICE"]
 authors = [{ name = "Bankai Random Forest contributors" }]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
@@ -32,14 +32,16 @@ python-source = "python"
 module-name = "bankai_random_forest._core"
 compatibility = "pypi"
 
-[tool.uv]
-dev-dependencies = [
-    "lightgbm>=4.7.0",
+[dependency-groups]
+dev = [
     "maturin>=1.9,<2",
-    "memory-profiler>=0.61",
     "pytest>=8.3",
     "scipy>=1.14",
     "shap>=0.51.0",
+]
+benchmark = [
+    "lightgbm>=4.7.0",
+    "memory-profiler>=0.61",
 ]
 
 [tool.pytest.ini_options]

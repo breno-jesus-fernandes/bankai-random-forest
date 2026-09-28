@@ -1,0 +1,205 @@
+name: CI and release artifacts
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release_gate:
+    name: Detect version bump on master
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    outputs:
+      changed: ${{ steps.version.outputs.changed }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Compare package versions
+        id: version
+        env:
+          BASE_SHA: ${{ github.event.before }}
+        run: |
+          previous_version="$(git show "${BASE_SHA}:pyproject.toml" | python -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["version"])')"
+          current_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          echo "version=${current_version}" >> "${GITHUB_OUTPUT}"
+          if [[ "${previous_version}" != "${current_version}" ]]; then
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+            echo "Package version changed: ${previous_version} -> ${current_version}"
+          else
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            echo "Package version unchanged (${current_version}); skipping PyPI publish."
+          fi
+
+  test:
+    name: Test (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            runner: ubuntu-24.04
+          - name: Linux ARM64
+            runner: ubuntu-24.04-arm
+          - name: Windows x86_64
+            runner: windows-2025
+          - name: macOS x86_64
+            runner: macos-15-intel
+          - name: macOS ARM64
+            runner: macos-15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python
+        run: uv python install 3.11
+
+      - name: Install project and test dependencies
+        run: uv sync --locked --no-install-project
+
+      - name: Build and install the native extension
+        run: uv run --no-sync maturin develop --release --locked
+
+      - name: Run Python tests
+        run: uv run --no-sync pytest -q
+
+      - name: Run Rust tests
+        run: uv run --no-sync cargo test --workspace --locked
+
+  wheels:
+    name: Build wheel (${{ matrix.name }})
+    needs: test
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            manylinux: "2_28"
+          - name: Linux ARM64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            manylinux: "2_28"
+          - name: Windows x86_64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            manylinux: "off"
+          - name: macOS x86_64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            manylinux: "off"
+          - name: macOS ARM64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            manylinux: "off"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          maturin-version: v1.9.6
+          args: --release --locked --out dist --compatibility pypi
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*.whl
+          if-no-files-found: error
+          retention-days: 14
+
+  sdist:
+    name: Build source distribution
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Build source distribution
+        run: uv build --sdist --out-dir dist
+
+      - name: Upload source distribution artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  distributions:
+    name: Collect release distributions
+    needs: [wheels, sdist]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download all distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Upload complete release set
+        uses: actions/upload-artifact@v4
+        with:
+          name: bankai-random-forest-release
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish release to PyPI
+    needs: [release_gate, distributions]
+    if: needs.release_gate.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download release distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: bankai-random-forest-release
+          path: dist
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+
+      - name: Check distributions
+        run: uvx --from twine twine check dist/*
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: ${{ secrets.TWINE_USERNAME }}
+          TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
+        run: |
+          if [[ -z "${TWINE_USERNAME}" || -z "${TWINE_PASSWORD}" ]]; then
+            echo "::error::Configure TWINE_USERNAME and TWINE_PASSWORD as GitHub Actions secrets."
+            exit 1
+          fi
+          uvx --from twine twine upload --non-interactive dist/*
