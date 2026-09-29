@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::thread;
 use xrf::{
     AccuracyDecreaseAggregator, DecisionSlice, FairBest, FeatureSampler, Mask, RfInput, RfRng,
     VoteAggregator,
@@ -361,18 +362,7 @@ impl DenseInput {
             return Err("labels must be encoded in 0..n_classes".into());
         }
 
-        let mut has_missing_values = false;
-        for row in 0..rows {
-            for feature in 0..columns {
-                let value = value_at(row, feature);
-                if value.is_infinite() {
-                    return Err("X must not contain infinite values".into());
-                }
-                has_missing_values |= value.is_nan();
-            }
-        }
-
-        let (binned, edges) = histogramize_from_accessor(
+        let (binned, edges, has_missing_values) = histogramize_from_accessor(
             rows,
             columns,
             max_bins,
@@ -380,7 +370,7 @@ impl DenseInput {
             strategy,
             sample_size,
             &value_at,
-        );
+        )?;
         let active_features = edges
             .iter()
             .enumerate()
@@ -1043,7 +1033,7 @@ fn histogramize(
     sample_size: usize,
 ) -> (Vec<u8>, Vec<Vec<f64>>) {
     let value_at = |row, feature| values[row * columns + feature];
-    histogramize_from_accessor(
+    let (binned, edges, _) = histogramize_from_accessor(
         rows,
         columns,
         max_bins,
@@ -1052,6 +1042,8 @@ fn histogramize(
         sample_size,
         &value_at,
     )
+    .expect("training values were validated before histogramization");
+    (binned, edges)
 }
 
 fn histogramize_from_accessor<F>(
@@ -1062,7 +1054,7 @@ fn histogramize_from_accessor<F>(
     strategy: BinningStrategy,
     sample_size: usize,
     value_at: &F,
-) -> (Vec<u8>, Vec<Vec<f64>>)
+) -> Result<(Vec<u8>, Vec<Vec<f64>>, bool), String>
 where
     F: Fn(usize, usize) -> f64 + Sync,
 {
@@ -1117,14 +1109,17 @@ where
                 .collect()
         })
     };
-    let binned = apply_histogram_accessor_parallel(
+    let (binned, has_missing_values, has_infinite_values) = apply_histogram_accessor_parallel(
         rows,
         columns,
         &edges_by_feature,
         preprocessing_threads,
         value_at,
     );
-    (binned, edges_by_feature)
+    if has_infinite_values {
+        return Err("X must not contain infinite values".into());
+    }
+    Ok((binned, edges_by_feature, has_missing_values))
 }
 
 fn histogram_edges_for_feature(
@@ -1176,17 +1171,22 @@ fn apply_histogram_accessor_parallel<F>(
     edges_by_feature: &[Vec<f64>],
     threads: usize,
     value_at: &F,
-) -> Vec<u8>
+) -> (Vec<u8>, bool, bool)
 where
     F: Fn(usize, usize) -> f64 + Sync,
 {
     let workers = threads.max(1).min(rows);
     if workers == 1 {
         let mut binned = Vec::with_capacity(rows.saturating_mul(columns));
+        let mut has_missing_values = false;
+        let mut has_infinite_values = false;
         for row in 0..rows {
             for feature in 0..columns {
                 let value = value_at(row, feature);
-                let bin = if value.is_nan() {
+                let is_missing = value.is_nan();
+                has_missing_values |= is_missing;
+                has_infinite_values |= value.is_infinite();
+                let bin = if is_missing {
                     edges_by_feature[feature].len() + 1
                 } else {
                     edges_by_feature[feature].partition_point(|edge| value > *edge)
@@ -1194,30 +1194,49 @@ where
                 binned.push(bin as u8);
             }
         }
-        return binned;
+        return (binned, has_missing_values, has_infinite_values);
     }
     let rows_per_worker = rows.div_ceil(workers);
     let output_len = rows.saturating_mul(columns);
     let mut binned = vec![0u8; output_len];
     let chunk_len = rows_per_worker * columns;
-    std::thread::scope(|scope| {
-        for (chunk_index, output) in binned.chunks_mut(chunk_len).enumerate() {
-            let start_row = chunk_index * rows_per_worker;
-            scope.spawn(move || {
-                for (index, bin_out) in output.iter_mut().enumerate() {
-                    let row = start_row + index / columns;
-                    let feature = index % columns;
-                    let value = value_at(row, feature);
-                    *bin_out = if value.is_nan() {
-                        (edges_by_feature[feature].len() + 1) as u8
-                    } else {
-                        edges_by_feature[feature].partition_point(|edge| value > *edge) as u8
-                    };
-                }
-            });
+    let (has_missing_values, has_infinite_values) = thread::scope(|scope| {
+        let handles = binned
+            .chunks_mut(chunk_len)
+            .enumerate()
+            .map(|(chunk_index, output)| {
+                let start_row = chunk_index * rows_per_worker;
+                scope.spawn(move || {
+                    let mut has_missing_values = false;
+                    let mut has_infinite_values = false;
+                    for (index, bin_out) in output.iter_mut().enumerate() {
+                        let row = start_row + index / columns;
+                        let feature = index % columns;
+                        let value = value_at(row, feature);
+                        let is_missing = value.is_nan();
+                        has_missing_values |= is_missing;
+                        has_infinite_values |= value.is_infinite();
+                        *bin_out = if is_missing {
+                            (edges_by_feature[feature].len() + 1) as u8
+                        } else {
+                            edges_by_feature[feature].partition_point(|edge| value > *edge) as u8
+                        };
+                    }
+                    (has_missing_values, has_infinite_values)
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut has_missing_values = false;
+        let mut has_infinite_values = false;
+        for handle in handles {
+            let (chunk_has_missing, chunk_has_infinite) =
+                handle.join().expect("histogram bin worker panicked");
+            has_missing_values |= chunk_has_missing;
+            has_infinite_values |= chunk_has_infinite;
         }
+        (has_missing_values, has_infinite_values)
     });
-    binned
+    (binned, has_missing_values, has_infinite_values)
 }
 
 fn build_histograms(input: &DenseInput, mask: &Mask) -> HistogramCache {
@@ -2073,12 +2092,37 @@ mod histogram_optimization_tests {
         .unwrap();
 
         assert_eq!(direct.bin_edges(), reference.bin_edges());
+        assert!(direct.has_missing_values);
         match (&direct.values, &reference.values) {
             (DenseValues::Binned(direct), DenseValues::Binned(reference)) => {
                 assert_eq!(direct, reference);
             }
             _ => panic!("both histogram inputs should use compact binned storage"),
         }
+    }
+
+    #[test]
+    fn direct_histogram_accessor_rejects_infinite_values() {
+        let values = [0.0, 1.0, f64::INFINITY, 3.0];
+        let result = DenseInput::training_binned_with_accessor(
+            4,
+            1,
+            vec![0, 0, 1, 1],
+            vec![1.0; 4],
+            2,
+            0.0,
+            Criterion::Gini,
+            2,
+            1,
+            0.0,
+            8,
+            2,
+            BinningStrategy::ExactSort,
+            4,
+            |row, _| values[row],
+        );
+
+        assert!(matches!(result, Err(message) if message == "X must not contain infinite values"));
     }
 
     #[test]

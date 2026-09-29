@@ -529,6 +529,15 @@ def test_sparse_input_validation_rejects_infinite_and_bad_csr_shape(sparse_forma
         BankaiRandomForestClassifier().fit(sparse_format(x), y)
 
 
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_dense_histogram_input_validation_rejects_infinite(dtype):
+    x = np.array([[0.0, 1.0], [1.0, 0.0], [np.inf, 1.0], [3.0, 2.0]], dtype=dtype)
+    y = np.array([0, 0, 1, 1])
+
+    with pytest.raises(ValueError, match="infinity|infinite"):
+        BankaiRandomForestClassifier(max_bins=8, n_jobs=2).fit(x, y)
+
+
 def test_sparse_fit_and_prediction_never_densify(monkeypatch):
     def fail_toarray(*args, **kwargs):
         raise AssertionError("sparse input was densified")
