@@ -1,128 +1,161 @@
-# Bankai Random Forest
+# ⚡💥 Bankai Random Forest
 
-Bankai is a scikit-learn-compatible random forest classifier with a native Rust
-backend. The project is in alpha; APIs and serialized models may change. The
-roadmap and compatibility details are in [`docs/ROADMAP.md`](docs/ROADMAP.md)
-and [`docs/SKLEARN_COMPATIBILITY.md`](docs/SKLEARN_COMPATIBILITY.md).
+Bankai is a high-performance random forest for Python, powered by a native Rust
+core based on a maintained fork of [XRF](https://gitlab.com/mbq/xrf/), the engine
+behind [FRU](https://www.sciencedirect.com/science/article/pii/S2352711026004097).
+It combines parallel tree building and efficient permutation importance with
+optional LightGBM-style histograms for continuous features.
 
-## Install from source
+On a local 1M-row, 500-feature benchmark, Bankai fit in 49.7 s versus 89.6 s
+for LightGBM RF. Bankai calculated permutation importance; LightGBM used gain,
+so treat this as a workload-specific comparison ([details](benchmarks/fit_stage_profile_1m.md)).
 
-Python 3.11 or newer and a Rust toolchain are required to build the extension.
-From the repository root:
+Bankai follows the familiar scikit-learn estimator API, and full compatibility
+is a project goal. The project is in alpha, so APIs and serialized models may
+change.
+
+## Install
+
+Python 3.11 or newer is required. Install the package from PyPI:
 
 ```bash
-uv sync
-uv run maturin develop --release
+python -m pip install bankai-random-forest
 ```
-
-The `--release` flag builds the optimized native extension. Then install the
-package in your Python environment using the workflow above and import it as
-shown below.
 
 ## Quick start
 
-`BankaiRandomForestClassifier` follows the familiar scikit-learn estimator API:
-
 ```python
-from sklearn.datasets import load_iris
-from sklearn.model_selection import train_test_split
+from sklearn.datasets import load_breast_cancer
 from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
 
 from bankai_random_forest import BankaiRandomForestClassifier
 
-X, y = load_iris(return_X_y=True)
+X, y = load_breast_cancer(return_X_y=True)
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y
 )
 
 model = BankaiRandomForestClassifier(
-    n_estimators=100,
+    n_estimators=200,
+    max_bins=63,
+    binning_strategy="sampled_select",
+    importance_type="permutation",
+    n_jobs=-1,
     random_state=42,
-    max_bins=64,  # omit this or use None for exact split search
 )
 model.fit(X_train, y_train)
 
 predictions = model.predict(X_test)
 probabilities = model.predict_proba(X_test)
 print(f"Accuracy: {accuracy_score(y_test, predictions):.3f}")
+print("Probabilities:", probabilities[:3])
 print("Feature importances:", model.feature_importances_)
 ```
 
-The classifier works with scikit-learn utilities such as `Pipeline`,
-`cross_val_score`, and `GridSearchCV`. Features should be numeric; encode
-categorical columns with a transformer such as `OneHotEncoder` in a pipeline.
+`max_bins` enables histogram-based split search in this example. Set
+`max_bins=None` to use exact split search. Histogram cuts can change the fitted
+trees and the accuracy/speed trade-off; evaluate both on your data when that
+matters.
 
-## Common options
+## Training options
 
-- `n_estimators`, `max_depth`, `min_samples_split`, `min_samples_leaf`,
-  `max_features`, `bootstrap`, `max_samples`, `class_weight`, and
-  `random_state` control forest fitting.
-- `max_bins=None` uses exact split search. An integer from 2 to 255 enables
-  histogram split search; for example, `max_bins=64`.
-- With histogram mode enabled, `binning_strategy` chooses how cuts are built:
-  `exact_sort` (default), `sampled_sort`, `exact_select`, or `sampled_select`.
-  Sampled modes use up to `bin_sample_size` rows per feature (default 200,000).
-  Selection modes avoid a full sort by selecting empirical quantile ranks;
-  repeated values can therefore produce different cuts than `exact_sort`.
-- `ccp_alpha` prunes trees. `monotonic_cst` accepts one `-1`, `0`, or `1` per
-  feature and is supported for binary classification.
-- `oob_score=True` enables out-of-bag estimates when `bootstrap=True`.
-- `importance_type` selects `"gain"` (default), `"split"`, or
-  `"permutation"`. Permutation importance requires `bootstrap=True`.
-- Dense arrays and SciPy CSR/CSC matrices are supported, including NaN feature
-  values. Missing values are routed by the fitted trees; categorical values
-  are not automatically encoded.
+Bankai follows the familiar `RandomForestClassifier` estimator pattern and
+supports common options such as `n_estimators`, `criterion`, `max_depth`,
+`min_samples_split`, `min_samples_leaf`, `max_features`, `max_leaf_nodes`,
+`bootstrap`, `max_samples`, `class_weight`, `random_state`, `n_jobs`,
+`oob_score`, and `ccp_alpha`.
 
-Multioutput and multilabel targets are supported. Bankai trains one native
-forest per output, whereas scikit-learn shares tree structures across outputs;
-therefore trees and probabilities need not match exactly. For multioutput
-models, `estimators_`, `apply`, `decision_path`, and TreeSHAP inspect the first
-output forest. Monotonic constraints currently apply only to binary single-
-output classification.
+| Option | Behavior |
+| --- | --- |
+| `n_jobs` | `None` uses one worker. Negative values follow joblib-style CPU-count rules; `n_jobs=-1` uses all visible logical CPUs. |
+| `max_bins` | `None` (default) uses exact split search. An integer from 2 to 255 enables histogram training. |
+| `binning_strategy` | With histograms, choose `exact_sort` (default), `sampled_sort`, `exact_select`, or `sampled_select`. |
+| `bin_sample_size` | Maximum number of rows used per feature by sampled strategies; defaults to 200,000. |
+| `importance_type` | `gain` (default), `split`, or `permutation`. Permutation importance uses out-of-bag accuracy decrease and requires `bootstrap=True`; it can add fit time. |
+| `monotonic_cst` | One `-1`, `0`, or `1` constraint per feature; currently limited to binary, single-output classification without NaN values. |
 
-## TreeSHAP
+Sampled binning strategies use a deterministic subset of rows to construct
+feature cuts. Selection strategies avoid fully sorting each feature, while
+repeated feature values can produce cuts that differ from the sort strategies.
+For reproducible model comparisons, keep the strategy, sample size, seed, and
+thread count fixed.
 
-Install SHAP in the same environment (`python -m pip install shap`), then pass
-the fitted classifier directly to `TreeExplainer`:
+## API and supported inputs
+
+- Dense NumPy arrays and SciPy CSR/CSC matrices are supported. Numeric features
+  are expected; encode categorical columns in a scikit-learn transformer such
+  as `OneHotEncoder`.
+- NaN feature values are supported in dense and sparse inputs and are routed by
+  the fitted trees. Infinite values are rejected.
+- Binary, multiclass, multioutput, and multilabel classification targets are
+  supported. Bankai trains a separate native forest for each output, so its
+  multioutput trees and probabilities need not match scikit-learn's shared-tree
+  implementation.
+- `feature_importances_` defaults to gain-based importance; its values are not
+  guaranteed to match scikit-learn's impurity importance. Bankai also provides
+  split-count and out-of-bag permutation importance.
+- `warm_start=True` does not append only new trees: a later `fit` rebuilds the
+  forest. For multioutput models, `estimators_`, `apply`, `decision_path`, and
+  TreeSHAP inspection expose the first output forest.
+
+Tested with scikit-learn 1.9.1 (`>=1.9.1,<1.10`).
+
+## Feature explanations
+
+SHAP is optional and is not a runtime dependency. For TreeSHAP, pass a fitted
+single-output classifier directly to `TreeExplainer`:
 
 ```python
 import shap
 
 explainer = shap.TreeExplainer(model)
-shap_values = explainer.shap_values(X_test)
+explanation = explainer(X_test[:10])
 ```
 
-This integration supports single-output classifiers. See
-[`docs/SKLEARN_COMPATIBILITY.md`](docs/SKLEARN_COMPATIBILITY.md) for the
-multioutput inspection limitation and compatibility status.
+See the [SHAP compatibility notes](docs/SHAP_COMPATIBILITY.md) for output
+shapes, multioutput limitations, and model-agnostic alternatives.
 
-## Save and restore a fitted model
+## Performance
+
+Fit time depends on the data, tree settings, hardware, and importance
+calculation. The benchmark report includes stage breakdowns, later Bankai
+measurements, and comparison caveats; results are specific to the recorded
+workload and are not a performance guarantee.
+
+## Save and restore models
+
+Fitted models can be saved with joblib:
 
 ```python
 import joblib
 
 joblib.dump(model, "classifier.joblib")
-restored_model = joblib.load("classifier.joblib")
-predictions = restored_model.predict(X_test)
+restored = joblib.load("classifier.joblib")
+predictions = restored.predict(X_test)
 ```
 
-Bankai's joblib state includes the training arrays and rebuilds the native
-forest while loading, so loading has reconstruction cost and artifacts may be
-large. Keep Bankai, Python, and dependency versions consistent when restoring
-models. Only load joblib files from trusted sources. Details are in
-[`docs/JOBLIB_COMPATIBILITY.md`](docs/JOBLIB_COMPATIBILITY.md).
+Bankai's serialized state includes training arrays and rebuilds the native
+forest when loaded. Loading therefore has reconstruction cost and model files
+can be large. Keep Bankai and Python versions consistent when restoring a
+model, and only load joblib files from trusted sources. See the
+[serialization notes](docs/JOBLIB_COMPATIBILITY.md).
 
-## Development and tests
+## Development
+
+Building from source requires Python 3.11 or newer, Rust, and `uv`:
 
 ```bash
+uv sync --locked --no-install-project
+uv run maturin develop --release --locked
 uv run pytest -q
-uv run cargo test --workspace
+uv run cargo test --workspace --locked
 ```
 
-Install benchmark-only dependencies with `uv sync --group benchmark`.
+Install optional benchmark dependencies with `uv sync --locked --group benchmark`.
+The [roadmap](docs/ROADMAP.md) tracks project status and planned work.
 
-Optimized `cp311-abi3` wheels were built and tested locally on Python 3.11,
-3.12, and 3.13. The full Python suite passed (147 tests) against each installed
-wheel. Release signing remains future work.
+## License
 
-The project is licensed under GPL-3.0-or-later; see [`COPYING`](COPYING).
+Bankai is licensed under [GPL-3.0-or-later](COPYING). The maintained XRF fork
+is also GPL-3.0-or-later; see [`NOTICE`](NOTICE) for upstream attribution.
