@@ -1,9 +1,10 @@
 pub mod dense;
 
-use dense::{ClassVotes, Criterion, DenseInput};
-use numpy::{PyReadonlyArray1, PyReadonlyArray2};
+use dense::{BinningStrategy, ClassVotes, Criterion, DenseInput};
+use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
+use std::cmp::Ordering;
 use xrf::{Forest, Walk};
 
 #[derive(Clone)]
@@ -24,6 +25,7 @@ struct NativeForest {
     n_features: usize,
     n_samples: usize,
     histogram_edges: Option<Vec<Vec<f64>>>,
+    training_order: Vec<usize>,
 }
 
 #[pymethods]
@@ -36,6 +38,7 @@ impl NativeForest {
             n_features: 0,
             n_samples: 0,
             histogram_edges: None,
+            training_order: Vec::new(),
         }
     }
 
@@ -43,7 +46,11 @@ impl NativeForest {
         self.forest.is_some()
     }
 
-    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1, max_bins=None, balanced_subsample=false, ccp_alpha=0.0, monotonic_cst=None))]
+    fn training_order<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<usize>> {
+        self.training_order.clone().into_pyarray(py)
+    }
+
+    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1, max_bins=None, balanced_subsample=false, ccp_alpha=0.0, monotonic_cst=None, binning_strategy="exact_sort", bin_sample_size=200000))]
     fn fit(
         &mut self,
         x: &Bound<'_, PyAny>,
@@ -68,6 +75,8 @@ impl NativeForest {
         balanced_subsample: bool,
         ccp_alpha: f64,
         monotonic_cst: Option<Vec<i8>>,
+        binning_strategy: &str,
+        bin_sample_size: usize,
     ) -> PyResult<()> {
         if n_estimators == 0 {
             return Err(PyValueError::new_err("n_estimators must be at least 1"));
@@ -77,16 +86,15 @@ impl NativeForest {
                 "ccp_alpha must be a finite non-negative number",
             ));
         }
-
-        let matrix = matrix_to_owned(x)?;
-        let (rows, columns) = matrix.shape();
-        if max_features == 0 || max_features > columns {
+        let binning_strategy = BinningStrategy::parse(binning_strategy)
+            .map_err(PyValueError::new_err)?;
+        if bin_sample_size == 0 {
             return Err(PyValueError::new_err(
-                "max_features must be between 1 and the number of features",
+                "bin_sample_size must be a positive integer",
             ));
         }
 
-        let labels: Vec<usize> = y
+        let raw_labels: Vec<usize> = y
             .as_array()
             .iter()
             .copied()
@@ -95,8 +103,35 @@ impl NativeForest {
                     .map_err(|_| PyValueError::new_err("y must contain non-negative labels"))
             })
             .collect::<PyResult<_>>()?;
+        let dense_order = canonical_dense_row_order(x, y.as_array())?;
+        let matrix = matrix_to_owned(x, dense_order.as_deref())?;
+        let (rows, columns) = matrix.shape();
+        let row_order = dense_order.unwrap_or_else(|| (0..rows).collect());
+        if row_order.len() != rows || raw_labels.len() != rows {
+            return Err(PyValueError::new_err(
+                "X and y must contain the same number of rows",
+            ));
+        }
+        if max_features == 0 || max_features > columns {
+            return Err(PyValueError::new_err(
+                "max_features must be between 1 and the number of features",
+            ));
+        }
+
+        let labels: Vec<usize> = row_order
+            .iter()
+            .map(|&row| raw_labels[row])
+            .collect();
         let sample_weights = match sample_weight {
-            Some(weights) => weights.as_array().iter().copied().collect(),
+            Some(weights) => {
+                let raw_weights: Vec<f64> = weights.as_array().iter().copied().collect();
+                if raw_weights.len() != rows {
+                    return Err(PyValueError::new_err(
+                        "sample_weight must have the same length as X",
+                    ));
+                }
+                row_order.iter().map(|&row| raw_weights[row]).collect()
+            }
             None => vec![1.0; rows],
         };
         let n_classes = labels
@@ -111,8 +146,8 @@ impl NativeForest {
             _ => return Err(PyValueError::new_err("unsupported criterion")),
         };
         let input = match matrix {
-            MatrixData::Dense(values, ..) => DenseInput::training_with_threads(values, rows, columns, labels, sample_weights, n_classes, min_leaf_weight, criterion, min_samples_split, min_samples_leaf, min_impurity_decrease, max_bins, n_jobs.max(1)),
-            MatrixData::Csr { indptr, indices, data, .. } => DenseInput::training_csr_with_threads(indptr, indices, data, rows, columns, labels, sample_weights, n_classes, min_leaf_weight, criterion, min_samples_split, min_samples_leaf, min_impurity_decrease, max_bins, n_jobs.max(1)),
+            MatrixData::Dense(values, ..) => DenseInput::training_with_binning_options(values, rows, columns, labels, sample_weights, n_classes, min_leaf_weight, criterion, min_samples_split, min_samples_leaf, min_impurity_decrease, max_bins, n_jobs.max(1), binning_strategy, bin_sample_size),
+            MatrixData::Csr { indptr, indices, data, .. } => DenseInput::training_csr_with_binning_options(indptr, indices, data, rows, columns, labels, sample_weights, n_classes, min_leaf_weight, criterion, min_samples_split, min_samples_leaf, min_impurity_decrease, max_bins, n_jobs.max(1), binning_strategy, bin_sample_size),
         }
         .map_err(PyValueError::new_err)?;
         let mut input = if balanced_subsample {
@@ -135,9 +170,20 @@ impl NativeForest {
             }
             input = input.with_monotonic_constraints(constraints);
         }
-        let input = input.with_ccp_alpha(ccp_alpha);
+        let tree_threads = n_jobs.min(n_estimators.max(1));
+        let histogram_threads = if max_bins.is_some()
+            && columns >= 64
+            && rows.saturating_mul(columns) >= 4 * 32 * 1024
+        {
+            (n_jobs / tree_threads).max(1)
+        } else {
+            1
+        };
+        let input = input
+            .with_ccp_alpha(ccp_alpha)
+            .with_histogram_threads(histogram_threads);
 
-        self.forest = Some(if n_jobs == 1 {
+        self.forest = Some(if tree_threads == 1 {
             Forest::new_with_settings(
                 &input,
                 n_estimators,
@@ -160,7 +206,7 @@ impl NativeForest {
                 permutation_importance,
                 oob,
                 random_state,
-                n_jobs,
+                tree_threads,
                 max_depth,
                 max_leaves.unwrap_or(usize::MAX),
                 bootstrap,
@@ -168,6 +214,7 @@ impl NativeForest {
             )
         });
         self.histogram_edges = input.bin_edges().map(|edges| edges.to_vec());
+        self.training_order = row_order;
         self.n_classes = n_classes;
         self.n_features = columns;
         self.n_samples = rows;
@@ -179,7 +226,7 @@ impl NativeForest {
             .forest
             .as_ref()
             .ok_or_else(|| PyRuntimeError::new_err("forest is not fitted"))?;
-        let matrix = matrix_to_owned(x)?;
+        let matrix = matrix_to_owned(x, None)?;
         let (rows, columns) = matrix.shape();
         if columns != self.n_features {
             return Err(PyValueError::new_err(format!(
@@ -203,7 +250,7 @@ impl NativeForest {
             .forest
             .as_ref()
             .ok_or_else(|| PyRuntimeError::new_err("forest is not fitted"))?;
-        let matrix = matrix_to_owned(x)?;
+        let matrix = matrix_to_owned(x, None)?;
         let (rows, columns) = matrix.shape();
         if columns != self.n_features {
             return Err(PyValueError::new_err(format!(
@@ -322,7 +369,7 @@ impl NativeForest {
     /// vote probabilities. Returns `(values, base_values)`.
     fn tree_shap(&self, x: &Bound<'_, PyAny>) -> PyResult<(Vec<Vec<Vec<f64>>>, Vec<f64>)> {
         let forest = self.forest.as_ref().ok_or_else(|| PyRuntimeError::new_err("forest is not fitted"))?;
-        let matrix = matrix_to_owned(x)?;
+        let matrix = matrix_to_owned(x, None)?;
         let (rows, columns) = matrix.shape();
         if columns != self.n_features { return Err(PyValueError::new_err("X has a different number of features")); }
         let input = matrix.into_prediction(rows, columns, self.n_classes, self.histogram_edges.as_deref()).map_err(PyValueError::new_err)?;
@@ -413,12 +460,122 @@ impl MatrixData {
         match self { Self::Dense(v,_,_) => DenseInput::prediction(v,rows,columns,classes,edges), Self::Csr{indptr,indices,data,..} => DenseInput::prediction_csr(indptr,indices,data,rows,columns,classes,edges) }
     }
 }
-fn matrix_to_owned(x: &Bound<'_, PyAny>) -> PyResult<MatrixData> {
+fn canonical_dense_row_order(
+    x: &Bound<'_, PyAny>,
+    labels: numpy::ndarray::ArrayView1<'_, i64>,
+) -> PyResult<Option<Vec<usize>>> {
     if let Ok(array) = x.extract::<PyReadonlyArray2<'_, f64>>() {
-        let view = array.as_array(); let rows = view.nrows(); let columns = view.ncols();
-        let values: Vec<f64> = view.iter().copied().collect();
-        if values.iter().any(|v| v.is_infinite()) { return Err(PyValueError::new_err("X must not contain infinite values")); }
-        return Ok(MatrixData::Dense(values, rows, columns));
+        let values = array.as_array();
+        return canonical_dense_row_order_by(
+            values.nrows(),
+            values.ncols(),
+            labels,
+            |row, feature| values[[row, feature]],
+        );
+    }
+    if let Ok(array) = x.extract::<PyReadonlyArray2<'_, f32>>() {
+        let values = array.as_array();
+        return canonical_dense_row_order_by(
+            values.nrows(),
+            values.ncols(),
+            labels,
+            |row, feature| f64::from(values[[row, feature]]),
+        );
+    }
+    Ok(None)
+}
+
+fn canonical_dense_row_order_by(
+    rows: usize,
+    columns: usize,
+    labels: numpy::ndarray::ArrayView1<'_, i64>,
+    value: impl Fn(usize, usize) -> f64,
+) -> PyResult<Option<Vec<usize>>> {
+    if rows != labels.len() {
+        return Err(PyValueError::new_err(
+            "X and y must contain the same number of rows",
+        ));
+    }
+
+    if columns == 0 {
+        let mut order: Vec<usize> = (0..rows).collect();
+        order.sort_by_key(|&row| labels[row]);
+        return Ok(Some(order));
+    }
+
+    // Cache the primary key contiguously. Refine only ties with the next
+    // feature, so ordinary continuous columns usually need one sort instead
+    // of comparing full, strided rows at every comparison.
+    let mut primary: Vec<(f64, usize)> = (0..rows)
+        .map(|row| (value(row, 0), row))
+        .collect();
+    primary.sort_by(|left, right| compare_numpy_f64(left.0, right.0));
+    let mut order: Vec<usize> = primary.iter().map(|&(_, row)| row).collect();
+    let mut unresolved = Vec::new();
+    let mut start = 0;
+    while start < primary.len() {
+        let mut end = start + 1;
+        while end < primary.len()
+            && compare_numpy_f64(primary[start].0, primary[end].0) == Ordering::Equal
+        {
+            end += 1;
+        }
+        if end - start > 1 {
+            unresolved.push((start, end));
+        }
+        start = end;
+    }
+
+    for feature in 1..columns {
+        if unresolved.is_empty() {
+            break;
+        }
+        let mut next_unresolved = Vec::new();
+        for &(group_start, group_end) in &unresolved {
+            order[group_start..group_end].sort_by(|&left, &right| {
+                compare_numpy_f64(value(left, feature), value(right, feature))
+            });
+            let mut tie_start = group_start;
+            while tie_start < group_end {
+                let first_row = order[tie_start];
+                let mut tie_end = tie_start + 1;
+                while tie_end < group_end
+                    && compare_numpy_f64(
+                        value(first_row, feature),
+                        value(order[tie_end], feature),
+                    ) == Ordering::Equal
+                {
+                    tie_end += 1;
+                }
+                if tie_end - tie_start > 1 {
+                    next_unresolved.push((tie_start, tie_end));
+                }
+                tie_start = tie_end;
+            }
+        }
+        unresolved = next_unresolved;
+    }
+
+    for (group_start, group_end) in unresolved {
+        order[group_start..group_end].sort_by_key(|&row| labels[row]);
+    }
+    Ok(Some(order))
+}
+
+fn compare_numpy_f64(left: f64, right: f64) -> Ordering {
+    match (left.is_nan(), right.is_nan()) {
+        (true, false) => Ordering::Greater,
+        (false, true) => Ordering::Less,
+        _ => left.partial_cmp(&right).unwrap_or(Ordering::Equal),
+    }
+}
+
+fn matrix_to_owned(x: &Bound<'_, PyAny>, row_order: Option<&[usize]>) -> PyResult<MatrixData> {
+    if let Ok(array) = x.extract::<PyReadonlyArray2<'_, f64>>() {
+        return dense_matrix_to_owned(array.as_array(), row_order);
+    }
+    if let Ok(array) = x.extract::<PyReadonlyArray2<'_, f32>>() {
+        return dense_matrix_to_owned(array.as_array(), row_order);
     }
     if x.hasattr("indptr")? && x.hasattr("indices")? && x.hasattr("data")? && x.hasattr("shape")? {
         let csr = x.call_method0("tocsr")?; csr.call_method0("sum_duplicates")?; csr.call_method0("sort_indices")?;
@@ -433,6 +590,32 @@ fn matrix_to_owned(x: &Bound<'_, PyAny>) -> PyResult<MatrixData> {
         return Ok(MatrixData::Csr{indptr,indices,data,rows:shape.0,columns:shape.1});
     }
     Err(PyValueError::new_err("X must be a two-dimensional NumPy array or CSR/CSC matrix"))
+}
+
+fn dense_matrix_to_owned<T>(
+    view: numpy::ndarray::ArrayView2<'_, T>,
+    row_order: Option<&[usize]>,
+) -> PyResult<MatrixData>
+where
+    T: Copy + Into<f64>,
+{
+    let rows = view.nrows();
+    let columns = view.ncols();
+    let values: Vec<f64> = if let Some(order) = row_order {
+        let mut values = Vec::with_capacity(rows.saturating_mul(columns));
+        for &row in order {
+            values.extend(view.row(row).iter().copied().map(Into::into));
+        }
+        values
+    } else {
+        view.iter().copied().map(Into::into).collect()
+    };
+    if values.iter().any(|value| value.is_infinite()) {
+        return Err(PyValueError::new_err(
+            "X must not contain infinite values",
+        ));
+    }
+    Ok(MatrixData::Dense(values, rows, columns))
 }
 
 fn class_from_votes(votes: &ClassVotes) -> usize {

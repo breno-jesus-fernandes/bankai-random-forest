@@ -26,6 +26,7 @@ pub struct DenseInput {
     ccp_alpha: f64,
     monotonic_constraints: Option<Arc<Vec<i8>>>,
     has_missing_values: bool,
+    histogram_threads: usize,
 }
 
 #[derive(Clone)]
@@ -56,6 +57,34 @@ struct HistogramCache {
 }
 
 const HISTOGRAM_PARALLEL_MIN_CELLS: usize = 32 * 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BinningStrategy {
+    ExactSort,
+    SampledSort,
+    ExactSelect,
+    SampledSelect,
+}
+
+impl BinningStrategy {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "exact_sort" => Ok(Self::ExactSort),
+            "sampled_sort" => Ok(Self::SampledSort),
+            "exact_select" => Ok(Self::ExactSelect),
+            "sampled_select" => Ok(Self::SampledSelect),
+            _ => Err("binning_strategy must be 'exact_sort', 'sampled_sort', 'exact_select', or 'sampled_select'".into()),
+        }
+    }
+
+    fn samples(self) -> bool {
+        matches!(self, Self::SampledSort | Self::SampledSelect)
+    }
+
+    fn selects(self) -> bool {
+        matches!(self, Self::ExactSelect | Self::SampledSelect)
+    }
+}
 
 impl HistogramCache {
     fn feature(&self, feature: usize, classes: usize) -> FeatureHistogram<'_> {
@@ -150,6 +179,31 @@ impl DenseInput {
         max_bins: Option<usize>,
         threads: usize,
     ) -> Result<Self, String> {
+        Self::training_with_binning_options(
+            values, rows, columns, labels, sample_weights, n_classes, min_leaf_weight,
+            criterion, min_samples_split, min_samples_leaf, min_impurity_decrease,
+            max_bins, threads, BinningStrategy::ExactSort, 200_000,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn training_with_binning_options(
+        values: Vec<f64>,
+        rows: usize,
+        columns: usize,
+        labels: Vec<usize>,
+        sample_weights: Vec<f64>,
+        n_classes: usize,
+        min_leaf_weight: f64,
+        criterion: Criterion,
+        min_samples_split: usize,
+        min_samples_leaf: usize,
+        min_impurity_decrease: f64,
+        max_bins: Option<usize>,
+        threads: usize,
+        binning_strategy: BinningStrategy,
+        bin_sample_size: usize,
+    ) -> Result<Self, String> {
         if threads == 0 {
             return Err("histogram preprocessing requires at least one thread".into());
         }
@@ -188,11 +242,16 @@ impl DenseInput {
         if max_bins.is_some_and(|bins| !(2..=255).contains(&bins)) {
             return Err("max_bins must be None or an integer in [2, 255]".to_string());
         }
+        if bin_sample_size == 0 {
+            return Err("bin_sample_size must be a positive integer".into());
+        }
 
         let total_weight = sample_weights.iter().sum();
         let (values, bin_edges, active_features) = match max_bins {
             Some(max_bins) => {
-                let (binned, edges) = histogramize(&values, rows, columns, max_bins, threads);
+                let (binned, edges) = histogramize(
+                    &values, rows, columns, max_bins, threads, binning_strategy, bin_sample_size,
+                );
                 let active = edges
                     .iter()
                     .enumerate()
@@ -232,6 +291,7 @@ impl DenseInput {
             ccp_alpha: 0.0,
             monotonic_constraints: None,
             has_missing_values,
+            histogram_threads: 1,
         })
     }
 
@@ -280,6 +340,7 @@ impl DenseInput {
             ccp_alpha: 0.0,
             monotonic_constraints: None,
             has_missing_values,
+            histogram_threads: 1,
         })
     }
 
@@ -336,6 +397,33 @@ impl DenseInput {
         max_bins: Option<usize>,
         threads: usize,
     ) -> Result<Self, String> {
+        Self::training_csr_with_binning_options(
+            indptr, indices, data, rows, columns, labels, sample_weights, n_classes,
+            min_leaf_weight, criterion, min_samples_split, min_samples_leaf,
+            min_impurity_decrease, max_bins, threads, BinningStrategy::ExactSort, 200_000,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn training_csr_with_binning_options(
+        indptr: Vec<usize>,
+        indices: Vec<usize>,
+        data: Vec<f64>,
+        rows: usize,
+        columns: usize,
+        labels: Vec<usize>,
+        sample_weights: Vec<f64>,
+        n_classes: usize,
+        min_leaf_weight: f64,
+        criterion: Criterion,
+        min_samples_split: usize,
+        min_samples_leaf: usize,
+        min_impurity_decrease: f64,
+        max_bins: Option<usize>,
+        threads: usize,
+        binning_strategy: BinningStrategy,
+        bin_sample_size: usize,
+    ) -> Result<Self, String> {
         if threads == 0 {
             return Err("histogram preprocessing requires at least one thread".into());
         }
@@ -368,9 +456,15 @@ impl DenseInput {
         if max_bins.is_some_and(|bins| !(2..=255).contains(&bins)) {
             return Err("max_bins must be None or an integer in [2, 255]".into());
         }
+        if bin_sample_size == 0 {
+            return Err("bin_sample_size must be a positive integer".into());
+        }
         let total_weight = sample_weights.iter().sum();
-        let bin_edges =
-            max_bins.map(|bins| sparse_histogram_edges(&sparse, rows, columns, bins, threads));
+        let bin_edges = max_bins.map(|bins| {
+            sparse_histogram_edges(
+                &sparse, rows, columns, bins, threads, binning_strategy, bin_sample_size,
+            )
+        });
         let active_features = bin_edges.as_ref().map_or_else(
             || (0..columns).collect(),
             |edges| {
@@ -401,6 +495,7 @@ impl DenseInput {
             ccp_alpha: 0.0,
             monotonic_constraints: None,
             has_missing_values,
+            histogram_threads: 1,
         })
     }
 
@@ -441,6 +536,7 @@ impl DenseInput {
             ccp_alpha: 0.0,
             monotonic_constraints: None,
             has_missing_values,
+            histogram_threads: 1,
         })
     }
 
@@ -463,6 +559,11 @@ impl DenseInput {
 
     pub fn with_ccp_alpha(mut self, ccp_alpha: f64) -> Self {
         self.ccp_alpha = ccp_alpha;
+        self
+    }
+
+    pub fn with_histogram_threads(mut self, threads: usize) -> Self {
+        self.histogram_threads = threads.max(1);
         self
     }
 
@@ -649,37 +750,25 @@ fn sparse_histogram_edges(
     columns: usize,
     max_bins: usize,
     threads: usize,
+    strategy: BinningStrategy,
+    sample_size: usize,
 ) -> Vec<Vec<f64>> {
     let preprocessing_threads = if rows.saturating_mul(columns) >= HISTOGRAM_PARALLEL_MIN_CELLS {
         threads
     } else {
         1
     };
+    let sampled_rows = (strategy.samples() && sample_size < rows)
+        .then(|| deterministic_sample_rows(rows, sample_size));
     let workers = preprocessing_threads.max(1).min(columns);
     let build = |column| {
-        let mut sorted = (0..rows)
-            .map(|row| values.get(row, column))
-            .filter(|value| !value.is_nan())
-            .collect::<Vec<_>>();
-        sorted.sort_unstable_by(f64::total_cmp);
-        sorted.dedup_by(|a, b| a.total_cmp(b).is_eq());
-        let mut edges = Vec::new();
-        if sorted.len() <= max_bins {
-            for pair in sorted.windows(2) {
-                edges.push(midpoint(pair[0], pair[1]));
-            }
+        let mut observations = Vec::with_capacity(sampled_rows.as_ref().map_or(rows, Vec::len));
+        if let Some(sampled_rows) = &sampled_rows {
+            observations.extend(sampled_rows.iter().map(|&row| values.get(row, column)));
         } else {
-            for bin in 1..max_bins {
-                let index = bin * sorted.len() / max_bins;
-                if index > 0 && index < sorted.len() {
-                    let edge = midpoint(sorted[index - 1], sorted[index]);
-                    if edges.last().is_none_or(|prev| *prev < edge) {
-                        edges.push(edge);
-                    }
-                }
-            }
+            observations.extend((0..rows).map(|row| values.get(row, column)));
         }
-        edges
+        edges_from_observations(observations, max_bins, strategy)
     };
     if workers == 1 {
         return (0..columns).map(build).collect();
@@ -699,6 +788,110 @@ fn sparse_histogram_edges(
             .flat_map(|handle| handle.join().expect("sparse histogram worker panicked"))
             .collect()
     })
+}
+
+fn deterministic_sample_rows(rows: usize, sample_size: usize) -> Vec<usize> {
+    let count = rows.min(sample_size);
+    let mut indices = (0..rows).collect::<Vec<_>>();
+    let mut state = 0x6a09_e667_f3bc_c909;
+    for index in 0..count {
+        state = splitmix64(state);
+        let remaining = rows - index;
+        let selected = index + state as usize % remaining;
+        indices.swap(index, selected);
+    }
+    indices.truncate(count);
+    indices.sort_unstable();
+    indices
+}
+
+fn splitmix64(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
+}
+
+fn edges_from_observations(
+    mut observations: Vec<f64>,
+    max_bins: usize,
+    strategy: BinningStrategy,
+) -> Vec<f64> {
+    observations.retain(|value| !value.is_nan());
+    if observations.is_empty() {
+        return Vec::new();
+    }
+
+    if !strategy.selects() || observations.len() <= max_bins {
+        observations.sort_unstable_by(f64::total_cmp);
+        observations.dedup_by(|left, right| left.total_cmp(right).is_eq());
+        return edges_from_sorted_unique(&observations, max_bins);
+    }
+
+    let mut positions = Vec::with_capacity((max_bins - 1) * 2);
+    for bin in 1..max_bins {
+        let rank = bin * observations.len() / max_bins;
+        if rank > 0 && rank < observations.len() {
+            positions.push(rank - 1);
+            positions.push(rank);
+        }
+    }
+    positions.sort_unstable();
+    positions.dedup();
+    multi_select_positions(&mut observations, &positions, 0);
+
+    let mut edges = Vec::with_capacity(max_bins.saturating_sub(1));
+    for bin in 1..max_bins {
+        let rank = bin * observations.len() / max_bins;
+        if rank == 0 || rank >= observations.len() {
+            continue;
+        }
+        let left = observations[rank - 1];
+        let right = observations[rank];
+        if left.total_cmp(&right).is_eq() {
+            continue;
+        }
+        let edge = midpoint(left, right);
+        if edges.last().is_none_or(|previous| *previous < edge) {
+            edges.push(edge);
+        }
+    }
+    edges
+}
+
+fn edges_from_sorted_unique(sorted: &[f64], max_bins: usize) -> Vec<f64> {
+    let mut edges = Vec::with_capacity(max_bins.saturating_sub(1));
+    if sorted.len() <= max_bins {
+        for adjacent in sorted.windows(2) {
+            edges.push(midpoint(adjacent[0], adjacent[1]));
+        }
+    } else {
+        for bin in 1..max_bins {
+            let index = bin * sorted.len() / max_bins;
+            if index > 0 && index < sorted.len() {
+                let edge = midpoint(sorted[index - 1], sorted[index]);
+                if edges.last().is_none_or(|previous| *previous < edge) {
+                    edges.push(edge);
+                }
+            }
+        }
+    }
+    edges
+}
+
+fn multi_select_positions(values: &mut [f64], targets: &[usize], offset: usize) {
+    if targets.is_empty() {
+        return;
+    }
+    let middle = targets.len() / 2;
+    let pivot_index = targets[middle] - offset;
+    let (lower, _, upper) = values.select_nth_unstable_by(pivot_index, f64::total_cmp);
+    multi_select_positions(lower, &targets[..middle], offset);
+    multi_select_positions(
+        upper,
+        &targets[middle + 1..],
+        targets[middle] + 1,
+    );
 }
 
 fn validate_matrix(values: &[f64], rows: usize, columns: usize) -> Result<(), String> {
@@ -727,16 +920,25 @@ fn histogramize(
     columns: usize,
     max_bins: usize,
     threads: usize,
+    strategy: BinningStrategy,
+    sample_size: usize,
 ) -> (Vec<u8>, Vec<Vec<f64>>) {
     let preprocessing_threads = if values.len() >= HISTOGRAM_PARALLEL_MIN_CELLS {
         threads
     } else {
         1
     };
+    let sampled_rows = (strategy.samples() && sample_size < rows)
+        .then(|| deterministic_sample_rows(rows, sample_size));
+    let sampled_rows = sampled_rows.as_deref();
     let workers = preprocessing_threads.max(1).min(columns);
     let edges_by_feature: Vec<Vec<f64>> = if workers == 1 {
         (0..columns)
-            .map(|feature| histogram_edges_for_feature(values, rows, columns, feature, max_bins))
+            .map(|feature| {
+                histogram_edges_for_feature(
+                    values, rows, columns, feature, max_bins, strategy, sampled_rows,
+                )
+            })
             .collect()
     } else {
         let chunk_size = columns.div_ceil(workers);
@@ -749,7 +951,8 @@ fn histogramize(
                         (start..end)
                             .map(|feature| {
                                 histogram_edges_for_feature(
-                                    values, rows, columns, feature, max_bins,
+                                    values, rows, columns, feature, max_bins, strategy,
+                                    sampled_rows,
                                 )
                             })
                             .collect::<Vec<_>>()
@@ -762,7 +965,6 @@ fn histogramize(
                 .collect()
         })
     };
-
     let binned = apply_histogram_edges_parallel(
         values,
         rows,
@@ -779,31 +981,20 @@ fn histogram_edges_for_feature(
     columns: usize,
     feature: usize,
     max_bins: usize,
+    strategy: BinningStrategy,
+    sampled_rows: Option<&[usize]>,
 ) -> Vec<f64> {
-    let mut sorted: Vec<_> = (0..rows)
-        .map(|row| values[row * columns + feature])
-        .filter(|value| !value.is_nan())
-        .collect();
-    sorted.sort_unstable_by(f64::total_cmp);
-    sorted.dedup_by(|left, right| left.total_cmp(right).is_eq());
-
-    let mut edges = Vec::with_capacity(max_bins.saturating_sub(1));
-    if sorted.len() <= max_bins {
-        for adjacent in sorted.windows(2) {
-            edges.push(midpoint(adjacent[0], adjacent[1]));
-        }
+    let mut observations = Vec::with_capacity(sampled_rows.map_or(rows, <[usize]>::len));
+    if let Some(sampled_rows) = sampled_rows {
+        observations.extend(
+            sampled_rows
+                .iter()
+                .map(|&row| values[row * columns + feature]),
+        );
     } else {
-        for bin in 1..max_bins {
-            let index = bin * sorted.len() / max_bins;
-            if index > 0 && index < sorted.len() {
-                let edge = midpoint(sorted[index - 1], sorted[index]);
-                if edges.last().is_none_or(|previous| *previous < edge) {
-                    edges.push(edge);
-                }
-            }
-        }
+        observations.extend((0..rows).map(|row| values[row * columns + feature]));
     }
-    edges
+    edges_from_observations(observations, max_bins, strategy)
 }
 
 fn midpoint(left: f64, right: f64) -> f64 {
@@ -907,6 +1098,15 @@ fn accumulate_dense_histograms<const CLASSES: usize>(
     input: &DenseInput, mask: &Mask, values: &[u8], histogram: &mut HistogramCache,
 ) {
     let classes = if CLASSES == 0 { input.n_classes } else { CLASSES };
+    let workers = input.histogram_threads.min(input.columns);
+    if workers > 1
+        && mask.len().saturating_mul(input.columns) >= HISTOGRAM_PARALLEL_MIN_CELLS
+    {
+        accumulate_dense_histograms_parallel::<CLASSES>(
+            input, mask, values, histogram, classes, workers,
+        );
+        return;
+    }
     let labels = input.labels();
     for &row in mask.iter() {
         let label = labels[row];
@@ -919,6 +1119,54 @@ fn accumulate_dense_histograms<const CLASSES: usize>(
             histogram.sample_counts[index] += 1;
         }
     }
+}
+
+fn accumulate_dense_histograms_parallel<const CLASSES: usize>(
+    input: &DenseInput,
+    mask: &Mask,
+    values: &[u8],
+    histogram: &mut HistogramCache,
+    classes: usize,
+    workers: usize,
+) {
+    let features_per_worker = input.columns.div_ceil(workers);
+    let offsets = &histogram.bin_offsets;
+    let labels = input.labels();
+    let n_classes = input.n_classes;
+    let columns = input.columns;
+    let mut class_weights = histogram.class_weights.as_mut_slice();
+    let mut sample_counts = histogram.sample_counts.as_mut_slice();
+
+    std::thread::scope(|scope| {
+        let mut start_feature = 0;
+        while start_feature < columns {
+            let end_feature = (start_feature + features_per_worker).min(columns);
+            let start_bin = offsets[start_feature];
+            let end_bin = offsets[end_feature];
+            let weight_len = (end_bin - start_bin) * classes;
+            let (worker_weights, remaining_weights) = class_weights.split_at_mut(weight_len);
+            class_weights = remaining_weights;
+            let (worker_counts, remaining_counts) = sample_counts.split_at_mut(end_bin - start_bin);
+            sample_counts = remaining_counts;
+            let feature_offsets = &offsets[start_feature..end_feature];
+            let input_weights = input.sample_weights.as_deref();
+
+            scope.spawn(move || {
+                for &row in mask.iter() {
+                    let label = labels[row];
+                    let weight = input_weights.map_or(1.0, |weights| weights[row]);
+                    let row_start = row * columns + start_feature;
+                    let row_bins = &values[row_start..row_start + (end_feature - start_feature)];
+                    for (&bin, &feature_start) in row_bins.iter().zip(feature_offsets) {
+                        let local_bin = feature_start - start_bin + bin as usize;
+                        worker_weights[local_bin * n_classes + label] += weight;
+                        worker_counts[local_bin] += 1;
+                    }
+                }
+            });
+            start_feature = end_feature;
+        }
+    });
 }
 
 fn subtract_histograms(mut parent: HistogramCache, smaller_child: &HistogramCache) -> HistogramCache {
@@ -1614,6 +1862,52 @@ mod histogram_optimization_tests {
     }
 
     #[test]
+    fn multiselect_matches_full_sort_for_unique_values() {
+        let values = (0..4096)
+            .map(|index| (index as f64 * 1.25) - 1000.0)
+            .collect::<Vec<_>>();
+        let sorted = edges_from_observations(values.clone(), 63, BinningStrategy::ExactSort);
+        let selected = edges_from_observations(values, 63, BinningStrategy::ExactSelect);
+        assert_eq!(selected, sorted);
+    }
+
+    #[test]
+    fn sampled_binning_is_deterministic_and_produces_ordered_edges() {
+        let first = deterministic_sample_rows(1000, 200);
+        assert_eq!(first, deterministic_sample_rows(1000, 200));
+        assert_eq!(first.len(), 200);
+        assert!(first.windows(2).all(|pair| pair[0] < pair[1]));
+
+        let values = (0..1000).map(|index| index as f64).collect::<Vec<_>>();
+        let edges = edges_from_observations(values, 32, BinningStrategy::SampledSelect);
+        assert!(edges.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(edges.len() <= 31);
+    }
+
+    #[test]
+    fn multiselect_handles_duplicate_values_without_duplicate_cuts() {
+        let values = (0..1000)
+            .map(|index| match index % 10 {
+                0..=6 => 0.0,
+                7..=8 => 1.0,
+                _ => 2.0,
+            })
+            .collect::<Vec<_>>();
+        let edges = edges_from_observations(values, 32, BinningStrategy::ExactSelect);
+        assert!(edges.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(edges.len() <= 2);
+    }
+
+    #[test]
+    fn binning_strategy_parser_rejects_unknown_values() {
+        assert_eq!(
+            BinningStrategy::parse("sampled_select").unwrap(),
+            BinningStrategy::SampledSelect
+        );
+        assert!(BinningStrategy::parse("unknown").is_err());
+    }
+
+    #[test]
     fn parallel_histogram_preprocessing_matches_serial() {
         let rows = 37;
         let columns = 5;
@@ -1703,6 +1997,39 @@ mod histogram_optimization_tests {
         assert_eq!(derived_right, direct_right);
         assert_eq!(derived_right.class_weights.as_ptr(), weights_ptr);
         assert_eq!(derived_right.sample_counts.as_ptr(), counts_ptr);
+    }
+
+    #[test]
+    fn parallel_child_histogram_matches_serial() {
+        let rows = 512;
+        let columns = 64;
+        let values = (0..rows * columns)
+            .map(|index| ((index * 37 % 997) as f64) / 997.0)
+            .collect::<Vec<_>>();
+        let labels = (0..rows).map(|row| row % 3).collect::<Vec<_>>();
+        let weights = (0..rows)
+            .map(|row| 0.5 + (row % 7) as f64 / 10.0)
+            .collect::<Vec<_>>();
+        let input = DenseInput::training_with_threads(
+            values,
+            rows,
+            columns,
+            labels,
+            weights,
+            3,
+            0.0,
+            Criterion::Gini,
+            2,
+            1,
+            0.0,
+            Some(32),
+            1,
+        )
+        .unwrap();
+        let mask = Mask::from_vec((0..rows).step_by(2).collect());
+        let serial = build_histograms(&input, &mask);
+        let parallel = build_histograms(&input.clone().with_histogram_threads(4), &mask);
+        assert_eq!(serial, parallel);
     }
 
     #[test]

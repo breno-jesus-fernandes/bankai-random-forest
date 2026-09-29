@@ -102,6 +102,8 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         monotonic_cst=None,
         importance_type="gain",
         max_bins=None,
+        binning_strategy="exact_sort",
+        bin_sample_size=200_000,
     ):
         self.n_estimators = n_estimators
         self.criterion = criterion
@@ -124,6 +126,8 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         self.monotonic_cst = monotonic_cst
         self.importance_type = importance_type
         self.max_bins = max_bins
+        self.binning_strategy = binning_strategy
+        self.bin_sample_size = bin_sample_size
 
     @property
     def estimators_(self):
@@ -186,7 +190,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
                 "n_estimators must be greater than or equal to the number of fitted trees "
                 "when warm_start=True"
             )
-        validation_options = dict(dtype=np.float64, ensure_2d=True, reset=not warm_refit, ensure_all_finite="allow-nan")
+        validation_options = dict(dtype=[np.float64, np.float32], ensure_2d=True, reset=not warm_refit, ensure_all_finite="allow-nan")
         if sparse_input:
             validation_options["accept_sparse"] = ("csr", "csc")
         X, y = validate_data(self, X, y, **validation_options)
@@ -218,9 +222,11 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             )
         else:
             X, encoded_y, sample_weight = self._prepare_training_data(
-                X, encoded_y, sample_weight
+                X,
+                encoded_y,
+                sample_weight,
+                defer_dense_sort=not sparse_input,
             )
-
         self._fit_seed = self._fit_seed if warm_refit else self._next_seed()
         self._fit_max_features = self._resolve_max_features()
         self._fit_X = X
@@ -241,6 +247,8 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         self._fit_verbose = self._resolve_verbose()
         self._fit_importance_type = self._resolve_importance_type()
         self._fit_max_bins = self._resolve_max_bins()
+        self._fit_binning_strategy = self._resolve_binning_strategy()
+        self._fit_bin_sample_size = self._resolve_bin_sample_size()
         if self._fit_verbose:
             print(
                 f"[BankaiRandomForestClassifier] building {self.n_estimators} trees",
@@ -268,6 +276,8 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             permutation_importance=self._fit_importance_type == "permutation",
             n_jobs=self._fit_n_jobs,
             max_bins=self._fit_max_bins,
+            binning_strategy=self._fit_binning_strategy,
+            bin_sample_size=self._fit_bin_sample_size,
             balanced_subsample=(
                 self.class_weight == "balanced_subsample" and self.bootstrap is True
             ),
@@ -282,12 +292,13 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             self.oob_decision_function_ = np.asarray(
                 forest.oob_predict_proba(), dtype=np.float64
             )
+            ordered_y = self._fit_y[np.asarray(forest.training_order(), dtype=np.intp)]
             valid = self.oob_decision_function_.sum(axis=1) > 0.0
             predictions = self.oob_decision_function_.argmax(axis=1)
             if callable(self.oob_score):
-                self.oob_score_ = float(self.oob_score(self._fit_y, predictions))
+                self.oob_score_ = float(self.oob_score(ordered_y, predictions))
             else:
-                self.oob_score_ = float(np.mean(predictions[valid] == self._fit_y[valid]))
+                self.oob_score_ = float(np.mean(predictions[valid] == ordered_y[valid]))
         return self
 
     def _fit_multioutput(self, X, y, sample_weight, sparse_input, raw_dtype):
@@ -306,7 +317,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
                 "when warm_start=True"
             )
         validation_options = dict(
-            dtype=np.float64,
+            dtype=[np.float64, np.float32],
             ensure_2d=True,
             reset=not warm_refit,
             ensure_all_finite="allow-nan",
@@ -516,6 +527,14 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             permutation_importance=self._fit_importance_type == "permutation",
             n_jobs=self._fit_n_jobs,
             max_bins=self._fit_max_bins,
+            binning_strategy=getattr(
+                self,
+                "_fit_binning_strategy",
+                getattr(self, "binning_strategy", "exact_sort"),
+            ),
+            bin_sample_size=getattr(
+                self, "_fit_bin_sample_size", getattr(self, "bin_sample_size", 200_000)
+            ),
             balanced_subsample=(
                 self.class_weight == "balanced_subsample" and self.bootstrap is True
             ),
@@ -658,6 +677,22 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             return int(self.max_bins)
         raise ValueError("max_bins must be None or an integer in [2, 255]")
 
+    def _resolve_binning_strategy(self):
+        allowed = ("exact_sort", "sampled_sort", "exact_select", "sampled_select")
+        if self.binning_strategy not in allowed:
+            choices = ", ".join(repr(value) for value in allowed)
+            raise ValueError(f"binning_strategy must be one of {choices}")
+        return self.binning_strategy
+
+    def _resolve_bin_sample_size(self):
+        if (
+            isinstance(self.bin_sample_size, (int, np.integer))
+            and not isinstance(self.bin_sample_size, (bool, np.bool_))
+            and self.bin_sample_size > 0
+        ):
+            return int(self.bin_sample_size)
+        raise ValueError("bin_sample_size must be a positive integer")
+
     def _selected_feature_importances(self, forest):
         method = (
             forest.permutation_importances
@@ -716,7 +751,9 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         return weights
 
     @staticmethod
-    def _prepare_training_data(X, encoded_y, sample_weight, return_order=False):
+    def _prepare_training_data(
+        X, encoded_y, sample_weight, return_order=False, defer_dense_sort=False
+    ):
         source_rows = np.arange(X.shape[0], dtype=np.intp) if return_order else None
         if sample_weight is not None and np.equal(
             sample_weight, np.floor(sample_weight)
@@ -741,6 +778,11 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
                 start, end = columns.indptr[feature : feature + 2]
                 values[columns.indices[start:end]] = columns.data[start:end]
                 order = order[np.argsort(values[order], kind="stable")]
+        elif defer_dense_sort:
+            # The native boundary computes the same stable canonical order and
+            # copies rows directly into its owned matrix, avoiding NumPy's
+            # full-size ``X[order]`` materialization here.
+            return X, encoded_y, sample_weight
         else:
             keys = (encoded_y, *(X[:, index] for index in range(X.shape[1] - 1, -1, -1)))
             order = np.lexsort(keys)

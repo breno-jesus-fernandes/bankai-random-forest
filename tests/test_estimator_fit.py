@@ -32,6 +32,35 @@ def test_fit_encodes_labels_and_predict_returns_original_labels(separable_data):
     np.testing.assert_array_equal(classifier.predict(x), y)
 
 
+def test_dense_fit_is_row_order_invariant_with_ties_and_missing_values():
+    rng = np.random.RandomState(91)
+    x = rng.randint(-2, 3, size=(96, 6)).astype(np.float64)
+    x[::9, 2] = np.nan
+    x[1::13, 0] = -0.0
+    x[2::13, 0] = 0.0
+    y = rng.randint(0, 3, size=x.shape[0])
+    _, encoded_y = np.unique(y, return_inverse=True)
+    keys = (encoded_y, *(x[:, index] for index in range(x.shape[1] - 1, -1, -1)))
+    order = np.lexsort(keys)
+    params = dict(
+        n_estimators=9,
+        max_features=None,
+        random_state=91,
+        oob_score=True,
+        max_bins=8,
+    )
+
+    direct = BankaiRandomForestClassifier(**params).fit(x, y)
+    preordered = BankaiRandomForestClassifier(**params).fit(x[order], y[order])
+
+    np.testing.assert_array_equal(direct.predict(x), preordered.predict(x))
+    np.testing.assert_allclose(direct.predict_proba(x), preordered.predict_proba(x))
+    np.testing.assert_allclose(direct.feature_importances_, preordered.feature_importances_)
+    np.testing.assert_allclose(
+        direct.oob_decision_function_, preordered.oob_decision_function_
+    )
+
+
 def test_predict_proba_and_log_proba_follow_the_fitted_classes(separable_data):
     x, y = separable_data
     classifier = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(x, y)
@@ -82,6 +111,79 @@ def test_max_bins_rejects_invalid_histogram_resolution(separable_data, max_bins)
 
     with pytest.raises(ValueError, match="max_bins must be None or an integer in \\[2, 255\\]"):
         BankaiRandomForestClassifier(max_bins=max_bins).fit(x, y)
+
+
+@pytest.mark.parametrize(
+    "strategy", ["exact_sort", "sampled_sort", "exact_select", "sampled_select"]
+)
+def test_binning_strategies_fit_and_keep_predictive_signal(strategy):
+    rng = np.random.RandomState(101)
+    x = rng.normal(size=(800, 8))
+    y = (x[:, 0] - 0.7 * x[:, 1] > 0.0).astype(int)
+    model = BankaiRandomForestClassifier(
+        n_estimators=15,
+        max_depth=8,
+        max_features=None,
+        max_bins=16,
+        binning_strategy=strategy,
+        bin_sample_size=256,
+        importance_type="gain",
+        n_jobs=2,
+        random_state=19,
+    ).fit(x, y)
+
+    assert model.score(x, y) > 0.85
+    assert model.predict(x).shape == y.shape
+    assert model.binning_strategy == strategy
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({"binning_strategy": "quick_sort"}, "binning_strategy must be one of"),
+        ({"bin_sample_size": 0}, "bin_sample_size must be a positive integer"),
+        ({"bin_sample_size": True}, "bin_sample_size must be a positive integer"),
+    ],
+)
+def test_binning_options_reject_invalid_values(separable_data, options, message):
+    x, y = separable_data
+    with pytest.raises(ValueError, match=message):
+        BankaiRandomForestClassifier(max_bins=4, **options).fit(x, y)
+
+
+def test_sampled_select_model_roundtrips_through_pickle():
+    rng = np.random.RandomState(102)
+    x = rng.normal(size=(240, 5))
+    y = (x[:, 0] + x[:, 1] > 0.0).astype(int)
+    model = BankaiRandomForestClassifier(
+        n_estimators=5,
+        max_bins=8,
+        binning_strategy="sampled_select",
+        bin_sample_size=120,
+        random_state=12,
+    ).fit(x, y)
+
+    restored = pickle.loads(pickle.dumps(model))
+
+    assert restored.binning_strategy == "sampled_select"
+    assert restored.bin_sample_size == 120
+    np.testing.assert_array_equal(restored.predict(x), model.predict(x))
+
+
+def test_sampled_select_histograms_support_sparse_input():
+    rng = np.random.RandomState(103)
+    x = rng.normal(size=(300, 6))
+    x[np.abs(x) < 0.8] = 0.0
+    y = (x[:, 0] + x[:, 1] > 0.0).astype(int)
+    model = BankaiRandomForestClassifier(
+        n_estimators=7,
+        max_bins=8,
+        binning_strategy="sampled_select",
+        bin_sample_size=100,
+        random_state=13,
+    ).fit(sparse.csr_matrix(x), y)
+
+    assert model.predict(sparse.csr_matrix(x)).shape == y.shape
 
 
 def test_histogram_backend_preserves_native_permutation_importance():
@@ -529,7 +631,7 @@ def test_accepts_float32_features(separable_data):
     np.testing.assert_array_equal(classifier.predict(x.astype(np.float32)), y)
 
 
-def test_float_transfer_telemetry_records_casts(separable_data):
+def test_float_transfer_telemetry_records_preserved_dtype(separable_data):
     x, y = separable_data
     float32_model = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(
         x.astype(np.float32), y
@@ -537,9 +639,38 @@ def test_float_transfer_telemetry_records_casts(separable_data):
     float64_model = BankaiRandomForestClassifier(n_estimators=25, random_state=42).fit(x, y)
 
     assert float32_model.copy_telemetry_["input_dtype"] == "float32"
-    assert float32_model.copy_telemetry_["core_dtype"] == "float64"
+    assert float32_model.copy_telemetry_["core_dtype"] == "float32"
     assert float32_model.copy_telemetry_["cast_to_float64"] is True
+    assert float32_model._fit_X.dtype == np.float32
     assert float64_model.copy_telemetry_["cast_to_float64"] is False
+
+
+def test_float32_fit_matches_float64_values_with_histograms_and_oob():
+    rng = np.random.RandomState(104)
+    x = rng.normal(size=(240, 7)).astype(np.float32)
+    x[::17, 2] = np.nan
+    y = (np.nan_to_num(x[:, 0]) - x[:, 1] > 0.0).astype(np.uint8)
+    params = dict(
+        n_estimators=11,
+        max_features=None,
+        max_bins=8,
+        oob_score=True,
+        random_state=53,
+    )
+
+    float32_model = BankaiRandomForestClassifier(**params).fit(x, y)
+    float64_model = BankaiRandomForestClassifier(**params).fit(x.astype(np.float64), y)
+
+    np.testing.assert_array_equal(float32_model.predict(x), float64_model.predict(x))
+    np.testing.assert_allclose(
+        float32_model.predict_proba(x), float64_model.predict_proba(x)
+    )
+    np.testing.assert_allclose(
+        float32_model.oob_decision_function_, float64_model.oob_decision_function_
+    )
+    np.testing.assert_allclose(
+        float32_model.feature_importances_, float64_model.feature_importances_
+    )
 
 
 def test_random_state_reproduces_predictions_probabilities_and_importances():

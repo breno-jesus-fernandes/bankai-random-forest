@@ -8,7 +8,7 @@ tests are in `tests/test_sklearn_compatibility_audit.py`.
 
 | Area | Status | Finding |
 | --- | --- | --- |
-| Constructor parameters | Supported with extensions | Bankai exposes all parameters from sklearn 1.9.1 and adds `importance_type` and `max_bins`. Matching parameter names do not guarantee identical semantics for every option below. |
+| Constructor parameters | Supported with extensions | Bankai exposes all parameters from sklearn 1.9.1 and adds `importance_type`, `max_bins`, `binning_strategy`, and `bin_sample_size`. Matching parameter names do not guarantee identical semantics for every option below. |
 | Core classifier API | Supported for single-output; multioutput public predictions supported | `fit`, `predict`, `predict_proba`, `predict_log_proba`, `score`, classes, feature count, and importances are available. Multioutput targets use independent native forests per target. |
 | Forest inspection | Supported in tested paths | Inherited `apply` and `decision_path` work through Bankai's sklearn-shaped `estimators_`; output dimensions were checked. |
 | Metadata routing | Supported for requested sample weights | `set_fit_request(sample_weight=True)` routes through a sklearn `Pipeline` when metadata routing is enabled. |

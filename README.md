@@ -59,6 +59,11 @@ categorical columns with a transformer such as `OneHotEncoder` in a pipeline.
   `random_state` control forest fitting.
 - `max_bins=None` uses exact split search. An integer from 2 to 255 enables
   histogram split search; for example, `max_bins=64`.
+- With histogram mode enabled, `binning_strategy` chooses how cuts are built:
+  `exact_sort` (default), `sampled_sort`, `exact_select`, or `sampled_select`.
+  Sampled modes use up to `bin_sample_size` rows per feature (default 200,000).
+  Selection modes avoid a full sort by selecting empirical quantile ranks;
+  repeated values can therefore produce different cuts than `exact_sort`.
 - `ccp_alpha` prunes trees. `monotonic_cst` accepts one `-1`, `0`, or `1` per
   feature and is supported for binary classification.
 - `oob_score=True` enables out-of-bag estimates when `bootstrap=True`.

@@ -20,7 +20,12 @@ def test_bankai_keeps_sklearn_parameters_and_adds_backend_controls():
     bankai_parameters = set(BankaiRandomForestClassifier().get_params())
 
     assert sklearn_parameters <= bankai_parameters
-    assert bankai_parameters - sklearn_parameters == {"importance_type", "max_bins"}
+    assert bankai_parameters - sklearn_parameters == {
+        "importance_type",
+        "max_bins",
+        "binning_strategy",
+        "bin_sample_size",
+    }
 
 
 def test_inherited_sklearn_forest_methods_work_with_bankai_trees():
