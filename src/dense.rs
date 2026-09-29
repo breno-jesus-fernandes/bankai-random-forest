@@ -295,6 +295,125 @@ impl DenseInput {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn training_binned_with_accessor<F>(
+        rows: usize,
+        columns: usize,
+        labels: Vec<usize>,
+        sample_weights: Vec<f64>,
+        n_classes: usize,
+        min_leaf_weight: f64,
+        criterion: Criterion,
+        min_samples_split: usize,
+        min_samples_leaf: usize,
+        min_impurity_decrease: f64,
+        max_bins: usize,
+        threads: usize,
+        strategy: BinningStrategy,
+        sample_size: usize,
+        value_at: F,
+    ) -> Result<Self, String>
+    where
+        F: Fn(usize, usize) -> f64 + Sync,
+    {
+        if threads == 0 {
+            return Err("histogram preprocessing requires at least one thread".into());
+        }
+        if columns == 0 {
+            return Err("X must contain at least one feature".into());
+        }
+        rows.checked_mul(columns)
+            .ok_or_else(|| "X shape is too large".to_string())?;
+        if !(2..=255).contains(&max_bins) {
+            return Err("max_bins must be an integer in [2, 255]".into());
+        }
+        if sample_size == 0 {
+            return Err("bin_sample_size must be a positive integer".into());
+        }
+        if labels.len() != rows {
+            return Err("y must contain one label per row".into());
+        }
+        if sample_weights.len() != rows {
+            return Err("sample_weight must contain one value per row".into());
+        }
+        if sample_weights
+            .iter()
+            .any(|weight| !weight.is_finite() || *weight < 0.0)
+        {
+            return Err("sample_weight must contain finite non-negative values".into());
+        }
+        if sample_weights.iter().all(|weight| *weight == 0.0) {
+            return Err("sample_weight cannot be all zero".into());
+        }
+        if n_classes == 0 {
+            return Err("at least one class is required".into());
+        }
+        if !min_leaf_weight.is_finite() || min_leaf_weight < 0.0 {
+            return Err("min_leaf_weight must be finite and non-negative".into());
+        }
+        if min_samples_split < 2 || min_samples_leaf == 0 {
+            return Err("invalid minimum sample control".into());
+        }
+        if !min_impurity_decrease.is_finite() || min_impurity_decrease < 0.0 {
+            return Err("min_impurity_decrease must be finite and non-negative".into());
+        }
+        if labels.iter().any(|&label| label >= n_classes) {
+            return Err("labels must be encoded in 0..n_classes".into());
+        }
+
+        let mut has_missing_values = false;
+        for row in 0..rows {
+            for feature in 0..columns {
+                let value = value_at(row, feature);
+                if value.is_infinite() {
+                    return Err("X must not contain infinite values".into());
+                }
+                has_missing_values |= value.is_nan();
+            }
+        }
+
+        let (binned, edges) = histogramize_from_accessor(
+            rows,
+            columns,
+            max_bins,
+            threads,
+            strategy,
+            sample_size,
+            &value_at,
+        );
+        let active_features = edges
+            .iter()
+            .enumerate()
+            .filter_map(|(feature, feature_edges)| {
+                (!feature_edges.is_empty()).then_some(feature)
+            })
+            .collect();
+        let total_weight = sample_weights.iter().sum();
+
+        Ok(Self {
+            values: DenseValues::Binned(Arc::new(binned)),
+            labels: Some(Arc::new(labels)),
+            sample_weights: Some(Arc::new(sample_weights)),
+            rows,
+            columns,
+            n_classes,
+            min_leaf_weight,
+            criterion,
+            min_samples_split,
+            min_samples_leaf,
+            min_impurity_decrease,
+            total_weight,
+            histogram_bins: Some(max_bins),
+            bin_edges: Some(Arc::new(edges)),
+            active_features,
+            balanced_subsample: false,
+            ccp_alpha: 0.0,
+            monotonic_constraints: None,
+            has_missing_values,
+            histogram_threads: 1,
+        })
+    }
+
     pub fn prediction(
         values: Vec<f64>,
         rows: usize,
@@ -923,7 +1042,31 @@ fn histogramize(
     strategy: BinningStrategy,
     sample_size: usize,
 ) -> (Vec<u8>, Vec<Vec<f64>>) {
-    let preprocessing_threads = if values.len() >= HISTOGRAM_PARALLEL_MIN_CELLS {
+    let value_at = |row, feature| values[row * columns + feature];
+    histogramize_from_accessor(
+        rows,
+        columns,
+        max_bins,
+        threads,
+        strategy,
+        sample_size,
+        &value_at,
+    )
+}
+
+fn histogramize_from_accessor<F>(
+    rows: usize,
+    columns: usize,
+    max_bins: usize,
+    threads: usize,
+    strategy: BinningStrategy,
+    sample_size: usize,
+    value_at: &F,
+) -> (Vec<u8>, Vec<Vec<f64>>)
+where
+    F: Fn(usize, usize) -> f64 + Sync,
+{
+    let preprocessing_threads = if rows.saturating_mul(columns) >= HISTOGRAM_PARALLEL_MIN_CELLS {
         threads
     } else {
         1
@@ -936,7 +1079,12 @@ fn histogramize(
         (0..columns)
             .map(|feature| {
                 histogram_edges_for_feature(
-                    values, rows, columns, feature, max_bins, strategy, sampled_rows,
+                    rows,
+                    feature,
+                    max_bins,
+                    strategy,
+                    sampled_rows,
+                    value_at,
                 )
             })
             .collect()
@@ -951,8 +1099,12 @@ fn histogramize(
                         (start..end)
                             .map(|feature| {
                                 histogram_edges_for_feature(
-                                    values, rows, columns, feature, max_bins, strategy,
+                                    rows,
+                                    feature,
+                                    max_bins,
+                                    strategy,
                                     sampled_rows,
+                                    value_at,
                                 )
                             })
                             .collect::<Vec<_>>()
@@ -965,34 +1117,29 @@ fn histogramize(
                 .collect()
         })
     };
-    let binned = apply_histogram_edges_parallel(
-        values,
+    let binned = apply_histogram_accessor_parallel(
         rows,
         columns,
         &edges_by_feature,
         preprocessing_threads,
+        value_at,
     );
     (binned, edges_by_feature)
 }
 
 fn histogram_edges_for_feature(
-    values: &[f64],
     rows: usize,
-    columns: usize,
     feature: usize,
     max_bins: usize,
     strategy: BinningStrategy,
     sampled_rows: Option<&[usize]>,
+    value_at: &(impl Fn(usize, usize) -> f64 + Sync),
 ) -> Vec<f64> {
     let mut observations = Vec::with_capacity(sampled_rows.map_or(rows, <[usize]>::len));
     if let Some(sampled_rows) = sampled_rows {
-        observations.extend(
-            sampled_rows
-                .iter()
-                .map(|&row| values[row * columns + feature]),
-        );
+        observations.extend(sampled_rows.iter().map(|&row| value_at(row, feature)));
     } else {
-        observations.extend((0..rows).map(|row| values[row * columns + feature]));
+        observations.extend((0..rows).map(|row| value_at(row, feature)));
     }
     edges_from_observations(observations, max_bins, strategy)
 }
@@ -1023,29 +1170,44 @@ fn apply_histogram_edges(
     binned
 }
 
-fn apply_histogram_edges_parallel(
-    values: &[f64],
+fn apply_histogram_accessor_parallel<F>(
     rows: usize,
     columns: usize,
     edges_by_feature: &[Vec<f64>],
     threads: usize,
-) -> Vec<u8> {
+    value_at: &F,
+) -> Vec<u8>
+where
+    F: Fn(usize, usize) -> f64 + Sync,
+{
     let workers = threads.max(1).min(rows);
     if workers == 1 {
-        return apply_histogram_edges(values, rows, columns, edges_by_feature);
+        let mut binned = Vec::with_capacity(rows.saturating_mul(columns));
+        for row in 0..rows {
+            for feature in 0..columns {
+                let value = value_at(row, feature);
+                let bin = if value.is_nan() {
+                    edges_by_feature[feature].len() + 1
+                } else {
+                    edges_by_feature[feature].partition_point(|edge| value > *edge)
+                };
+                binned.push(bin as u8);
+            }
+        }
+        return binned;
     }
     let rows_per_worker = rows.div_ceil(workers);
-    let output_len = values.len();
+    let output_len = rows.saturating_mul(columns);
     let mut binned = vec![0u8; output_len];
     let chunk_len = rows_per_worker * columns;
     std::thread::scope(|scope| {
         for (chunk_index, output) in binned.chunks_mut(chunk_len).enumerate() {
             let start_row = chunk_index * rows_per_worker;
-            let chunk_rows = output.len() / columns;
-            let input = &values[start_row * columns..(start_row + chunk_rows) * columns];
             scope.spawn(move || {
-                for (index, (&value, bin_out)) in input.iter().zip(output.iter_mut()).enumerate() {
+                for (index, bin_out) in output.iter_mut().enumerate() {
+                    let row = start_row + index / columns;
                     let feature = index % columns;
+                    let value = value_at(row, feature);
                     *bin_out = if value.is_nan() {
                         (edges_by_feature[feature].len() + 1) as u8
                     } else {
@@ -1859,6 +2021,64 @@ mod histogram_optimization_tests {
     fn histogram_bins_use_compact_storage() {
         let input = training_input();
         assert!(matches!(input.values, DenseValues::Binned(ref values) if values.len() == 12));
+    }
+
+    #[test]
+    fn direct_histogram_accessor_matches_owned_matrix_binning() {
+        let rows = 600;
+        let columns = 64;
+        let mut values = (0..rows * columns)
+            .map(|index| ((index * 17) % 257) as f64)
+            .collect::<Vec<_>>();
+        for index in (37..values.len()).step_by(211) {
+            values[index] = f64::NAN;
+        }
+        let labels = (0..rows).map(|row| row % 2).collect::<Vec<_>>();
+        let weights = vec![1.0; rows];
+        let reference = DenseInput::training_with_binning_options(
+            values.clone(),
+            rows,
+            columns,
+            labels.clone(),
+            weights.clone(),
+            2,
+            0.0,
+            Criterion::Gini,
+            2,
+            1,
+            0.0,
+            Some(8),
+            4,
+            BinningStrategy::SampledSelect,
+            200,
+        )
+        .unwrap();
+        let direct = DenseInput::training_binned_with_accessor(
+            rows,
+            columns,
+            labels,
+            weights,
+            2,
+            0.0,
+            Criterion::Gini,
+            2,
+            1,
+            0.0,
+            8,
+            4,
+            BinningStrategy::SampledSelect,
+            200,
+            |row, feature| values[row * columns + feature],
+        )
+        .unwrap();
+
+        assert_eq!(direct.bin_edges(), reference.bin_edges());
+        match (&direct.values, &reference.values) {
+            (DenseValues::Binned(direct), DenseValues::Binned(reference)) => {
+                assert_eq!(direct, reference);
+            }
+            _ => panic!("both histogram inputs should use compact binned storage"),
+        }
     }
 
     #[test]

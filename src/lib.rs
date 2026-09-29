@@ -104,8 +104,30 @@ impl NativeForest {
             })
             .collect::<PyResult<_>>()?;
         let dense_order = canonical_dense_row_order(x, y.as_array())?;
-        let matrix = matrix_to_owned(x, dense_order.as_deref())?;
-        let (rows, columns) = matrix.shape();
+        let direct_f32 = if max_bins.is_some() {
+            x.extract::<PyReadonlyArray2<'_, f32>>().ok()
+        } else {
+            None
+        };
+        let direct_f64 = if max_bins.is_some() && direct_f32.is_none() {
+            x.extract::<PyReadonlyArray2<'_, f64>>().ok()
+        } else {
+            None
+        };
+        let matrix = if direct_f32.is_some() || direct_f64.is_some() {
+            None
+        } else {
+            Some(matrix_to_owned(x, dense_order.as_deref())?)
+        };
+        let (rows, columns) = if let Some(array) = &direct_f32 {
+            let view = array.as_array();
+            (view.nrows(), view.ncols())
+        } else if let Some(array) = &direct_f64 {
+            let view = array.as_array();
+            (view.nrows(), view.ncols())
+        } else {
+            matrix.as_ref().expect("non-histogram input owns its matrix").shape()
+        };
         let row_order = dense_order.unwrap_or_else(|| (0..rows).collect());
         if row_order.len() != rows || raw_labels.len() != rows {
             return Err(PyValueError::new_err(
@@ -145,9 +167,88 @@ impl NativeForest {
             "entropy" | "log_loss" => Criterion::Entropy,
             _ => return Err(PyValueError::new_err("unsupported criterion")),
         };
-        let input = match matrix {
-            MatrixData::Dense(values, ..) => DenseInput::training_with_binning_options(values, rows, columns, labels, sample_weights, n_classes, min_leaf_weight, criterion, min_samples_split, min_samples_leaf, min_impurity_decrease, max_bins, n_jobs.max(1), binning_strategy, bin_sample_size),
-            MatrixData::Csr { indptr, indices, data, .. } => DenseInput::training_csr_with_binning_options(indptr, indices, data, rows, columns, labels, sample_weights, n_classes, min_leaf_weight, criterion, min_samples_split, min_samples_leaf, min_impurity_decrease, max_bins, n_jobs.max(1), binning_strategy, bin_sample_size),
+        let input = if let Some(array) = direct_f32 {
+            let view = array.as_array();
+            DenseInput::training_binned_with_accessor(
+                rows,
+                columns,
+                labels,
+                sample_weights,
+                n_classes,
+                min_leaf_weight,
+                criterion,
+                min_samples_split,
+                min_samples_leaf,
+                min_impurity_decrease,
+                max_bins.expect("direct f32 path requires histogram bins"),
+                n_jobs.max(1),
+                binning_strategy,
+                bin_sample_size,
+                |row, feature| f64::from(view[[row_order[row], feature]]),
+            )
+        } else if let Some(array) = direct_f64 {
+            let view = array.as_array();
+            DenseInput::training_binned_with_accessor(
+                rows,
+                columns,
+                labels,
+                sample_weights,
+                n_classes,
+                min_leaf_weight,
+                criterion,
+                min_samples_split,
+                min_samples_leaf,
+                min_impurity_decrease,
+                max_bins.expect("direct f64 path requires histogram bins"),
+                n_jobs.max(1),
+                binning_strategy,
+                bin_sample_size,
+                |row, feature| view[[row_order[row], feature]],
+            )
+        } else {
+            match matrix.expect("non-histogram input owns its matrix") {
+                MatrixData::Dense(values, ..) => DenseInput::training_with_binning_options(
+                    values,
+                    rows,
+                    columns,
+                    labels,
+                    sample_weights,
+                    n_classes,
+                    min_leaf_weight,
+                    criterion,
+                    min_samples_split,
+                    min_samples_leaf,
+                    min_impurity_decrease,
+                    max_bins,
+                    n_jobs.max(1),
+                    binning_strategy,
+                    bin_sample_size,
+                ),
+                MatrixData::Csr {
+                    indptr,
+                    indices,
+                    data,
+                    ..
+                } => DenseInput::training_csr_with_binning_options(
+                    indptr,
+                    indices,
+                    data,
+                    rows,
+                    columns,
+                    labels,
+                    sample_weights,
+                    n_classes,
+                    min_leaf_weight,
+                    criterion,
+                    min_samples_split,
+                    min_samples_leaf,
+                    min_impurity_decrease,
+                    max_bins,
+                    n_jobs.max(1),
+                    binning_strategy,
+                    bin_sample_size,
+                ),
+            }
         }
         .map_err(PyValueError::new_err)?;
         let mut input = if balanced_subsample {

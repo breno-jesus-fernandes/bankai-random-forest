@@ -673,6 +673,30 @@ def test_float32_fit_matches_float64_values_with_histograms_and_oob():
     )
 
 
+def test_strided_float32_histogram_input_matches_contiguous_input():
+    rng = np.random.RandomState(105)
+    backing = rng.normal(size=(320, 12)).astype(np.float32)
+    x = backing[:, ::2]
+    y = (x[:, 0] + x[:, 1] > 0.0).astype(np.uint8)
+    params = dict(
+        n_estimators=7,
+        max_features=None,
+        max_bins=8,
+        oob_score=True,
+        random_state=54,
+    )
+
+    strided = BankaiRandomForestClassifier(**params).fit(x, y)
+    contiguous = BankaiRandomForestClassifier(**params).fit(x.copy(), y)
+
+    assert strided.copy_telemetry_["input_c_contiguous"] is False
+    np.testing.assert_array_equal(strided.predict(x), contiguous.predict(x))
+    np.testing.assert_allclose(strided.predict_proba(x), contiguous.predict_proba(x))
+    np.testing.assert_allclose(
+        strided.oob_decision_function_, contiguous.oob_decision_function_
+    )
+
+
 def test_random_state_reproduces_predictions_probabilities_and_importances():
     rng = np.random.RandomState(42)
     x = rng.normal(size=(50, 4))
