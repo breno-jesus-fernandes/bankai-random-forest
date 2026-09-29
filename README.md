@@ -6,9 +6,11 @@ behind [FRU](https://www.sciencedirect.com/science/article/pii/S2352711026004097
 It combines parallel tree building and efficient permutation importance with
 optional LightGBM-style histograms for continuous features.
 
-On a local 1M-row, 500-feature benchmark, Bankai fit in 49.7 s versus 89.6 s
-for LightGBM RF. Bankai calculated permutation importance; LightGBM used gain,
-so treat this as a workload-specific comparison ([details](benchmarks/fit_stage_profile_1m.md)).
+Preliminary results from the [Colab fit benchmark](https://colab.research.google.com/github/breno-jesus-fernandes/bankai-random-forest/blob/master/benchmarks/benchmark_fit_100k_500f_90_relevant.ipynb)
+show Bankai fitting 8× faster than scikit-learn Random Forest and 1.8× faster
+than LightGBM RF. These initial figures are provisional and specific to the
+benchmark workload and hardware; see the notebook for settings and comparison
+caveats.
 
 Bankai follows the familiar scikit-learn estimator API, and full compatibility
 is a project goal. The project is in alpha, so APIs and serialized models may
@@ -122,6 +124,13 @@ Fit time depends on the data, tree settings, hardware, and importance
 calculation. The benchmark report includes stage breakdowns, later Bankai
 measurements, and comparison caveats; results are specific to the recorded
 workload and are not a performance guarantee.
+
+Run the [binary classification fit benchmark in Google Colab](https://colab.research.google.com/github/breno-jesus-fernandes/bankai-random-forest/blob/master/benchmarks/benchmark_fit_100k_500f_90_relevant.ipynb)
+or [view the notebook in this repository](benchmarks/benchmark_fit_100k_500f_90_relevant.ipynb).
+It compares scikit-learn RF, LightGBM RF, and Bankai on one shared dataset with
+`n_jobs=-1`; the first cell installs the pinned packages. It reports fit time
+only, with matched-setting baseline fits and a separate Bankai permutation-
+importance profile whose extra work is called out explicitly.
 
 ## Save and restore models
 
