@@ -80,6 +80,28 @@ de árvores e as configurações RF são aproximadas, não matematicamente idên
 Em 100k, P1 e P2 ficaram empatados no fit integral: a preparação já é pequena
 frente ao treino e à importance permutation.
 
+### Fit integral local de 1M: P2 versus P3
+
+Repeti o fit completo do Bankai com o tamanho solicitado, mantendo os parâmetros
+do notebook e alterando apenas `N_SAMPLES` para 1.000.000: 500 features, 90
+relevantes, 40 árvores, profundidade 20, 511 folhas, `max_bins=63`,
+`sampled_select` com 200 mil linhas para os cortes, `max_samples=0.8`,
+`n_jobs=-1` e permutation importance. O tempo medido cobre somente `fit`; cada
+processo recriou o mesmo dataset determinístico (seed 1729) antes do cronômetro.
+
+| Versão | Fits (s) | Mediana | Faixa |
+|---|---|---:|---:|
+| P2, antes da validação fundida | 42,701; 48,348; 49,143 | 48,348 s | 42,701–49,143 s |
+| P3, validação fundida | 43,476; 45,691; 48,611 | 45,691 s | 43,476–48,611 s |
+
+A mediana observada caiu **2,656 s (5,5%; 1,06×)**. As faixas se sobrepõem
+bastante e, em uma das três execuções, P3 ficou mais lento que P2; com este
+número de repetições não dá para separar com confiança o ganho da variação do
+host. O perfil raso isola melhor a preparação e mostrou economia de cerca de
+1,18 s em 1M; no fit completo, os 40 trees e a permutation importance diluem
+esse efeito. Portanto, trato os 2,656 s como diferença entre medianas observada,
+não como uma economia garantida para toda execução.
+
 O maior RSS amostrado foi 1,982 GiB para o primeiro fit completo P2 de 1M e
 3,794 GiB para o primeiro LightGBM; um processo posterior que alternou execuções
 observou 3,145 GiB de pico total. A medição do RSS do macOS variou entre
@@ -174,7 +196,9 @@ O atraso inicial vinha da preparação Python e da transferência da matriz, nã
 chamadas repetidas pela ponte Python→Rust. A ordenação no Rust, a preservação de
 `float32`, a discretização direta e a fusão da validação reduziram o perfil raso
 de 1M de 387,9 s para 2,1 s de mediana neste host. No fit integral de 1M, três
-execuções deram 49,7 s de mediana para Bankai P2 e 89,6 s para LightGBM RF; o
-Bankai calcula permutation importance e o LightGBM não. Esse resultado
-consolida o patamar neste host, mas não remove a diferença de trabalho nem
-substitui uma comparação em máquinas de produção.
+execuções recentes deram 45,7 s de mediana para Bankai P3, contra 48,3 s para
+P2 na rodada pareada; essa diferença de 2,7 s teve bastante variação entre
+execuções. A comparação anterior mediu 89,6 s para LightGBM RF, que não calcula
+permutation importance. Esses resultados consolidam o patamar neste host, mas
+não removem a diferença de trabalho nem substituem uma comparação em máquinas
+de produção.
