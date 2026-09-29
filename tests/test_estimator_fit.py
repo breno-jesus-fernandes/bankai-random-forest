@@ -1,6 +1,8 @@
+import pickle
+import warnings
+
 import numpy as np
 import pandas as pd
-import pickle
 import pytest
 from scipy import sparse
 from sklearn.ensemble import RandomForestClassifier
@@ -70,7 +72,16 @@ def test_predict_proba_and_log_proba_follow_the_fitted_classes(separable_data):
     assert probabilities.shape == (x.shape[0], 2)
     np.testing.assert_allclose(probabilities.sum(axis=1), 1.0)
     np.testing.assert_array_equal(classifier.classes_[probabilities.argmax(axis=1)], y)
-    np.testing.assert_allclose(classifier.predict_log_proba(x), np.log(probabilities))
+    with np.errstate(divide="ignore"):
+        expected_log_probabilities = np.log(probabilities)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        log_probabilities = classifier.predict_log_proba(x)
+
+    assert not caught
+    assert np.isneginf(log_probabilities).any()
+    np.testing.assert_allclose(log_probabilities, expected_log_probabilities)
 
 
 def test_fit_sets_normalized_feature_importances(separable_data):

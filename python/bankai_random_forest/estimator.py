@@ -464,9 +464,10 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
 
     def predict_log_proba(self, X):
         probabilities = self.predict_proba(X)
-        if isinstance(probabilities, list):
-            return [np.log(output) for output in probabilities]
-        return np.log(probabilities)
+        with np.errstate(divide="ignore"):
+            if isinstance(probabilities, list):
+                return [np.log(output) for output in probabilities]
+            return np.log(probabilities)
 
     def _validate_multioutput_prediction_input(self, X):
         check_is_fitted(self, "_forest")
