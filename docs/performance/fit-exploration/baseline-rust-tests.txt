@@ -1,0 +1,119 @@
+   Compiling target-lexicon v0.13.5
+   Compiling autocfg v1.5.1
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.26
+   Compiling quote v1.0.47
+   Compiling libc v0.2.189
+   Compiling heck v0.5.0
+   Compiling rawpointer v0.2.1
+   Compiling once_cell v1.21.4
+   Compiling rustc-hash v2.1.3
+   Compiling xrf v1.0.0 (/Users/jesus/Documents/Code/bankai-fit-evidence/crates/xrf)
+   Compiling num-traits v0.2.19
+   Compiling matrixmultiply v0.3.11
+   Compiling syn v2.0.119
+   Compiling pyo3-build-config v0.29.2
+   Compiling pyo3-ffi v0.29.2
+   Compiling pyo3 v0.29.2
+   Compiling numpy v0.29.0
+   Compiling num-integer v0.1.47
+   Compiling num-complex v0.4.6
+   Compiling ndarray v0.17.2
+   Compiling pyo3-macros-backend v0.29.2
+   Compiling pyo3-macros v0.29.2
+   Compiling bankai-random-forest v0.1.0-alpha.5 (/Users/jesus/Documents/Code/bankai-fit-evidence)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.89s
+     Running unittests src/lib.rs (target/debug/deps/bankai_random_forest-bd912c16a4f226f6)
+
+running 28 tests
+test dense::histogram_optimization_tests::direct_binning_accessor_rejects_zero_rows_before_sampling ... ok
+test dense::histogram_optimization_tests::csr_validation_rejects_shape_overflow_duplicate_indices_and_infinity ... ok
+test dense::histogram_optimization_tests::binning_strategy_parser_rejects_unknown_values ... ok
+test dense::histogram_optimization_tests::csr_prediction_uses_implicit_zeros_and_routes_nan_consistently ... ok
+test dense::histogram_optimization_tests::direct_histogram_accessor_rejects_infinite_values ... ok
+test dense::histogram_optimization_tests::constant_features_are_excluded_from_histogram_split_sampling ... ok
+test dense::histogram_optimization_tests::bootstrap_balancing_weights_each_tree_from_its_bag_without_copying_features ... ok
+test dense::histogram_optimization_tests::child_histogram_subtraction_matches_direct_histogram ... ok
+test dense::histogram_optimization_tests::child_caches_preserve_bootstrap_counts_in_both_size_orders ... ok
+test dense::histogram_optimization_tests::finite_and_nan_training_split_iterators_route_rows ... ok
+test dense::histogram_optimization_tests::histogram_bins_use_compact_storage ... ok
+test dense::histogram_optimization_tests::parallel_sparse_histogram_edges_match_serial ... ok
+test dense::histogram_optimization_tests::exact_and_histogram_forests_fit_predict_in_parallel_and_prune ... ok
+test dense::histogram_optimization_tests::training_rejects_weight_sums_that_overflow_in_dense_csr_and_accessor_paths ... ok
+test dense::histogram_optimization_tests::parallel_histogram_preprocessing_matches_serial ... ok
+test dense::histogram_optimization_tests::sampled_binning_is_deterministic_and_produces_ordered_edges ... ok
+test dense::histogram_optimization_tests::multiselect_handles_duplicate_values_without_duplicate_cuts ... ok
+test dense::histogram_optimization_tests::serial_and_parallel_forests_match_predictions_oob_votes_and_importance ... ok
+test tests::canonical_row_order_handles_zero_features_and_rejects_label_length_mismatch ... ok
+test tests::canonical_row_order_refines_feature_ties_then_labels_and_places_nan_last ... ok
+test tests::dense_conversion_respects_requested_row_order_and_rejects_infinity ... ok
+test tests::matrix_data_builds_dense_and_sparse_prediction_inputs ... ok
+test tests::fitted_native_forest_reports_importance_oob_and_shap_tree_arrays ... ok
+test tests::numpy_float_order_matches_nan_and_signed_zero_contract ... ok
+test tests::native_tree_shap_is_additive_for_exact_and_binned_trees_with_missing_values ... ok
+test dense::histogram_optimization_tests::multiselect_matches_full_sort_for_unique_values ... ok
+test dense::histogram_optimization_tests::direct_histogram_accessor_matches_owned_matrix_binning ... ok
+test dense::histogram_optimization_tests::parallel_child_histogram_matches_serial ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/bin/bankai-xrf-cli.rs (target/debug/deps/bankai_xrf_cli-bf08f895f46d9edd)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/test_cli.rs (target/debug/deps/test_cli-f9884abedbc74118)
+
+running 5 tests
+test cli_exports_split_importances ... ok
+test cli_exports_predictions_for_comparative_benchmarks ... ok
+test cli_exports_gain_importances ... ok
+test cli_emits_csv_benchmark_measurement ... ok
+test cli_exports_native_permutation_importances ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+
+     Running unittests src/lib.rs (target/debug/deps/xrf-592c5cdf847e91b2)
+
+running 25 tests
+test fair_best::tests::fair_best_basic ... ok
+test forest::importance_aggregator::tests::merges ... ok
+test forest::importance_aggregator::tests::add_zeroes ... ok
+test forest::importance_aggregator::tests::raw_state_round_trips_exactly ... ok
+test error::tests::errors_display_stable_actionable_messages ... ok
+test forest::importance_aggregator::tests::merging_empty_aggregators_preserves_the_empty_state ... ok
+test forest::importance_aggregator::tests::merging_into_empty_copies_state_and_merging_empty_is_a_noop ... ok
+test forest::importance_aggregator::tests::works ... ok
+test forest::tests::empty_walk_restores_an_empty_forest ... ok
+test forest::tree::tests::best_first_growth_obeys_the_leaf_budget_and_round_trips ... ok
+test forest::tree::tests::growth_stops_for_pure_targets_depth_limits_and_no_split_candidates ... ok
+test forest::tree::tests::ident ... ok
+test forest::tests::saved_tree_and_optional_statistics_flags_are_independent ... ok
+test forest::tree::tests::tree_restoration_rejects_incomplete_branch_walks ... ok
+test mask::tests::bootstrap_masks_partition_rows_and_keep_the_requested_bag_size ... ok
+test mask::tests::permutation_preserves_duplicate_indices_and_handles_short_masks ... ok
+test mask::tests::mask_cache_reuses_released_capacity ... ok
+test mask::tests::split_operations_clear_reused_masks_and_keep_parallel_rows_aligned ... ok
+test mockups::simple_cls::tests::subset_objects_preserves_requested_order_and_duplicate_rows ... ok
+test forest::tests::walk_round_trip_preserves_predictions_and_tree_count ... ok
+test rng::tests::basic ... ok
+test rng::tests::reproducible ... ok
+test forest::importance::tests::imp ... ok
+test fair_best::tests::fair_best_fairness ... ok
+test tests::iris ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+   Doc-tests bankai_random_forest
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests xrf
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

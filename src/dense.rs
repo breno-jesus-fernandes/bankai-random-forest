@@ -1701,6 +1701,22 @@ fn best_split_histogram(
     lower_bound: f64,
     upper_bound: f64,
 ) -> Option<(f64, bool, f64)> {
+    if input.n_classes == 2 {
+        best_split_histogram_classes::<2>(input, target, histogram, monotonic_constraint, lower_bound, upper_bound)
+    } else {
+        best_split_histogram_classes::<0>(input, target, histogram, monotonic_constraint, lower_bound, upper_bound)
+    }
+}
+
+fn best_split_histogram_classes<const CLASSES: usize>(
+    input: &DenseInput,
+    target: &DenseDecisionSlice,
+    histogram: &FeatureHistogram<'_>,
+    monotonic_constraint: i8,
+    lower_bound: f64,
+    upper_bound: f64,
+) -> Option<(f64, bool, f64)> {
+    let classes = if CLASSES == 0 { input.n_classes } else { CLASSES };
     let bin_count = histogram.sample_counts.len();
     if bin_count < 2 {
         return None;
@@ -1708,25 +1724,32 @@ fn best_split_histogram(
 
     let total_weight = target.total_weight;
     let parent_impurity = impurity(input.criterion, &target.class_weights, total_weight);
-    let mut left = vec![0.0; input.n_classes];
-    let mut right = target.class_weights.clone();
+    // Binary splits need no heap allocation for their class accumulators.
+    // Keep the generic path for arbitrary class counts and identical arithmetic.
+    let mut left_stack = [0.0; CLASSES];
+    let mut right_stack = [0.0; CLASSES];
+    let mut left_heap = if CLASSES == 0 { vec![0.0; classes] } else { Vec::new() };
+    let mut right_heap = if CLASSES == 0 { vec![0.0; classes] } else { Vec::new() };
+    let left: &mut [f64] = if CLASSES == 0 { &mut left_heap } else { &mut left_stack };
+    let right: &mut [f64] = if CLASSES == 0 { &mut right_heap } else { &mut right_stack };
+    right.copy_from_slice(&target.class_weights);
     let mut left_weight = 0.0;
     let mut left_count = 0;
     let missing_bin = if input.has_missing_values { bin_count - 1 } else { bin_count };
-    let missing_classes = input.has_missing_values.then(|| (0..input.n_classes).map(|class| histogram.class_weights[missing_bin * input.n_classes + class]).collect::<Vec<_>>());
+    let missing_classes = input.has_missing_values.then(|| (0..classes).map(|class| histogram.class_weights[missing_bin * classes + class]).collect::<Vec<_>>());
     let missing_count = if input.has_missing_values { histogram.sample_counts[missing_bin] } else { 0 };
     if let Some(missing_classes) = &missing_classes {
-        for class in 0..input.n_classes { right[class] -= missing_classes[class]; }
+        for class in 0..classes { right[class] -= missing_classes[class]; }
     }
     let total_count = histogram.sample_counts[..missing_bin].iter().sum::<usize>();
     let mut best: Option<(f64, bool, f64)> = None;
 
-    let mut candidate_left = if missing_count > 0 { vec![0.0; input.n_classes] } else { Vec::new() };
-    let mut candidate_right = if missing_count > 0 { vec![0.0; input.n_classes] } else { Vec::new() };
+    let mut candidate_left = if missing_count > 0 { vec![0.0; classes] } else { Vec::new() };
+    let mut candidate_right = if missing_count > 0 { vec![0.0; classes] } else { Vec::new() };
     let split_bin_end = if input.has_missing_values { missing_bin.saturating_sub(1) } else { bin_count.saturating_sub(1) };
     for bin in 0..split_bin_end {
-        for class in 0..input.n_classes {
-            let weight = histogram.class_weights[bin * input.n_classes + class];
+        for class in 0..classes {
+            let weight = histogram.class_weights[bin * classes + class];
             left[class] += weight;
             right[class] -= weight;
             left_weight += weight;
@@ -1758,10 +1781,10 @@ fn best_split_histogram(
             candidate_right.copy_from_slice(&right);
             let (lcount, rcount, lw) = if missing_left {
                 let missing_classes = missing_classes.as_ref().unwrap();
-                for class in 0..input.n_classes { candidate_left[class] += missing_classes[class]; }
+                for class in 0..classes { candidate_left[class] += missing_classes[class]; }
                 (left_count + missing_count, total_count - left_count, left_weight + missing_classes.iter().sum::<f64>())
             } else {
-                for class in 0..input.n_classes { candidate_right[class] += missing_classes.as_ref().unwrap()[class]; }
+                for class in 0..classes { candidate_right[class] += missing_classes.as_ref().unwrap()[class]; }
                 (left_count, total_count - left_count + missing_count, left_weight)
             };
             let lc = &candidate_left;

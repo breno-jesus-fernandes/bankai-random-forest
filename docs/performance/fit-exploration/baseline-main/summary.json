@@ -1,0 +1,9 @@
+{
+  "baseline": {
+    "median_seconds": 10.052825145496172,
+    "min_seconds": 8.716548458003672,
+    "max_seconds": 11.389101832988672,
+    "std_seconds": 1.3362766874925,
+    "median_peak_rss": 1203609600.0
+  }
+}

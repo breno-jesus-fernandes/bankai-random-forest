@@ -1,0 +1,76 @@
+diff --git a/src/dense.rs b/src/dense.rs
+index 6dca567..02efdf0 100644
+--- a/src/dense.rs
++++ b/src/dense.rs
+@@ -1065,6 +1065,7 @@ where
+         .then(|| deterministic_sample_rows(rows, sample_size));
+     let sampled_rows = sampled_rows.as_deref();
+     let workers = preprocessing_threads.max(1).min(columns);
++    let phase = std::time::Instant::now();
+     let edges_by_feature: Vec<Vec<f64>> = if workers == 1 {
+         (0..columns)
+             .map(|feature| {
+@@ -1107,6 +1108,8 @@ where
+                 .collect()
+         })
+     };
++    eprintln!("PROFILE bin_edges {}", phase.elapsed().as_secs_f64());
++    let phase = std::time::Instant::now();
+     let (binned, has_missing_values, has_infinite_values) = apply_histogram_accessor_parallel(
+         rows,
+         columns,
+@@ -1114,6 +1117,7 @@ where
+         preprocessing_threads,
+         value_at,
+     );
++    eprintln!("PROFILE apply_bins {}", phase.elapsed().as_secs_f64());
+     if has_infinite_values {
+         return Err("X must not contain infinite values".into());
+     }
+diff --git a/src/lib.rs b/src/lib.rs
+index 5b283c1..2f63de2 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -94,6 +94,7 @@ impl NativeForest {
+             ));
+         }
+ 
++        let phase = std::time::Instant::now();
+         let raw_labels: Vec<usize> = y
+             .as_array()
+             .iter()
+@@ -104,6 +105,8 @@ impl NativeForest {
+             })
+             .collect::<PyResult<_>>()?;
+         let dense_order = canonical_dense_row_order(x, y.as_array())?;
++        eprintln!("PROFILE canonical_labels {}", phase.elapsed().as_secs_f64());
++        let phase = std::time::Instant::now();
+         let direct_f32 = if max_bins.is_some() {
+             x.extract::<PyReadonlyArray2<'_, f32>>().ok()
+         } else {
+@@ -167,6 +170,8 @@ impl NativeForest {
+             "entropy" | "log_loss" => Criterion::Entropy,
+             _ => return Err(PyValueError::new_err("unsupported criterion")),
+         };
++        eprintln!("PROFILE native_conversion {}", phase.elapsed().as_secs_f64());
++        let phase = std::time::Instant::now();
+         let input = if let Some(array) = direct_f32 {
+             let view = array.as_array();
+             DenseInput::training_binned_with_accessor(
+@@ -284,6 +289,8 @@ impl NativeForest {
+             .with_ccp_alpha(ccp_alpha)
+             .with_histogram_threads(histogram_threads);
+ 
++        eprintln!("PROFILE preprocessing {}", phase.elapsed().as_secs_f64());
++        let phase = std::time::Instant::now();
+         self.forest = Some(if tree_threads == 1 {
+             Forest::new_with_settings(
+                 &input,
+@@ -314,6 +321,7 @@ impl NativeForest {
+                 max_samples,
+             )
+         });
++        eprintln!("PROFILE trees {}", phase.elapsed().as_secs_f64());
+         self.histogram_edges = input.bin_edges().map(|edges| edges.to_vec());
+         self.training_order = row_order;
+         self.n_classes = n_classes;

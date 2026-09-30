@@ -1,0 +1,54 @@
+{
+  "rows": 100000,
+  "features": 500,
+  "training_rows": 80000,
+  "fit_seconds": 8.867282582999906,
+  "fit_peak_rss": 1376731136,
+  "rss_before_fit": 374489088,
+  "process_peak_rss": 1631846400,
+  "metrics": {
+    "accuracy": 0.88735,
+    "precision": 0.8948555031768806,
+    "recall": 0.8767948589215785,
+    "f1": 0.8857331237003601
+  },
+  "conversion_seconds": 2.1249870769679546e-06,
+  "extension": {
+    "path": "/Users/jesus/Documents/Code/bankai-fit-evidence/python/bankai_random_forest/_core.abi3.so",
+    "sha256": "a9bffff49b6c39e7caeb1e8435563eab20366d12a9d98c38cce91b1ddb8dbfa5"
+  },
+  "prediction_sha256": "08f131d70d7e422a005c5d5c19a148abd35865f4842d340c0648fcac7e2f4f05",
+  "params": {
+    "n_estimators": 40,
+    "max_depth": 20,
+    "max_leaf_nodes": 511,
+    "min_samples_leaf": 5,
+    "max_features": null,
+    "max_samples": 0.8,
+    "random_state": 42,
+    "n_jobs": 8,
+    "max_bins": 63,
+    "importance_type": "gain"
+  },
+  "library": "bankai",
+  "layout": "C",
+  "scenario": "main",
+  "dataset": {
+    "x.npy": "c977c297d5e441b7bc325e61e0cd002645dd591c378d4d330aa187522096eac7",
+    "y.npy": "4408e379589dc85f6b149a3a895aa69114e1ced7b67bebe2923051610025b3b9"
+  },
+  "data_seed": 1729,
+  "model_seed": 42,
+  "commit": "3b2f966247b1420500ec2c1fbbf3a9d43db482cc",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "cpus": 8,
+  "python": "3.11.11",
+  "packages": {
+    "numpy": "2.4.6",
+    "pandas": "3.0.6",
+    "scikit-learn": "1.9.1",
+    "lightgbm": "4.7.0",
+    "psutil": "7.2.2"
+  }
+}

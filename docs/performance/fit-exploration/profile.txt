@@ -1,0 +1,64 @@
+PROFILE canonical_labels 0.007299166
+PROFILE native_conversion 0.000136084
+PROFILE bin_edges 0.274772125
+PROFILE apply_bins 0.092335458
+PROFILE preprocessing 0.367451917
+PROFILE trees 8.470560208
+         2473770 function calls (2426623 primitive calls) in 11.607 seconds
+
+   Ordered by: cumulative time
+   List reduced from 5944 to 50 due to restriction <50>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000   11.609   11.609 /Users/jesus/Documents/Code/bankai-fit-evidence/benchmarks/run_fit_exploration.py:158(main)
+        1    0.001    0.001   11.607   11.607 /Users/jesus/Documents/Code/bankai-fit-evidence/benchmarks/run_fit_exploration.py:41(worker)
+        1    0.003    0.003    8.867    8.867 /Users/jesus/Documents/Code/bankai-fit-evidence/python/bankai_random_forest/estimator.py:167(fit)
+        1    8.847    8.847    8.847    8.847 {method 'fit' of 'builtins.NativeForest' objects}
+   1514/6    0.009    0.000    2.402    0.400 <frozen importlib._bootstrap>:1165(_find_and_load)
+   1473/6    0.005    0.000    2.402    0.400 <frozen importlib._bootstrap>:1120(_find_and_load_unlocked)
+   1434/7    0.004    0.000    2.401    0.343 <frozen importlib._bootstrap>:666(_load_unlocked)
+   1218/7    0.002    0.000    2.401    0.343 <frozen importlib._bootstrap_external>:934(exec_module)
+  3459/13    0.001    0.000    2.398    0.184 <frozen importlib._bootstrap>:233(_call_with_frames_removed)
+   1554/7    0.022    0.000    2.397    0.342 {built-in method builtins.exec}
+   749/16    0.001    0.000    2.314    0.145 {built-in method builtins.__import__}
+        1    0.000    0.000    1.547    1.547 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/sklearn/__init__.py:1(<module>)
+        1    0.000    0.000    1.535    1.535 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/sklearn/base.py:1(<module>)
+        1    0.000    0.000    1.530    1.530 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/sklearn/utils/__init__.py:1(<module>)
+        1    0.000    0.000    1.512    1.512 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/sklearn/utils/_chunking.py:1(<module>)
+        1    0.000    0.000    1.512    1.512 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/sklearn/utils/_param_validation.py:1(<module>)
+1893/1090    0.002    0.000    1.402    0.001 <frozen importlib._bootstrap>:1207(_handle_fromlist)
+        1    0.000    0.000    1.321    1.321 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/sklearn/utils/validation.py:1(<module>)
+        1    0.000    0.000    1.233    1.233 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/sklearn/utils/_array_api.py:1(<module>)
+        1    0.000    0.000    1.141    1.141 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/sklearn/utils/fixes.py:1(<module>)
+1434/1431    0.002    0.000    1.011    0.001 <frozen importlib._bootstrap>:566(module_from_spec)
+      192    0.001    0.000    0.985    0.005 <frozen importlib._bootstrap_external>:1231(create_module)
+      192    0.984    0.005    0.985    0.005 {built-in method _imp.create_dynamic}
+        1    0.000    0.000    0.732    0.732 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/scipy/stats/__init__.py:1(<module>)
+        1    0.000    0.000    0.652    0.652 /Users/jesus/Documents/Code/bankai-fit-evidence/python/bankai_random_forest/__init__.py:1(<module>)
+        1    0.001    0.001    0.507    0.507 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/scipy/stats/_stats_py.py:1(<module>)
+  192/125    0.000    0.000    0.406    0.003 <frozen importlib._bootstrap_external>:1239(exec_module)
+  192/125    0.049    0.000    0.406    0.003 {built-in method _imp.exec_dynamic}
+      625    0.001    0.000    0.388    0.001 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/scipy/_lib/_docscrape.py:579(__init__)
+     1218    0.006    0.000    0.347    0.000 <frozen importlib._bootstrap_external>:1007(get_code)
+      633    0.002    0.000    0.342    0.001 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/scipy/_lib/_docscrape.py:140(__init__)
+      474    0.002    0.000    0.340    0.001 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/scipy/_lib/_array_api.py:840(decorator)
+        1    0.000    0.000    0.311    0.311 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/pandas/__init__.py:1(<module>)
+      633    0.006    0.000    0.257    0.000 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/scipy/_lib/_docscrape.py:388(_parse)
+        1    0.000    0.000    0.246    0.246 /Users/jesus/Documents/Code/bankai-fit-evidence/python/bankai_random_forest/estimator.py:1(<module>)
+        1    0.000    0.000    0.245    0.245 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/sklearn/ensemble/__init__.py:1(<module>)
+     1218    0.002    0.000    0.240    0.000 <frozen importlib._bootstrap_external>:1127(get_data)
+        1    0.000    0.000    0.206    0.206 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/scipy/stats/distributions.py:1(<module>)
+     1235    0.194    0.000    0.194    0.000 {method 'read' of '_io.BufferedReader' objects}
+        1    0.000    0.000    0.186    0.186 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/sklearn/ensemble/_bagging.py:1(<module>)
+        1    0.000    0.000    0.183    0.183 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/sklearn/tree/__init__.py:1(<module>)
+        1    0.000    0.000    0.181    0.181 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/sklearn/tree/_classes.py:1(<module>)
+        1    0.000    0.000    0.178    0.178 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/scipy/sparse/__init__.py:1(<module>)
+        1    0.000    0.000    0.158    0.158 /Users/jesus/Documents/Code/bankai-fit-evidence/python/bankai_random_forest/estimator.py:417(predict)
+        1    0.000    0.000    0.158    0.158 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/pandas/core/api.py:1(<module>)
+25563/24730    0.006    0.000    0.158    0.000 {built-in method builtins.hasattr}
+2247/2232    0.021    0.000    0.155    0.000 {built-in method builtins.__build_class__}
+        1    0.000    0.000    0.146    0.146 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/sklearn/neighbors/__init__.py:1(<module>)
+        1    0.133    0.133    0.133    0.133 {method 'predict' of 'builtins.NativeForest' objects}
+        1    0.000    0.000    0.129    0.129 /Users/jesus/Documents/Code/bankai-fit-evidence/.venv/lib/python3.11/site-packages/scipy/optimize/__init__.py:1(<module>)
+
+
