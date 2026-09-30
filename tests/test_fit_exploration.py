@@ -24,6 +24,25 @@ def test_unpaired_results_have_no_speedup():
     assert 'paired' not in result
 
 
+def test_runner_imports_without_unix_resource_module(monkeypatch):
+    import builtins
+
+    native_import = builtins.__import__
+
+    def import_without_resource(name, *args, **kwargs):
+        if name == 'resource':
+            raise ImportError('resource is unavailable')
+        return native_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, '__import__', import_without_resource)
+    portable_spec = importlib.util.spec_from_file_location(
+        'fit_exploration_without_resource', Path(__file__).parents[1] / 'benchmarks/run_fit_exploration.py')
+    portable_runner = importlib.util.module_from_spec(portable_spec)
+    portable_spec.loader.exec_module(portable_runner)
+
+    assert portable_runner.resource is None
+
+
 def test_quality_requires_all_nine_seed_pairs(tmp_path):
     import json
     spec = importlib.util.spec_from_file_location('quality', Path(__file__).parents[1] / 'benchmarks/summarize_fit_quality.py')

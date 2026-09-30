@@ -7,11 +7,15 @@ import json
 import os
 from pathlib import Path
 import platform
-import resource
 import subprocess
 import sys
 import multiprocessing
 import time
+
+try:
+    import resource
+except ImportError:  # Windows does not provide the Unix resource module.
+    resource = None
 
 
 def digest(path):
@@ -124,7 +128,10 @@ def worker(args):
         stop.set()
         sampler.join()
     fit_peak_rss = peak.value
-    process_peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == 'darwin' else 1024)
+    if resource is None:
+        process_peak_rss = None
+    else:
+        process_peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == 'darwin' else 1024)
     pred = model.predict(valid)
     metrics = {name: float(fn(y[split:], pred, **({} if name == 'accuracy' else
                 {'average': 'macro' if args.scenario == 'multiclass' else 'binary', 'zero_division': 0})))
