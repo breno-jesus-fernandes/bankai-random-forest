@@ -10,7 +10,7 @@ import platform
 import resource
 import subprocess
 import sys
-import threading
+import multiprocessing
 import time
 
 
@@ -36,6 +36,15 @@ def dataset(args):
         (root / 'manifest.json').write_text(json.dumps({
             name: digest(root / name) for name in ('x.npy', 'y.npy')}, indent=2))
     return root
+
+
+def monitor_memory(pid, stop, ready, peak):
+    # A separate process samples even while native fit holds the Python GIL.
+    import psutil
+    process = psutil.Process(pid)
+    ready.set()
+    while not stop.wait(.01):
+        peak.value = max(peak.value, process.memory_info().rss)
 
 
 def worker(args):
@@ -96,27 +105,33 @@ def worker(args):
                                importance_type='gain', random_state=args.model_seed,
                                n_jobs=args.jobs, verbosity=-1)
     process = psutil.Process()
-    memory = [process.memory_info().rss]
-    stop = threading.Event()
-    def sample():
-        while not stop.wait(.01):
-            memory.append(process.memory_info().rss)
-    thread = threading.Thread(target=sample, daemon=True)
-    thread.start()
-    start = time.perf_counter()
-    model.fit(train, y[:split])
-    elapsed = time.perf_counter() - start
-    memory.append(process.memory_info().rss)
-    stop.set()
-    thread.join()
+    rss_before_fit = process.memory_info().rss
+    context = multiprocessing.get_context('spawn')
+    stop, ready = context.Event(), context.Event()
+    peak = context.Value('Q', rss_before_fit)
+    sampler = context.Process(target=monitor_memory, args=(os.getpid(), stop, ready, peak))
+    sampler.start()
+    if not ready.wait(30):
+        sampler.terminate()
+        sampler.join()
+        raise RuntimeError('RSS sampler did not start')
+    try:
+        start = time.perf_counter()
+        model.fit(train, y[:split])
+        elapsed = time.perf_counter() - start
+        peak.value = max(peak.value, process.memory_info().rss)
+    finally:
+        stop.set()
+        sampler.join()
+    fit_peak_rss = peak.value
+    process_peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == 'darwin' else 1024)
     pred = model.predict(valid)
     metrics = {name: float(fn(y[split:], pred, **({} if name == 'accuracy' else
                 {'average': 'macro' if args.scenario == 'multiclass' else 'binary', 'zero_division': 0})))
                for name, fn in [('accuracy', accuracy_score), ('precision', precision_score),
                                 ('recall', recall_score), ('f1', f1_score)]}
-    result = dict(rows=len(y), features=x.shape[1], training_rows=split, fit_seconds=elapsed, fit_peak_rss=max(memory), rss_before_fit=memory[0],
-                  process_peak_rss=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss *
-                  (1 if sys.platform == 'darwin' else 1024), metrics=metrics,
+    result = dict(rows=len(y), features=x.shape[1], training_rows=split, fit_seconds=elapsed, fit_peak_rss=fit_peak_rss, rss_before_fit=rss_before_fit,
+                  process_peak_rss=process_peak_rss, metrics=metrics,
                   conversion_seconds=conversion_seconds, fit_plus_conversion_seconds=elapsed + conversion_seconds, extension=extension,
                   prediction_sha256=hashlib.sha256(pred.tobytes()).hexdigest(),
                   probability_sha256=hashlib.sha256(np.asarray(model.predict_proba(valid)).tobytes()).hexdigest(),

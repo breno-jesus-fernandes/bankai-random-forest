@@ -63,3 +63,11 @@ individually. Reorganizing preprocessing alone cannot plausibly meet 5% overall
 on this observed profile, so prioritization moves to tree split loops.
 
 H1 initial suites: Python 171 passed, Rust 58 passed, no tests relaxed.
+
+H1 screening: median baseline 8.501 s, candidate 7.378 s (13.2% reduction),
+paired speedup 1.152. Screening memory sampling used a Python thread which can
+be blocked by the native GIL: its fit RSS is **not sufficient for acceptance**.
+Before confirmation, replaced it with a separate sampling process and capture
+OS high-water RSS immediately after fit (before scoring). Final memory evidence
+uses only this corrected executor. This is a measurement correction, not a model
+change. H1 remains pending confirmation.
