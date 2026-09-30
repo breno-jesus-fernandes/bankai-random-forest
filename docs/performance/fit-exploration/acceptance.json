@@ -1,0 +1,459 @@
+{
+  "main": {
+    "baseline": {
+      "median_seconds": 7.030409375001909,
+      "min_seconds": 6.739095625001937,
+      "max_seconds": 7.916160749999108,
+      "std_seconds": 0.41559196486151795,
+      "median_peak_rss": 1989459968.0
+    },
+    "candidate": {
+      "median_seconds": 5.830723916995339,
+      "min_seconds": 5.514381625020178,
+      "max_seconds": 5.955794707988389,
+      "std_seconds": 0.1807041040251317,
+      "median_peak_rss": 2070953984.0
+    },
+    "paired": {
+      "median_speedup": 1.2245327397869004,
+      "ratio_ci95": [
+        1.1853739151807778,
+        1.3291527223699162
+      ],
+      "median_seconds_saved": 1.2567517079878598,
+      "note": "Percentile bootstrap of paired median ratios; screening is not confirmation."
+    },
+    "complete": true,
+    "measured_counts": {
+      "baseline": 5,
+      "candidate": 5
+    },
+    "median_reduction": 0.1706423330442609,
+    "max_fit_rss": {
+      "baseline": 2187476992,
+      "candidate": 2205810688
+    },
+    "memory_passed": true,
+    "timing_passed": true,
+    "passed": true
+  },
+  "controls": {
+    "jobs-1": {
+      "baseline": {
+        "median_seconds": 23.208698208996793,
+        "min_seconds": 23.078403833991615,
+        "max_seconds": 24.278737457992975,
+        "std_seconds": 0.4369549123211164,
+        "median_peak_rss": 862601216.0
+      },
+      "candidate": {
+        "median_seconds": 19.863623709010426,
+        "min_seconds": 19.83768749999581,
+        "max_seconds": 22.978592667001067,
+        "std_seconds": 1.213146370584949,
+        "median_peak_rss": 890945536.0
+      },
+      "paired": {
+        "median_speedup": 1.162791676903399,
+        "ratio_ci95": [
+          1.0565806970789386,
+          1.169475678150693
+        ],
+        "median_seconds_saved": 3.2309932509961072,
+        "note": "Percentile bootstrap of paired median ratios; screening is not confirmation."
+      },
+      "complete": true,
+      "measured_counts": {
+        "baseline": 5,
+        "candidate": 5
+      },
+      "median_reduction": 0.1441302079876956,
+      "max_fit_rss": {
+        "baseline": 890126336,
+        "candidate": 895762432
+      },
+      "memory_passed": true,
+      "timing_passed": true,
+      "passed": true
+    },
+    "jobs--1": {
+      "baseline": {
+        "median_seconds": 7.983285166992573,
+        "min_seconds": 7.817545625002822,
+        "max_seconds": 8.399618750001537,
+        "std_seconds": 0.24907991829632284,
+        "median_peak_rss": 2056830976.0
+      },
+      "candidate": {
+        "median_seconds": 6.690811875014333,
+        "min_seconds": 6.348963791999267,
+        "max_seconds": 8.918329958018148,
+        "std_seconds": 0.9555185680197691,
+        "median_peak_rss": 2078883840.0
+      },
+      "paired": {
+        "median_speedup": 1.1684001539777376,
+        "ratio_ci95": [
+          0.9418376298636207,
+          1.2514140476728408
+        ],
+        "median_seconds_saved": 1.1476591249811463,
+        "note": "Percentile bootstrap of paired median ratios; screening is not confirmation."
+      },
+      "complete": true,
+      "measured_counts": {
+        "baseline": 5,
+        "candidate": 5
+      },
+      "median_reduction": 0.16189742254505168,
+      "max_fit_rss": {
+        "baseline": 2231599104,
+        "candidate": 2248146944
+      },
+      "memory_passed": true,
+      "timing_passed": true,
+      "passed": true
+    },
+    "exact": {
+      "baseline": {
+        "median_seconds": 0.2206068750238046,
+        "min_seconds": 0.20112225000048056,
+        "max_seconds": 0.26149887501378544,
+        "std_seconds": 0.020534380543561197,
+        "median_peak_rss": 175128576.0
+      },
+      "candidate": {
+        "median_seconds": 0.2152767500083428,
+        "min_seconds": 0.20221704099094495,
+        "max_seconds": 0.3029443330015056,
+        "std_seconds": 0.02685755548847379,
+        "median_peak_rss": 175276032.0
+      },
+      "paired": {
+        "median_speedup": 0.9801535493632093,
+        "ratio_ci95": [
+          0.9351059619285667,
+          1.022139624895375
+        ],
+        "median_seconds_saved": -0.004093041003216058,
+        "note": "Percentile bootstrap of paired median ratios; screening is not confirmation."
+      },
+      "complete": true,
+      "measured_counts": {
+        "baseline": 15,
+        "candidate": 15
+      },
+      "median_reduction": 0.02416119178011411,
+      "max_fit_rss": {
+        "baseline": 175538176,
+        "candidate": 175669248
+      },
+      "memory_passed": true,
+      "timing_passed": true,
+      "passed": true
+    },
+    "float64": {
+      "baseline": {
+        "median_seconds": 0.07209558400791138,
+        "min_seconds": 0.061126540997065604,
+        "max_seconds": 0.08657058299286291,
+        "std_seconds": 0.00972464165204533,
+        "median_peak_rss": 192266240.0
+      },
+      "candidate": {
+        "median_seconds": 0.044276875007199124,
+        "min_seconds": 0.042713417002232745,
+        "max_seconds": 0.049203834001673386,
+        "std_seconds": 0.002326707731997446,
+        "median_peak_rss": 192495616.0
+      },
+      "paired": {
+        "median_speedup": 1.6742048200871915,
+        "ratio_ci95": [
+          1.3805522857502215,
+          1.9822069722507323
+        ],
+        "median_seconds_saved": 0.02903300101752393,
+        "note": "Percentile bootstrap of paired median ratios; screening is not confirmation."
+      },
+      "complete": true,
+      "measured_counts": {
+        "baseline": 5,
+        "candidate": 5
+      },
+      "median_reduction": 0.3858587094274676,
+      "max_fit_rss": {
+        "baseline": 193904640,
+        "candidate": 193822720
+      },
+      "memory_passed": true,
+      "timing_passed": true,
+      "passed": true
+    },
+    "permutation": {
+      "baseline": {
+        "median_seconds": 0.07775583400507458,
+        "min_seconds": 0.07582562498282641,
+        "max_seconds": 0.08051749999867752,
+        "std_seconds": 0.0018591018593786003,
+        "median_peak_rss": 191070208.0
+      },
+      "candidate": {
+        "median_seconds": 0.04997575000743382,
+        "min_seconds": 0.04801149998093024,
+        "max_seconds": 0.05468741699587554,
+        "std_seconds": 0.0023736138383514565,
+        "median_peak_rss": 192528384.0
+      },
+      "paired": {
+        "median_speedup": 1.54967880406208,
+        "ratio_ci95": [
+          1.463439935408903,
+          1.5942907847182795
+        ],
+        "median_seconds_saved": 0.02778008399764076,
+        "note": "Percentile bootstrap of paired median ratios; screening is not confirmation."
+      },
+      "complete": true,
+      "measured_counts": {
+        "baseline": 5,
+        "candidate": 5
+      },
+      "median_reduction": 0.35727330756722064,
+      "max_fit_rss": {
+        "baseline": 193363968,
+        "candidate": 193363968
+      },
+      "memory_passed": true,
+      "timing_passed": true,
+      "passed": true
+    },
+    "multiclass": {
+      "baseline": {
+        "median_seconds": 0.13937474999693222,
+        "min_seconds": 0.13400595801067539,
+        "max_seconds": 0.14782766602002084,
+        "std_seconds": 0.005078499943569335,
+        "median_peak_rss": 229081088.0
+      },
+      "candidate": {
+        "median_seconds": 0.13074554200284183,
+        "min_seconds": 0.1281170840084087,
+        "max_seconds": 0.14412199999787845,
+        "std_seconds": 0.005729539585859113,
+        "median_peak_rss": 227377152.0
+      },
+      "paired": {
+        "median_speedup": 1.0660000169941002,
+        "ratio_ci95": [
+          0.9622805122611722,
+          1.1404211826691957
+        ],
+        "median_seconds_saved": 0.008629207994090393,
+        "note": "Percentile bootstrap of paired median ratios; screening is not confirmation."
+      },
+      "complete": true,
+      "measured_counts": {
+        "baseline": 5,
+        "candidate": 5
+      },
+      "median_reduction": 0.061913711014945916,
+      "max_fit_rss": {
+        "baseline": 229834752,
+        "candidate": 228179968
+      },
+      "memory_passed": true,
+      "timing_passed": true,
+      "passed": true
+    },
+    "sparse": {
+      "baseline": {
+        "median_seconds": 0.11763291698298417,
+        "min_seconds": 0.11620325001422316,
+        "max_seconds": 0.16868733300361782,
+        "std_seconds": 0.02063392478385774,
+        "median_peak_rss": 194936832.0
+      },
+      "candidate": {
+        "median_seconds": 0.09419966698624194,
+        "min_seconds": 0.0929321669973433,
+        "max_seconds": 0.09538166699348949,
+        "std_seconds": 0.000904183010116233,
+        "median_peak_rss": 195969024.0
+      },
+      "paired": {
+        "median_speedup": 1.2402843741990317,
+        "ratio_ci95": [
+          1.218297537430908,
+          1.815166249254041
+        ],
+        "median_seconds_saved": 0.022752126009436324,
+        "note": "Percentile bootstrap of paired median ratios; screening is not confirmation."
+      },
+      "complete": true,
+      "measured_counts": {
+        "baseline": 5,
+        "candidate": 5
+      },
+      "median_reduction": 0.19920657072655856,
+      "max_fit_rss": {
+        "baseline": 197165056,
+        "candidate": 197541888
+      },
+      "memory_passed": true,
+      "timing_passed": true,
+      "passed": true
+    },
+    "nan": {
+      "baseline": {
+        "median_seconds": 0.06973483398905955,
+        "min_seconds": 0.06884504199842922,
+        "max_seconds": 0.08476837500347756,
+        "std_seconds": 0.006063027547276486,
+        "median_peak_rss": 192086016.0
+      },
+      "candidate": {
+        "median_seconds": 0.05032149999169633,
+        "min_seconds": 0.049724417011020705,
+        "max_seconds": 0.0516654159873724,
+        "std_seconds": 0.0008291708154847573,
+        "median_peak_rss": 192151552.0
+      },
+      "paired": {
+        "median_speedup": 1.3986385187850354,
+        "ratio_ci95": [
+          1.3325169396730632,
+          1.6845359342918116
+        ],
+        "median_seconds_saved": 0.01987575099337846,
+        "note": "Percentile bootstrap of paired median ratios; screening is not confirmation."
+      },
+      "complete": true,
+      "measured_counts": {
+        "baseline": 5,
+        "candidate": 5
+      },
+      "median_reduction": 0.27838790009034675,
+      "max_fit_rss": {
+        "baseline": 192774144,
+        "candidate": 194543616
+      },
+      "memory_passed": true,
+      "timing_passed": true,
+      "passed": true
+    },
+    "few": {
+      "baseline": {
+        "median_seconds": 0.013029416993958876,
+        "min_seconds": 0.0113791250041686,
+        "max_seconds": 0.013471957994624972,
+        "std_seconds": 0.000736013616269288,
+        "median_peak_rss": 173408256.0
+      },
+      "candidate": {
+        "median_seconds": 0.009190000011585653,
+        "min_seconds": 0.00895966700045392,
+        "max_seconds": 0.009567209024680778,
+        "std_seconds": 0.00020564542152942336,
+        "median_peak_rss": 173572096.0
+      },
+      "paired": {
+        "median_speedup": 1.4355583754981545,
+        "ratio_ci95": [
+          1.2382072894258063,
+          1.4561572112491732
+        ],
+        "median_seconds_saved": 0.0039024580037221313,
+        "note": "Percentile bootstrap of paired median ratios; screening is not confirmation."
+      },
+      "complete": true,
+      "measured_counts": {
+        "baseline": 5,
+        "candidate": 5
+      },
+      "median_reduction": 0.29467296841856994,
+      "max_fit_rss": {
+        "baseline": 173539328,
+        "candidate": 173670400
+      },
+      "memory_passed": true,
+      "timing_passed": true,
+      "passed": true
+    }
+  },
+  "quality": {
+    "complete": true,
+    "pairs": 9,
+    "metrics": {
+      "accuracy": {
+        "deltas": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "mean_delta": 0.0,
+        "lower_one_sided_95": 0.0,
+        "passed": true
+      },
+      "precision": {
+        "deltas": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "mean_delta": 0.0,
+        "lower_one_sided_95": 0.0,
+        "passed": true
+      },
+      "recall": {
+        "deltas": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "mean_delta": 0.0,
+        "lower_one_sided_95": 0.0,
+        "passed": true
+      },
+      "f1": {
+        "deltas": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "mean_delta": 0.0,
+        "lower_one_sided_95": 0.0,
+        "passed": true
+      }
+    },
+    "identical_predictions": true,
+    "passed": true,
+    "method": "One-sided paired Student t interval across nine seed combinations; shared dataset seeds imply dependence, so interpret cautiously."
+  },
+  "numeric_gates_passed": true,
+  "note": "Suite and compatibility results must also pass; this script evaluates numeric gates only."
+}

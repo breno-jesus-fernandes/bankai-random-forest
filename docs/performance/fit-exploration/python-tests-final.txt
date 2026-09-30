@@ -1,0 +1,24 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/jesus/Documents/Code/bankai-fit-evidence
+configfile: pyproject.toml
+testpaths: tests
+collected 174 items
+
+tests/test_benchmark_runner.py ..                                        [  1%]
+tests/test_best_first_growth.py ........                                 [  5%]
+tests/test_estimator_api.py .                                            [  6%]
+tests/test_estimator_fit.py ............................................ [ 31%]
+..........................................                               [ 55%]
+tests/test_fit_exploration.py .....                                      [ 58%]
+tests/test_import.py .                                                   [ 59%]
+tests/test_joblib_serialization.py ...............                       [ 67%]
+tests/test_multioutput.py .......                                        [ 71%]
+tests/test_native_core.py ..                                             [ 72%]
+tests/test_shap_compatibility.py .                                       [ 73%]
+tests/test_sklearn_checks.py .                                           [ 74%]
+tests/test_sklearn_compatibility_audit.py .............................. [ 91%]
+...                                                                      [ 93%]
+tests/test_tree_shap_paths.py ............                               [100%]
+
+============================= 174 passed in 9.27s ==============================

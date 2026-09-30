@@ -1,0 +1,7 @@
+Optional dependencies installed identically into both isolated virtual environments
+for the contextual layout campaign only. These packages are not added to
+pyproject.toml or uv.lock.
+
+polars==1.44.2
+polars-runtime-32==1.44.2
+pyarrow==25.0.1

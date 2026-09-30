@@ -1702,12 +1702,25 @@ fn best_split_histogram(
     upper_bound: f64,
 ) -> Option<(f64, bool, f64)> {
     if input.n_classes == 2 {
-        best_split_histogram_classes::<2>(input, target, histogram, monotonic_constraint, lower_bound, upper_bound)
+        best_split_histogram_classes::<2>(
+            input,
+            target,
+            histogram,
+            monotonic_constraint,
+            lower_bound,
+            upper_bound,
+        )
     } else {
-        best_split_histogram_classes::<0>(input, target, histogram, monotonic_constraint, lower_bound, upper_bound)
+        best_split_histogram_classes::<0>(
+            input,
+            target,
+            histogram,
+            monotonic_constraint,
+            lower_bound,
+            upper_bound,
+        )
     }
 }
-
 fn best_split_histogram_classes<const CLASSES: usize>(
     input: &DenseInput,
     target: &DenseDecisionSlice,
@@ -1716,7 +1729,11 @@ fn best_split_histogram_classes<const CLASSES: usize>(
     lower_bound: f64,
     upper_bound: f64,
 ) -> Option<(f64, bool, f64)> {
-    let classes = if CLASSES == 0 { input.n_classes } else { CLASSES };
+    let classes = if CLASSES == 0 {
+        input.n_classes
+    } else {
+        CLASSES
+    };
     let bin_count = histogram.sample_counts.len();
     if bin_count < 2 {
         return None;
@@ -1728,25 +1745,67 @@ fn best_split_histogram_classes<const CLASSES: usize>(
     // Keep the generic path for arbitrary class counts and identical arithmetic.
     let mut left_stack = [0.0; CLASSES];
     let mut right_stack = [0.0; CLASSES];
-    let mut left_heap = if CLASSES == 0 { vec![0.0; classes] } else { Vec::new() };
-    let mut right_heap = if CLASSES == 0 { vec![0.0; classes] } else { Vec::new() };
-    let left: &mut [f64] = if CLASSES == 0 { &mut left_heap } else { &mut left_stack };
-    let right: &mut [f64] = if CLASSES == 0 { &mut right_heap } else { &mut right_stack };
+    let mut left_heap = if CLASSES == 0 {
+        vec![0.0; classes]
+    } else {
+        Vec::new()
+    };
+    let mut right_heap = if CLASSES == 0 {
+        vec![0.0; classes]
+    } else {
+        Vec::new()
+    };
+    let left: &mut [f64] = if CLASSES == 0 {
+        &mut left_heap
+    } else {
+        &mut left_stack
+    };
+    let right: &mut [f64] = if CLASSES == 0 {
+        &mut right_heap
+    } else {
+        &mut right_stack
+    };
     right.copy_from_slice(&target.class_weights);
     let mut left_weight = 0.0;
     let mut left_count = 0;
-    let missing_bin = if input.has_missing_values { bin_count - 1 } else { bin_count };
-    let missing_classes = input.has_missing_values.then(|| (0..classes).map(|class| histogram.class_weights[missing_bin * classes + class]).collect::<Vec<_>>());
-    let missing_count = if input.has_missing_values { histogram.sample_counts[missing_bin] } else { 0 };
+    let missing_bin = if input.has_missing_values {
+        bin_count - 1
+    } else {
+        bin_count
+    };
+    let missing_classes = input.has_missing_values.then(|| {
+        (0..classes)
+            .map(|class| histogram.class_weights[missing_bin * classes + class])
+            .collect::<Vec<_>>()
+    });
+    let missing_count = if input.has_missing_values {
+        histogram.sample_counts[missing_bin]
+    } else {
+        0
+    };
     if let Some(missing_classes) = &missing_classes {
-        for class in 0..classes { right[class] -= missing_classes[class]; }
+        for class in 0..classes {
+            right[class] -= missing_classes[class];
+        }
     }
     let total_count = histogram.sample_counts[..missing_bin].iter().sum::<usize>();
     let mut best: Option<(f64, bool, f64)> = None;
 
-    let mut candidate_left = if missing_count > 0 { vec![0.0; classes] } else { Vec::new() };
-    let mut candidate_right = if missing_count > 0 { vec![0.0; classes] } else { Vec::new() };
-    let split_bin_end = if input.has_missing_values { missing_bin.saturating_sub(1) } else { bin_count.saturating_sub(1) };
+    let mut candidate_left = if missing_count > 0 {
+        vec![0.0; classes]
+    } else {
+        Vec::new()
+    };
+    let mut candidate_right = if missing_count > 0 {
+        vec![0.0; classes]
+    } else {
+        Vec::new()
+    };
+    let split_bin_end = if input.has_missing_values {
+        missing_bin.saturating_sub(1)
+    } else {
+        bin_count.saturating_sub(1)
+    };
     for bin in 0..split_bin_end {
         for class in 0..classes {
             let weight = histogram.class_weights[bin * classes + class];
@@ -1759,55 +1818,100 @@ fn best_split_histogram_classes<const CLASSES: usize>(
         if missing_count == 0 {
             let right_count = total_count - left_count;
             let right_weight = total_weight - left_weight;
-            if left_count < input.min_samples_leaf || right_count < input.min_samples_leaf
-                || left_weight == 0.0 || right_weight == 0.0
-                || left_weight < input.min_leaf_weight || right_weight < input.min_leaf_weight { continue; }
-            if monotonic_constraint != 0 {
-                let lp = left[1] / left_weight; let rp = right[1] / right_weight;
-                if lp < lower_bound || lp > upper_bound || rp < lower_bound || rp > upper_bound
-                    || (lp - rp) * monotonic_constraint as f64 > 0.0 { continue; }
+            if left_count < input.min_samples_leaf
+                || right_count < input.min_samples_leaf
+                || left_weight == 0.0
+                || right_weight == 0.0
+                || left_weight < input.min_leaf_weight
+                || right_weight < input.min_leaf_weight
+            {
+                continue;
             }
-            let child_impurity = (left_weight / total_weight) * impurity(input.criterion, &left, left_weight)
+            if monotonic_constraint != 0 {
+                let lp = left[1] / left_weight;
+                let rp = right[1] / right_weight;
+                if lp < lower_bound
+                    || lp > upper_bound
+                    || rp < lower_bound
+                    || rp > upper_bound
+                    || (lp - rp) * monotonic_constraint as f64 > 0.0
+                {
+                    continue;
+                }
+            }
+            let child_impurity = (left_weight / total_weight)
+                * impurity(input.criterion, &left, left_weight)
                 + (right_weight / total_weight) * impurity(input.criterion, &right, right_weight);
             let gain = parent_impurity - child_impurity;
-            if gain >= input.min_impurity_decrease && best.as_ref().is_none_or(|(_, _, g)| gain > *g) {
+            if gain >= input.min_impurity_decrease
+                && best.as_ref().is_none_or(|(_, _, g)| gain > *g)
+            {
                 best = Some((pivot, left_count <= right_count, gain));
             }
             continue;
         }
         for missing_left in [false, true] {
-            if missing_count == 0 && missing_left != (left_count > total_count - left_count) { continue; }
+            if missing_count == 0 && missing_left != (left_count > total_count - left_count) {
+                continue;
+            }
             candidate_left.copy_from_slice(&left);
             candidate_right.copy_from_slice(&right);
             let (lcount, rcount, lw) = if missing_left {
                 let missing_classes = missing_classes.as_ref().unwrap();
-                for class in 0..classes { candidate_left[class] += missing_classes[class]; }
-                (left_count + missing_count, total_count - left_count, left_weight + missing_classes.iter().sum::<f64>())
+                for class in 0..classes {
+                    candidate_left[class] += missing_classes[class];
+                }
+                (
+                    left_count + missing_count,
+                    total_count - left_count,
+                    left_weight + missing_classes.iter().sum::<f64>(),
+                )
             } else {
-                for class in 0..classes { candidate_right[class] += missing_classes.as_ref().unwrap()[class]; }
-                (left_count, total_count - left_count + missing_count, left_weight)
+                for class in 0..classes {
+                    candidate_right[class] += missing_classes.as_ref().unwrap()[class];
+                }
+                (
+                    left_count,
+                    total_count - left_count + missing_count,
+                    left_weight,
+                )
             };
             let lc = &candidate_left;
             let rc = &candidate_right;
             let rw = total_weight - lw;
-            if lcount < input.min_samples_leaf || rcount < input.min_samples_leaf || lw == 0.0 || rw == 0.0
-                || lw < input.min_leaf_weight || rw < input.min_leaf_weight { continue; }
+            if lcount < input.min_samples_leaf
+                || rcount < input.min_samples_leaf
+                || lw == 0.0
+                || rw == 0.0
+                || lw < input.min_leaf_weight
+                || rw < input.min_leaf_weight
+            {
+                continue;
+            }
             if monotonic_constraint != 0 {
-                let lp = lc[1] / lw; let rp = rc[1] / rw;
-                if lp < lower_bound || lp > upper_bound || rp < lower_bound || rp > upper_bound
-                    || (lp - rp) * monotonic_constraint as f64 > 0.0 { continue; }
+                let lp = lc[1] / lw;
+                let rp = rc[1] / rw;
+                if lp < lower_bound
+                    || lp > upper_bound
+                    || rp < lower_bound
+                    || rp > upper_bound
+                    || (lp - rp) * monotonic_constraint as f64 > 0.0
+                {
+                    continue;
+                }
             }
             let child_impurity = (lw / total_weight) * impurity(input.criterion, &lc, lw)
                 + (rw / total_weight) * impurity(input.criterion, &rc, rw);
             let gain = parent_impurity - child_impurity;
-            if gain >= input.min_impurity_decrease && best.as_ref().is_none_or(|(_, _, g)| gain > *g) {
+            if gain >= input.min_impurity_decrease
+                && best.as_ref().is_none_or(|(_, _, g)| gain > *g)
+            {
                 best = Some((pivot, !missing_left, gain));
             }
         }
     }
     best
 }
-
 pub struct PermutationImportance {
     direct: Vec<Option<usize>>,
     drops: HashMap<usize, isize>,

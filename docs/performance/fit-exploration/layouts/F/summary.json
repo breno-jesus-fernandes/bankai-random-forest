@@ -1,0 +1,25 @@
+{
+  "baseline": {
+    "median_seconds": 7.420028811990051,
+    "min_seconds": 7.305323457985651,
+    "max_seconds": 7.5347341659944504,
+    "std_seconds": 0.11470535400439985,
+    "median_peak_rss": 1934041088.0
+  },
+  "candidate": {
+    "median_seconds": 6.039706270996248,
+    "min_seconds": 5.722163041995373,
+    "max_seconds": 6.357249499997124,
+    "std_seconds": 0.3175432290008757,
+    "median_peak_rss": 1967464448.0
+  },
+  "paired": {
+    "median_speedup": 1.230945435927603,
+    "ratio_ci95": [
+      1.185219199906793,
+      1.2766716719484132
+    ],
+    "median_seconds_saved": 1.3803225409938022,
+    "note": "Percentile bootstrap of paired median ratios; screening is not confirmation."
+  }
+}

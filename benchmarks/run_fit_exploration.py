@@ -142,8 +142,8 @@ def worker(args):
                   commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
                   platform=platform.platform(), machine=platform.machine(), cpus=os.cpu_count(),
                   python=platform.python_version(),
-                  packages={p: importlib.metadata.version(p) for p in
-                            ['numpy', 'pandas', 'scikit-learn', 'lightgbm', 'psutil']})
+                packages={p: importlib.metadata.version(p) for p in
+                            ['numpy', 'pandas', 'scikit-learn', 'lightgbm', 'psutil', 'polars', 'pyarrow']})
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + '\n')
 

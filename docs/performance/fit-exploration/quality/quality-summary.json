@@ -1,0 +1,73 @@
+{
+  "complete": true,
+  "pairs": 9,
+  "metrics": {
+    "accuracy": {
+      "deltas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "mean_delta": 0.0,
+      "lower_one_sided_95": 0.0,
+      "passed": true
+    },
+    "precision": {
+      "deltas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "mean_delta": 0.0,
+      "lower_one_sided_95": 0.0,
+      "passed": true
+    },
+    "recall": {
+      "deltas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "mean_delta": 0.0,
+      "lower_one_sided_95": 0.0,
+      "passed": true
+    },
+    "f1": {
+      "deltas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "mean_delta": 0.0,
+      "lower_one_sided_95": 0.0,
+      "passed": true
+    }
+  },
+  "identical_predictions": true,
+  "passed": true,
+  "method": "One-sided paired Student t interval across nine seed combinations; shared dataset seeds imply dependence, so interpret cautiously."
+}

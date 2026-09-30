@@ -31,7 +31,8 @@ def scenario(directory):
 
 
 def evaluate(root):
-    main = scenario(root / 'confirm-main')
+    final_confirmation = root / 'confirm-main-final'
+    main = scenario(final_confirmation if final_confirmation.exists() else root / 'confirm-main')
     if main['complete']:
         main['timing_passed'] = main['median_reduction'] >= .05 and main['paired']['ratio_ci95'][0] > 1
         main['passed'] = main['timing_passed'] and main['memory_passed']

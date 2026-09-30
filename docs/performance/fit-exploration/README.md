@@ -31,8 +31,8 @@ public Arrow API, merge or release in this campaign.
 
 ## Journal
 
-- Preparation: created isolated worktrees and environments. Baseline tests and
-  phase profile pending. No optimization accepted yet.
+- Preparation: created isolated worktrees and environments from the recorded
+  baseline. The modified notebook in the original worktree remains untouched.
 
 - Initial validation: Python 169/169, Rust 58/58, executor 2/2 passed.
   Full outputs are stored alongside this journal. Both environments have identical
@@ -72,13 +72,27 @@ OS high-water RSS immediately after fit (before scoring). Final memory evidence
 uses only this corrected executor. This is a measurement correction, not a model
 change. H1 remains pending confirmation.
 
-H1 main confirmation (`confirm-main/`): one warmup + five alternating pairs,
-uninstrumented release. Median baseline 8.058679 s, candidate 7.177023 s;
-10.94% reduction in medians. Paired median speedup 1.08414, percentile-bootstrap
-95% CI [1.01104, 1.27919], paired median saving 0.72959 s. Median fit RSS
-1,813,495,808 → 1,733,574,656 bytes (−4.41%); maximum observed fit RSS
-1,949,712,384 → 2,037,841,920 bytes (+4.52%). Both memory summaries meet +10%.
-This passes main timing/memory gates; controls and quality are still pending.
+H1 main confirmation (`confirm-main-final/`): one warmup + five alternating
+pairs, uninstrumented release built from the final source. Median baseline
+7.030409 s, candidate 5.830724 s; 17.06% reduction in medians. Paired median
+speedup 1.22453, percentile-bootstrap 95% CI [1.18537, 1.32915], paired median
+saving 1.25675 s. Median fit RSS 1,989,459,968 → 2,070,953,984 bytes (+4.10%);
+maximum observed fit RSS 2,187,476,992 → 2,205,810,688 bytes (+0.84%). Both
+memory summaries meet +10%. The earlier `confirm-main/` result is retained for
+the build-hash correction history. The final binary SHA256 is
+`fbc024628cafd04e6fb0b68b9e74de67bc403fc44972a011fabe6a8ca2557f31`.
+
+H1 control matrix (`controls/`): five pairs each for `n_jobs=1`, `n_jobs=-1`,
+float64, permutation importance, multiclass, sparse, NaN and few-estimator fits;
+15 pairs for exact training after the initial result was near the 5% boundary.
+Every control's median candidate fit was no more than 5% slower, and every peak
+RSS gate passed. Exact mode's paired interval spans parity, so the result supports
+absence of a material regression rather than a speedup claim.
+
+H1 quality confirmation (`quality/`): 3 dataset seeds × 3 model seeds. Predictions
+were byte-identical; accuracy, precision, recall and F1 deltas were all 0.000 in
+all nine pairs. The mean and one-sided 95% lower bound for each metric are 0.000.
+All numerical gates pass (`acceptance.json`).
 
 Compatibility audit: 13 scenarios passed cross-build comparison (standard, OOB,
 weights, NaNs, CSR, warm start, pruning, monotonic constraints, entropy,
@@ -90,6 +104,25 @@ absolute differences and uses only for importance an absolute 1e−15 tolerance.
 No existing repository test was changed or relaxed. Repeated fits and pickle
 round trips are checked in both environments. Raw audit JSON is included.
 
+Context comparisons (`comparators/`) use two fits per library on the shared
+100k × 500 dataset: sklearn RF median 207.816 s and LightGBM RF median 12.004 s.
+These use different split algorithms and importance definitions, so they are
+descriptive only. Their inputs, parameters, versions and raw timings are recorded.
+
+Input-layout trials (`layouts/`) include one warmup and two paired measurements.
+Median source-to-array conversion costs were approximately 0.072 s for Fortran,
+0.084 s for pandas, 0.180 s for Polars and 0.106 s for Arrow; median fit time
+remained 6.0–8.2 s. C-contiguous input needed effectively no reorganization.
+Polars 1.44.2 and PyArrow 25.0.1 were installed at the same versions into both
+isolated environments for these trials only; see `layout-dependencies.txt`.
+The measurements do not justify a public Arrow path or changing the default
+layout.
+
+Final validation: Python 174 passed; Rust workspace 58 passed. The focused
+split specialization is rustfmt-formatted. `cargo fmt --all -- --check` still
+reports pre-existing formatting drift across the workspace; the same check fails
+on the untouched baseline. No workspace-wide reformat was applied.
+
 Reproduction (from candidate worktree; substitute worktree paths):
 
 ```sh
@@ -98,6 +131,7 @@ uv sync --frozen --all-groups
 .venv/bin/python benchmarks/run_fit_campaign.py controls --baseline /path/to/baseline --candidate /path/to/candidate --output docs/performance/fit-exploration/controls
 .venv/bin/python benchmarks/run_fit_campaign.py quality --baseline /path/to/baseline --candidate /path/to/candidate --output docs/performance/fit-exploration/quality
 .venv/bin/python benchmarks/run_fit_campaign.py comparators --baseline /path/to/baseline --candidate /path/to/candidate --output docs/performance/fit-exploration/comparators
+.venv/bin/python benchmarks/run_fit_campaign.py layouts --baseline /path/to/baseline --candidate /path/to/candidate --output docs/performance/fit-exploration/layouts
 /path/to/baseline/.venv/bin/python benchmarks/check_fit_compatibility.py --write
 .venv/bin/python benchmarks/check_fit_compatibility.py
 .venv/bin/python benchmarks/evaluate_fit_campaign.py docs/performance/fit-exploration
@@ -106,3 +140,6 @@ uv sync --frozen --all-groups
 Raw records include exact subprocess commands. Warmups use fresh worker processes,
 as do measured fits; this warms machine/file caches without reusing an estimator.
 The 95% timing CI resamples paired speedup ratios (20,000 draws, fixed seed 1729).
+The sklearn/LightGBM contextual comparison uses two measured runs per library;
+the candidate-vs-baseline acceptance comparison retains the full five-pair
+confirmation protocol.

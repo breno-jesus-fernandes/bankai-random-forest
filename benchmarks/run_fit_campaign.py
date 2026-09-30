@@ -34,7 +34,7 @@ elif args.phase == 'quality':
     subprocess.run([sys.executable, str(runner.with_name('summarize_fit_quality.py')), str(args.output)], check=True)
 elif args.phase == 'comparators':
     for library in ('sklearn', 'lightgbm'):
-        run(library, ['--library', library], paired=False)
+        run(library, ['--library', library], paired=False, repeats=2, warmups=0)
 else:
     for layout in ('C', 'F', 'pandas', 'polars', 'arrow'):
-        run(layout, ['--layout', layout], paired=False, repeats=2, warmups=0)
+        run(layout, ['--layout', layout], repeats=2, warmups=1)
