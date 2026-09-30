@@ -71,3 +71,11 @@ Before confirmation, replaced it with a separate sampling process and capture
 OS high-water RSS immediately after fit (before scoring). Final memory evidence
 uses only this corrected executor. This is a measurement correction, not a model
 change. H1 remains pending confirmation.
+
+H1 main confirmation (`confirm-main/`): one warmup + five alternating pairs,
+uninstrumented release. Median baseline 8.058679 s, candidate 7.177023 s;
+10.94% reduction in medians. Paired median speedup 1.08414, percentile-bootstrap
+95% CI [1.01104, 1.27919], paired median saving 0.72959 s. Median fit RSS
+1,813,495,808 → 1,733,574,656 bytes (−4.41%); maximum observed fit RSS
+1,949,712,384 → 2,037,841,920 bytes (+4.52%). Both memory summaries meet +10%.
+This passes main timing/memory gates; controls and quality are still pending.
