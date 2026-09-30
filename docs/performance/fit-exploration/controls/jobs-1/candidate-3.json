@@ -1,0 +1,83 @@
+{
+  "rows": 100000,
+  "features": 500,
+  "training_rows": 80000,
+  "fit_seconds": 19.83768749999581,
+  "fit_peak_rss": 895762432,
+  "rss_before_fit": 365903872,
+  "process_peak_rss": 895762432,
+  "metrics": {
+    "accuracy": 0.88735,
+    "precision": 0.8948555031768806,
+    "recall": 0.8767948589215785,
+    "f1": 0.8857331237003601
+  },
+  "conversion_seconds": 1.2499804142862558e-06,
+  "fit_plus_conversion_seconds": 19.837688749976223,
+  "extension": {
+    "path": "/Users/jesus/Documents/Code/bankai-fit-evidence/python/bankai_random_forest/_core.abi3.so",
+    "sha256": "baa5a2cc389558e8c4bacfe1bbacdc7b4e3759e7d964bbb5b6855e32422413c9"
+  },
+  "prediction_sha256": "08f131d70d7e422a005c5d5c19a148abd35865f4842d340c0648fcac7e2f4f05",
+  "probability_sha256": "70e9452cdc9a006a849005f90cd5a1d483b1d50d4d1e65b5e45ca756ca79d729",
+  "importance_sha256": "43fd580a6eba36c80c65fe33e601b295b7c0f87c3d1b9bbca29a3c36b56a30dd",
+  "params": {
+    "n_estimators": 40,
+    "max_depth": 20,
+    "max_leaf_nodes": 511,
+    "min_samples_leaf": 5,
+    "max_features": null,
+    "max_samples": 0.8,
+    "random_state": 42,
+    "n_jobs": 1,
+    "max_bins": 63,
+    "importance_type": "gain"
+  },
+  "library": "bankai",
+  "layout": "C",
+  "scenario": "main",
+  "dataset": {
+    "x.npy": "c977c297d5e441b7bc325e61e0cd002645dd591c378d4d330aa187522096eac7",
+    "y.npy": "4408e379589dc85f6b149a3a895aa69114e1ced7b67bebe2923051610025b3b9"
+  },
+  "data_seed": 1729,
+  "model_seed": 42,
+  "commit": "56ca84df1ba90bb0c4dc465114a75878f5ab1c1d",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "machine": "arm64",
+  "cpus": 8,
+  "python": "3.11.11",
+  "packages": {
+    "numpy": "2.4.6",
+    "pandas": "3.0.6",
+    "scikit-learn": "1.9.1",
+    "lightgbm": "4.7.0",
+    "psutil": "7.2.2"
+  },
+  "variant": "candidate",
+  "repeat": 3,
+  "warmup": false,
+  "command": [
+    "/Users/jesus/Documents/Code/bankai-fit-evidence/.venv/bin/python",
+    "/Users/jesus/Documents/Code/bankai-fit-evidence/benchmarks/run_fit_exploration.py",
+    "--worker",
+    "--data",
+    "/tmp/bankai-fit-data/100000-500-1729",
+    "--output",
+    "/Users/jesus/Documents/Code/bankai-fit-evidence/docs/performance/fit-exploration/controls/jobs-1/candidate-3.json",
+    "--jobs",
+    "1",
+    "--trees",
+    "40",
+    "--layout",
+    "C",
+    "--scenario",
+    "main",
+    "--library",
+    "bankai",
+    "--data-seed",
+    "1729",
+    "--model-seed",
+    "42"
+  ]
+}
