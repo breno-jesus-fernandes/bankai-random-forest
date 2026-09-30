@@ -33,6 +33,11 @@ jobs:
           previous_version="$(git show "${BASE_SHA}:pyproject.toml" | python -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["version"])')"
           current_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           echo "version=${current_version}" >> "${GITHUB_OUTPUT}"
+          if [[ "${previous_version}" == "${current_version}" ]]; then
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            echo "changed=false; the project version is unchanged (${current_version})."
+            exit 0
+          fi
           status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "https://pypi.org/pypi/bankai-random-forest/${current_version}/json")"
           if [[ "${status}" == "404" ]]; then
             echo "changed=true" >> "${GITHUB_OUTPUT}"
@@ -192,6 +197,9 @@ jobs:
     name: Publish release to PyPI
     needs: [release_gate, distributions]
     if: needs.release_gate.outputs.changed == 'true'
+    concurrency:
+      group: publish-${{ needs.release_gate.outputs.version }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     steps:
       - name: Download release distributions
@@ -215,4 +223,12 @@ jobs:
             echo "::error::Configure TWINE_USERNAME and TWINE_PASSWORD as GitHub Actions secrets."
             exit 1
           fi
-          uvx --from twine twine upload --non-interactive dist/*
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "https://pypi.org/pypi/bankai-random-forest/${{ needs.release_gate.outputs.version }}/json")"
+          if [[ "${status}" == "200" ]]; then
+            echo "${{ needs.release_gate.outputs.version }} was published by another run; skipping duplicate upload."
+          elif [[ "${status}" == "404" ]]; then
+            uvx --from twine twine upload --non-interactive dist/*
+          else
+            echo "::error::Could not verify PyPI release state (HTTP ${status})."
+            exit 1
+          fi
