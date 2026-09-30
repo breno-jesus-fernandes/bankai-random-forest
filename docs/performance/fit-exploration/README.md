@@ -54,3 +54,12 @@ Status: screening pending. No API/default/serialization changes proposed.
 
 Initial main baseline: 8.717 / 11.389 s; median 10.053 s, sampled peak RSS median
 1,203,609,600 bytes. Variation is substantial: final paired confirmation is essential.
+
+Profile (instrumented; fit 8.867 s): canonical labels/order 0.00730 s,
+native conversion 0.000136 s, bin edges 0.27477 s, applying bins 0.09234 s,
+trees 8.47056 s (95.5%). Remaining Python validation, importance and bookkeeping
+are collectively ~0.021 s; the profile does not resolve these tiny components
+individually. Reorganizing preprocessing alone cannot plausibly meet 5% overall
+on this observed profile, so prioritization moves to tree split loops.
+
+H1 initial suites: Python 171 passed, Rust 58 passed, no tests relaxed.

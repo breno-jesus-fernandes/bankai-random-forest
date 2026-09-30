@@ -117,8 +117,10 @@ def worker(args):
     result = dict(rows=len(y), features=x.shape[1], training_rows=split, fit_seconds=elapsed, fit_peak_rss=max(memory), rss_before_fit=memory[0],
                   process_peak_rss=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss *
                   (1 if sys.platform == 'darwin' else 1024), metrics=metrics,
-                  conversion_seconds=conversion_seconds, extension=extension,
+                  conversion_seconds=conversion_seconds, fit_plus_conversion_seconds=elapsed + conversion_seconds, extension=extension,
                   prediction_sha256=hashlib.sha256(pred.tobytes()).hexdigest(),
+                  probability_sha256=hashlib.sha256(np.asarray(model.predict_proba(valid)).tobytes()).hexdigest(),
+                  importance_sha256=hashlib.sha256(np.asarray(model.feature_importances_).tobytes()).hexdigest(),
                   params=params, library=args.library, layout=args.layout, scenario=args.scenario,
                   dataset=json.loads((root / 'manifest.json').read_text()),
                   data_seed=args.data_seed, model_seed=args.model_seed,
@@ -176,6 +178,8 @@ def main():
     args = parser.parse_args()
     if not 10 <= args.rows <= 100000 or args.features < 4 or args.repeats < 1:
         parser.error('Require 10..100000 total rows, >=4 features and positive repeats')
+    if args.scenario != 'main' and not args.worker and args.rows > 10000:
+        parser.error('Control scenarios are limited to 10000 rows')
     if args.worker:
         worker(args)
         return
