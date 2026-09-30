@@ -79,3 +79,30 @@ uninstrumented release. Median baseline 8.058679 s, candidate 7.177023 s;
 1,813,495,808 → 1,733,574,656 bytes (−4.41%); maximum observed fit RSS
 1,949,712,384 → 2,037,841,920 bytes (+4.52%). Both memory summaries meet +10%.
 This passes main timing/memory gates; controls and quality are still pending.
+
+Compatibility audit: 13 scenarios passed cross-build comparison (standard, OOB,
+weights, NaNs, CSR, warm start, pruning, monotonic constraints, entropy,
+permutation importance, exact training, multiclass, balanced subsample).
+Predictions/probabilities/OOB require exact array equality; baseline pickles also
+load in candidate. Baseline itself showed importance differences of 2.78e−17
+between same-seed fits, due to reduction order; the supplemental audit records
+absolute differences and uses only for importance an absolute 1e−15 tolerance.
+No existing repository test was changed or relaxed. Repeated fits and pickle
+round trips are checked in both environments. Raw audit JSON is included.
+
+Reproduction (from candidate worktree; substitute worktree paths):
+
+```sh
+uv sync --frozen --all-groups
+.venv/bin/python benchmarks/run_fit_exploration.py --baseline /path/to/baseline --candidate /path/to/candidate --output docs/performance/fit-exploration/confirm-main --warmups 1 --repeats 5
+.venv/bin/python benchmarks/run_fit_campaign.py controls --baseline /path/to/baseline --candidate /path/to/candidate --output docs/performance/fit-exploration/controls
+.venv/bin/python benchmarks/run_fit_campaign.py quality --baseline /path/to/baseline --candidate /path/to/candidate --output docs/performance/fit-exploration/quality
+.venv/bin/python benchmarks/run_fit_campaign.py comparators --baseline /path/to/baseline --candidate /path/to/candidate --output docs/performance/fit-exploration/comparators
+/path/to/baseline/.venv/bin/python benchmarks/check_fit_compatibility.py --write
+.venv/bin/python benchmarks/check_fit_compatibility.py
+.venv/bin/python benchmarks/evaluate_fit_campaign.py docs/performance/fit-exploration
+```
+
+Raw records include exact subprocess commands. Warmups use fresh worker processes,
+as do measured fits; this warms machine/file caches without reusing an estimator.
+The 95% timing CI resamples paired speedup ratios (20,000 draws, fixed seed 1729).

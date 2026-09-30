@@ -1,0 +1,199 @@
+{
+  "standard": {
+    "passed": true,
+    "repeat_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 0.0
+    },
+    "roundtrip_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 0.0
+    },
+    "cross_build_max_absolute_delta": null,
+    "legacy_model_max_absolute_delta": null
+  },
+  "oob": {
+    "passed": true,
+    "repeat_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 0.0,
+      "oob": 0.0
+    },
+    "roundtrip_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 0.0,
+      "oob": 0.0
+    },
+    "cross_build_max_absolute_delta": null,
+    "legacy_model_max_absolute_delta": null
+  },
+  "weighted": {
+    "passed": true,
+    "repeat_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 0.0
+    },
+    "roundtrip_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 2.7755575615628914e-17
+    },
+    "cross_build_max_absolute_delta": null,
+    "legacy_model_max_absolute_delta": null
+  },
+  "nan": {
+    "passed": true,
+    "repeat_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 1.1102230246251565e-16
+    },
+    "roundtrip_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 5.551115123125783e-17
+    },
+    "cross_build_max_absolute_delta": null,
+    "legacy_model_max_absolute_delta": null
+  },
+  "sparse": {
+    "passed": true,
+    "repeat_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 2.7755575615628914e-17
+    },
+    "roundtrip_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 2.7755575615628914e-17
+    },
+    "cross_build_max_absolute_delta": null,
+    "legacy_model_max_absolute_delta": null
+  },
+  "warm": {
+    "passed": true,
+    "repeat_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 4.163336342344337e-17
+    },
+    "roundtrip_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 2.7755575615628914e-17
+    },
+    "cross_build_max_absolute_delta": null,
+    "legacy_model_max_absolute_delta": null
+  },
+  "pruning": {
+    "passed": true,
+    "repeat_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 2.7755575615628914e-17
+    },
+    "roundtrip_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 2.7755575615628914e-17
+    },
+    "cross_build_max_absolute_delta": null,
+    "legacy_model_max_absolute_delta": null
+  },
+  "monotonic": {
+    "passed": true,
+    "repeat_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 2.7755575615628914e-17
+    },
+    "roundtrip_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 5.551115123125783e-17
+    },
+    "cross_build_max_absolute_delta": null,
+    "legacy_model_max_absolute_delta": null
+  },
+  "entropy": {
+    "passed": true,
+    "repeat_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 1.3877787807814457e-17
+    },
+    "roundtrip_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 1.3877787807814457e-17
+    },
+    "cross_build_max_absolute_delta": null,
+    "legacy_model_max_absolute_delta": null
+  },
+  "permutation": {
+    "passed": true,
+    "repeat_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 0.0
+    },
+    "roundtrip_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 0.0
+    },
+    "cross_build_max_absolute_delta": null,
+    "legacy_model_max_absolute_delta": null
+  },
+  "exact": {
+    "passed": true,
+    "repeat_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 2.7755575615628914e-17
+    },
+    "roundtrip_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 2.7755575615628914e-17
+    },
+    "cross_build_max_absolute_delta": null,
+    "legacy_model_max_absolute_delta": null
+  },
+  "multiclass": {
+    "passed": true,
+    "repeat_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 1.3877787807814457e-17
+    },
+    "roundtrip_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 1.3877787807814457e-17
+    },
+    "cross_build_max_absolute_delta": null,
+    "legacy_model_max_absolute_delta": null
+  },
+  "balanced": {
+    "passed": true,
+    "repeat_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 2.7755575615628914e-17
+    },
+    "roundtrip_max_absolute_delta": {
+      "pred": 0.0,
+      "proba": 0.0,
+      "importance": 4.163336342344337e-17
+    },
+    "cross_build_max_absolute_delta": null,
+    "legacy_model_max_absolute_delta": null
+  }
+}

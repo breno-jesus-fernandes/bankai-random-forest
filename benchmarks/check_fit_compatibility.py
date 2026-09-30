@@ -13,12 +13,25 @@ from sklearn.datasets import make_classification
 from bankai_random_forest import BankaiRandomForestClassifier
 
 
-def signature(model, x):
+def arrays(model, x):
     values = dict(pred=model.predict(x), proba=model.predict_proba(x),
                   importance=model.feature_importances_)
     if hasattr(model, 'oob_decision_function_'):
         values['oob'] = model.oob_decision_function_
-    return {k: hashlib.sha256(np.asarray(v).tobytes()).hexdigest() for k, v in values.items()}
+    return {k: np.asarray(v) for k, v in values.items()}
+
+
+def compare(observed, expected):
+    differences = {}
+    for key in expected:
+        a, b = observed[key], expected[key]
+        differences[key] = float(np.nanmax(np.abs(a-b)))
+        if key == 'importance':
+            # Baseline randomized HashMap reduction varies at ~1e-17 already.
+            np.testing.assert_allclose(a, b, rtol=0, atol=1e-15, equal_nan=True)
+        else:
+            np.testing.assert_array_equal(a, b)
+    return differences
 
 
 def main():
@@ -55,18 +68,21 @@ def main():
                 model.fit(train, labels, sample_weight=weights)
             return model
         model = fit()
-        observed = signature(model, train)
-        assert signature(fit(), train) == observed, (name, 'fixed seed repeatability')
-        assert signature(pickle.loads(pickle.dumps(model)), train) == observed, (name, 'roundtrip')
+        observed = arrays(model, train)
+        repeated = compare(arrays(fit(), train), observed)
+        roundtrip = compare(arrays(pickle.loads(pickle.dumps(model)), train), observed)
         file = args.directory / f'{name}.pkl'
         if args.write:
             file.write_bytes(pickle.dumps(model))
-            (args.directory / f'{name}.json').write_text(json.dumps(observed))
+            np.savez(args.directory / f'{name}.npz', **observed)
         else:
-            expected = json.loads((args.directory / f'{name}.json').read_text())
-            assert observed == expected, (name, 'cross-build output', observed, expected)
-            assert signature(pickle.loads(file.read_bytes()), train) == expected, (name, 'old model compatibility')
-        result[name] = {'passed': True, 'signature': observed}
+            expected = dict(np.load(args.directory / f'{name}.npz'))
+            cross = compare(observed, expected)
+            legacy = compare(arrays(pickle.loads(file.read_bytes()), train), expected)
+        result[name] = {'passed': True, 'repeat_max_absolute_delta': repeated,
+                        'roundtrip_max_absolute_delta': roundtrip,
+                        'cross_build_max_absolute_delta': None if args.write else cross,
+                        'legacy_model_max_absolute_delta': None if args.write else legacy}
     print(json.dumps(result, indent=2))
 
 
