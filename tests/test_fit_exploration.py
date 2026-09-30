@@ -56,3 +56,14 @@ def test_quality_rejects_a_metric_outside_margin(tmp_path):
     assert result['complete']
     assert not result['passed']
     assert not result['metrics']['recall']['passed']
+
+
+def test_acceptance_fails_closed_without_evidence(tmp_path):
+    import json
+    import subprocess
+    import sys
+    script = Path(__file__).parents[1] / 'benchmarks/evaluate_fit_campaign.py'
+    subprocess.run([sys.executable, str(script), str(tmp_path)], check=True, capture_output=True)
+    result = json.loads((tmp_path / 'acceptance.json').read_text())
+    assert not result['numeric_gates_passed']
+    assert not result['main']['complete']

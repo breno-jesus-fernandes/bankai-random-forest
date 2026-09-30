@@ -11,7 +11,11 @@ def scenario(directory):
         records += [json.loads(p.read_text()) for p in directory.glob(f'{variant}-*.json')]
     measured = [r for r in records if not r['warmup']]
     counts = {v: len([r for r in measured if r['variant'] == v]) for v in ('baseline', 'candidate')}
-    complete = all(n >= 5 for n in counts.values()) and all(any(r['variant'] == v and r['warmup'] for r in records) for v in counts)
+    by_variant = {v: {r['repeat']: r for r in measured if r['variant'] == v} for v in counts}
+    paired = by_variant['baseline'].keys() & by_variant['candidate'].keys()
+    consistent = all(by_variant['baseline'][i]['dataset'] == by_variant['candidate'][i]['dataset']
+                     and by_variant['baseline'][i]['params'] == by_variant['candidate'][i]['params'] for i in paired)
+    complete = len(paired) >= 5 and consistent and all(any(r['variant'] == v and r['warmup'] for r in records) for v in counts)
     if not measured or not all(counts.values()):
         return {'complete': False, 'passed': False}
     summary = summarize(measured)

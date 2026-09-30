@@ -184,6 +184,8 @@ def main():
     parser.add_argument('--trees', type=int, default=40)
     parser.add_argument('--jobs', type=int, default=8)
     parser.add_argument('--repeats', type=int, default=2)
+    parser.add_argument('--repeat-offset', type=int, default=0,
+                        help='First measurement index; warmups retain negative indices')
     parser.add_argument('--warmups', type=int, default=0)
     parser.add_argument('--data-seed', type=int, default=1729)
     parser.add_argument('--model-seed', type=int, default=42)
@@ -205,8 +207,9 @@ def main():
         parser.error('Supply --baseline and/or --candidate worktree paths')
     args.output.mkdir(parents=True, exist_ok=True)
     for repeat in range(-args.warmups, args.repeats):
+        measurement = repeat if repeat < 0 else repeat + args.repeat_offset
         for label, worktree in variants[::(-1 if repeat % 2 else 1)]:
-            output = args.output.resolve() / f'{label}-{repeat}.json'
+            output = args.output.resolve() / f'{label}-{measurement}.json'
             command = [str(worktree / '.venv/bin/python'), str(Path(__file__).resolve()), '--worker',
                        '--data', str(root), '--output', str(output)]
             for name in ['jobs', 'trees', 'layout', 'scenario', 'library', 'data_seed', 'model_seed']:
@@ -214,7 +217,7 @@ def main():
             subprocess.run(command, cwd=worktree, check=True,
                            env={**os.environ, 'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': str(max(1, args.jobs))})
             record = json.loads(output.read_text())
-            record.update(variant=label, repeat=repeat, warmup=repeat < 0, command=command)
+            record.update(variant=label, repeat=measurement, warmup=repeat < 0, command=command)
             output.write_text(json.dumps(record, indent=2) + '\n')
             records.append(record)
             print(label, repeat, round(record['fit_seconds'], 3), flush=True)
