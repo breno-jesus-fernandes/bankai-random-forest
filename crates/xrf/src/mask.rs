@@ -128,8 +128,9 @@ impl MaskCache {
     pub fn provide(&mut self) -> Mask {
         self.0.pop().unwrap_or_else(|| Mask(Vec::new()))
     }
-    /// Move a mask into the cache for later use
-    pub fn release(&mut self, what: Mask) {
+    /// Empty and move a mask into the cache for later reuse.
+    pub fn release(&mut self, mut what: Mask) {
+        what.0.clear();
         self.0.push(what);
     }
 }
@@ -137,5 +138,83 @@ impl MaskCache {
 impl Default for MaskCache {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permutation_preserves_duplicate_indices_and_handles_short_masks() {
+        let mut rng = RfRng::from_seed(17, 3);
+        let input = Mask::from_vec(vec![4, 4, 9, 12, 9]);
+        let mut expected = input.to_vec();
+        expected.sort_unstable();
+        let mut actual = input.permute(&mut rng).to_vec();
+        actual.sort_unstable();
+
+        assert_eq!(actual, expected);
+        assert!(Mask::from_vec(Vec::new()).permute(&mut rng).is_empty());
+        assert_eq!(&*Mask::from_vec(vec![7]).permute(&mut rng), &[7]);
+    }
+
+    #[test]
+    fn bootstrap_masks_partition_rows_and_keep_the_requested_bag_size() {
+        let mut rng = RfRng::from_seed(31, 2);
+        let (bag, oob) = Mask::new_bag_oob_with_size(12, 25, &mut rng);
+
+        assert_eq!(bag.len(), 25);
+        assert!(bag.iter().all(|&row| row < 12));
+        assert!(oob.iter().all(|&row| row < 12));
+        for row in 0..12 {
+            assert!(bag.contains(&row) ^ oob.contains(&row));
+        }
+
+        let (empty_bag, all_oob) = Mask::new_bag_oob_with_size(4, 0, &mut rng);
+        assert!(empty_bag.is_empty());
+        assert_eq!(&*all_oob, &[0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn split_operations_clear_reused_masks_and_keep_parallel_rows_aligned() {
+        let rows = Mask::from_vec(vec![8, 3, 8, 1]);
+        let companion = Mask::from_vec(vec![80, 30, 81, 10]);
+        let mut left = Mask::from_vec(vec![999]);
+        let mut left_companion = Mask::from_vec(vec![999]);
+        let mut right = Mask::from_vec(vec![999]);
+        let mut right_companion = Mask::from_vec(vec![999]);
+
+        rows.split_together_into(
+            &companion,
+            [false, true, true, false].into_iter(),
+            &mut left,
+            &mut left_companion,
+            &mut right,
+            &mut right_companion,
+        );
+
+        assert_eq!(&*left, &[3, 8]);
+        assert_eq!(&*left_companion, &[30, 81]);
+        assert_eq!(&*right, &[8, 1]);
+        assert_eq!(&*right_companion, &[80, 10]);
+        rows.split_into([true, false, true, false].into_iter(), &mut left, &mut right);
+        assert_eq!(&*left, &[8, 8]);
+        assert_eq!(&*right, &[3, 1]);
+    }
+
+    #[test]
+    fn mask_cache_reuses_released_capacity() {
+        let mut cache = MaskCache::default();
+        let mut mask = cache.provide();
+        mask.0.reserve(32);
+        let capacity = mask.0.capacity();
+        mask.0.extend([1, 2, 3]);
+        cache.release(mask);
+
+        let reused = cache.provide();
+
+        assert!(reused.is_empty());
+        assert!(reused.0.capacity() >= capacity);
     }
 }

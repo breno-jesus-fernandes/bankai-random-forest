@@ -255,3 +255,21 @@ impl AccuracyDecreaseAggregator<DataFrame> for DaAggregator {
             .map(|(a, b)| (*a, (*b as f64) / (self.n as f64)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subset_objects_preserves_requested_order_and_duplicate_rows() {
+        let input = DataFrame::new(
+            vec![vec![10.0, 20.0, 30.0, 40.0], vec![1.0, 2.0, 3.0, 4.0]],
+            vec![0, 1, 0, 1],
+            2,
+        );
+        let subset = input.subset_objects(&Mask::from_vec(vec![3, 1, 3]));
+
+        assert_eq!(subset.y(), &[1, 1, 1]);
+        assert_eq!(subset.x, vec![vec![40.0, 20.0, 40.0], vec![4.0, 2.0, 4.0]]);
+    }
+}

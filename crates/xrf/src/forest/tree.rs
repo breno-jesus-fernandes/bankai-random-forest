@@ -591,7 +591,36 @@ impl<I: RfInput> Tree<I> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mockups::generate_ident;
+    use crate::mockups::{generate_ident, simple_cls::DataFrame};
+
+    fn grow(
+        input: &DataFrame,
+        tries: usize,
+        max_depth: usize,
+        max_leaves: usize,
+    ) -> Tree<DataFrame> {
+        let bag = Mask::new_all(input.observation_count());
+        let mut rng = RfRng::from_seed(21, 1);
+        let mut masks = MaskCache::new();
+        let mut sampler = input.feature_sampler();
+        Tree::new(
+            input,
+            &bag,
+            tries,
+            &mut sampler,
+            max_depth,
+            max_leaves,
+            &mut masks,
+            &mut rng,
+        )
+    }
+
+    fn leaf_count(tree: &Tree<DataFrame>) -> usize {
+        tree.nodes
+            .iter()
+            .filter(|node| matches!(node, Node::Leaf(..)))
+            .count()
+    }
 
     #[test]
     fn ident() {
@@ -640,5 +669,45 @@ mod tests {
             _ => false,
         });
         assert!(ok);
+    }
+
+    #[test]
+    fn best_first_growth_obeys_the_leaf_budget_and_round_trips() {
+        let input = generate_ident(4, 16);
+        let tree = grow(&input, 1, 8, 3);
+
+        assert_eq!(leaf_count(&tree), 3);
+        assert_eq!(tree.nodes.len(), 5);
+        assert!(matches!(tree.nodes[tree.root], Node::Branch(..)));
+        let restored = Tree::from_walk(&mut tree.walk()).unwrap();
+        assert_eq!(restored.walk().count(), tree.walk().count());
+        assert_eq!(leaf_count(&restored), 3);
+    }
+
+    #[test]
+    fn growth_stops_for_pure_targets_depth_limits_and_no_split_candidates() {
+        let pure = DataFrame::new(vec![vec![0.0, 1.0, 2.0, 3.0]], vec![1; 4], 2);
+        assert_eq!(leaf_count(&grow(&pure, 2, 8, usize::MAX)), 1);
+
+        let identity = generate_ident(2, 8);
+        let depth_limited = grow(&identity, 1, 1, usize::MAX);
+        assert_eq!(leaf_count(&depth_limited), 2);
+        assert_eq!(depth_limited.nodes.len(), 3);
+
+        let no_tries = grow(&identity, 0, 8, usize::MAX);
+        assert_eq!(leaf_count(&no_tries), 1);
+    }
+
+    #[test]
+    fn tree_restoration_rejects_incomplete_branch_walks() {
+        let mut walk = [Walk::<DataFrame>::VisitBranch(0, 1.0, 0.5)].into_iter();
+
+        let error = match Tree::from_walk(&mut walk) {
+            Ok(_) => panic!("incomplete branch walk should be rejected"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(error, XrfError::WalkAggregationFailure));
+        assert_eq!(error.to_string(), "Walk is a corrupted representation of a forest");
     }
 }

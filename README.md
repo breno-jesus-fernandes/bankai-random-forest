@@ -6,11 +6,12 @@ behind [FRU](https://www.sciencedirect.com/science/article/pii/S2352711026004097
 It combines parallel tree building and efficient permutation importance with
 optional LightGBM-style histograms for continuous features.
 
-Preliminary results from the [Colab fit benchmark](https://colab.research.google.com/github/breno-jesus-fernandes/bankai-random-forest/blob/master/benchmarks/benchmark_fit_100k_500f_90_relevant.ipynb)
-show Bankai fitting 8× faster than scikit-learn Random Forest and 1.8× faster
-than LightGBM RF. These initial figures are provisional and specific to the
-benchmark workload and hardware; see the notebook for settings and comparison
-caveats.
+Preliminary results from an earlier run of the [Colab benchmark](https://colab.research.google.com/github/breno-jesus-fernandes/bankai-random-forest/blob/master/benchmarks/benchmark_fit_100k_500f_90_relevant.ipynb)
+reported Bankai's fit-plus-OOB-permutation workload 21× faster than scikit-learn
+fit plus validation permutation importance, and Bankai histogram fit 1.8× faster
+than LightGBM RF. These figures have not been remeasured with the notebook's
+current 1,000-row setup and are workload- and hardware-specific; see the notebook
+for current settings and comparison caveats.
 
 Bankai follows the familiar scikit-learn estimator API, and full compatibility
 is a project goal. The project is in alpha, so APIs and serialized models may
@@ -128,9 +129,10 @@ workload and are not a performance guarantee.
 Run the [binary classification fit benchmark in Google Colab](https://colab.research.google.com/github/breno-jesus-fernandes/bankai-random-forest/blob/master/benchmarks/benchmark_fit_100k_500f_90_relevant.ipynb)
 or [view the notebook in this repository](benchmarks/benchmark_fit_100k_500f_90_relevant.ipynb).
 It compares scikit-learn RF, LightGBM RF, and Bankai on one shared dataset with
-`n_jobs=-1`; the first cell installs the pinned packages. It reports fit time
-only, with matched-setting baseline fits and a separate Bankai permutation-
-importance profile whose extra work is called out explicitly.
+`n_jobs=-1`; the first cell installs the packages. The scikit-learn comparison
+times fit plus validation permutation importance against Bankai fit with OOB
+permutation importance. The LightGBM comparison remains fit-only with gain on
+both models.
 
 ## Save and restore models
 

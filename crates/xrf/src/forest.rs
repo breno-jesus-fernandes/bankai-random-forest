@@ -394,6 +394,13 @@ impl<I: RfInput> Forest<I> {
     {
         let mut trees: MaybeVec<Tree<I>> = MaybeVec::new(true);
         let mut forest_walk = forest_walk.peekable();
+        if forest_walk.peek().is_none() {
+            return Ok(Self {
+                trees,
+                importance: None,
+                oob_votes: None,
+            });
+        }
         loop {
             let tree = Tree::from_walk(&mut forest_walk)?;
             trees.push(tree);
@@ -466,5 +473,62 @@ impl<I: RfInput> Forest<I> {
         importance
             .into_iter()
             .map(move |(feature, value)| (feature, if total > 0.0 { value / total } else { 0.0 }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mockups::{generate_ident, simple_cls::DataFrame};
+
+    #[test]
+    fn empty_walk_restores_an_empty_forest() {
+        let forest = Forest::<DataFrame>::from_walk(std::iter::empty()).unwrap();
+
+        assert_eq!(forest.trees(), 0);
+        assert!(forest.has_trees());
+        assert!(!forest.has_oob());
+        assert!(!forest.has_importance());
+        assert_eq!(forest.walk().count(), 0);
+    }
+
+    #[test]
+    fn walk_round_trip_preserves_predictions_and_tree_count() {
+        let input = generate_ident(4, 16);
+        let original = Forest::new_with_settings(
+            &input, 5, 1, true, false, false, 73, 8, usize::MAX, false, None,
+        );
+        let restored = Forest::from_walk(original.walk()).unwrap();
+
+        assert_eq!(restored.trees(), original.trees());
+        assert_eq!(restored.walk().count(), original.walk().count());
+        let mut rng = RfRng::from_seed(5, 1);
+        let original_predictions = original
+            .predict(&input)
+            .predictions()
+            .map(|(_, votes)| votes.collapse(&mut rng))
+            .collect::<Vec<_>>();
+        let mut rng = RfRng::from_seed(5, 1);
+        let restored_predictions = restored
+            .predict(&input)
+            .predictions()
+            .map(|(_, votes)| votes.collapse(&mut rng))
+            .collect::<Vec<_>>();
+        assert_eq!(restored_predictions, original_predictions);
+    }
+
+    #[test]
+    fn saved_tree_and_optional_statistics_flags_are_independent() {
+        let input = generate_ident(2, 8);
+        let forest = Forest::new_with_settings(
+            &input, 3, 1, false, true, true, 11, 4, usize::MAX, true, Some(6),
+        );
+
+        assert_eq!(forest.trees(), 3);
+        assert!(!forest.has_trees());
+        assert!(forest.has_importance());
+        assert!(forest.has_oob());
+        assert!(forest.raw_importance().next().is_some());
+        assert_eq!(forest.oob().count(), input.observation_count());
     }
 }

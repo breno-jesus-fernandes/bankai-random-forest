@@ -27,6 +27,15 @@ impl ImportanceAggregator {
     }
     /// Merges in a second aggregator; after this operation, self is in the state as if it had ingested all the values ingested into `other` (including those acquired via merges).
     pub fn merge(&mut self, other: &Self) {
+        if other.n == 0 {
+            return;
+        }
+        if self.n == 0 {
+            self.n = other.n;
+            self.mean = other.mean;
+            self.sum_sq = other.sum_sq;
+            return;
+        }
         let n = self.n + other.n;
         let delta = other.mean - self.mean;
         self.mean = ((self.n as f64) * self.mean + (other.n as f64) * other.mean) / (n as f64);
@@ -118,5 +127,50 @@ mod tests {
         (1..c1).for_each(|x| ia2.ingest(x as f64));
         assert_eq!(ia1.value(c1 + c2), ia2.value(c1 + c2));
         assert_eq!(ia1.value_normalised(c1 + c2), ia2.value_normalised(c1 + c2));
+    }
+
+    #[test]
+    fn merging_empty_aggregators_preserves_the_empty_state() {
+        let mut left = ImportanceAggregator::new();
+        let right = ImportanceAggregator::new();
+
+        left.merge(&right);
+
+        assert_eq!(left.samples(), 0);
+        assert_eq!(left.mean, 0.0);
+        assert_eq!(left.sum_sq, 0.0);
+        assert_eq!(left.value_normalised(0), None);
+    }
+
+    #[test]
+    fn merging_into_empty_copies_state_and_merging_empty_is_a_noop() {
+        let mut empty = ImportanceAggregator::new();
+        let mut populated = ImportanceAggregator::new();
+        populated.ingest(2.5);
+        populated.ingest(4.5);
+
+        empty.merge(&populated);
+        let after_copy = empty.into_raw();
+        empty.merge(&ImportanceAggregator::new());
+
+        assert_eq!(empty.into_raw(), after_copy);
+        assert_eq!(empty.samples(), 2);
+        assert_eq!(empty.value(2), 3.5);
+    }
+
+    #[test]
+    fn raw_state_round_trips_exactly() {
+        let mut original = ImportanceAggregator::new();
+        for value in [1.25, -3.5, 8.0, 2.25] {
+            original.ingest(value);
+        }
+
+        let restored = ImportanceAggregator::from_raw(&original.into_raw());
+
+        assert_eq!(restored.samples(), original.samples());
+        assert_eq!(restored.mean, original.mean);
+        assert_eq!(restored.sum_sq, original.sum_sq);
+        assert_eq!(restored.value(6), original.value(6));
+        assert_eq!(restored.value_normalised(6), original.value_normalised(6));
     }
 }

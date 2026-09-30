@@ -572,7 +572,8 @@ fn canonical_dense_row_order(
             values.ncols(),
             labels,
             |row, feature| values[[row, feature]],
-        );
+        )
+        .map_err(PyValueError::new_err);
     }
     if let Ok(array) = x.extract::<PyReadonlyArray2<'_, f32>>() {
         let values = array.as_array();
@@ -581,7 +582,8 @@ fn canonical_dense_row_order(
             values.ncols(),
             labels,
             |row, feature| f64::from(values[[row, feature]]),
-        );
+        )
+        .map_err(PyValueError::new_err);
     }
     Ok(None)
 }
@@ -591,11 +593,9 @@ fn canonical_dense_row_order_by(
     columns: usize,
     labels: numpy::ndarray::ArrayView1<'_, i64>,
     value: impl Fn(usize, usize) -> f64,
-) -> PyResult<Option<Vec<usize>>> {
+) -> Result<Option<Vec<usize>>, String> {
     if rows != labels.len() {
-        return Err(PyValueError::new_err(
-            "X and y must contain the same number of rows",
-        ));
+        return Err("X and y must contain the same number of rows".into());
     }
 
     if columns == 0 {
@@ -673,10 +673,10 @@ fn compare_numpy_f64(left: f64, right: f64) -> Ordering {
 
 fn matrix_to_owned(x: &Bound<'_, PyAny>, row_order: Option<&[usize]>) -> PyResult<MatrixData> {
     if let Ok(array) = x.extract::<PyReadonlyArray2<'_, f64>>() {
-        return dense_matrix_to_owned(array.as_array(), row_order);
+        return dense_matrix_to_owned(array.as_array(), row_order).map_err(PyValueError::new_err);
     }
     if let Ok(array) = x.extract::<PyReadonlyArray2<'_, f32>>() {
-        return dense_matrix_to_owned(array.as_array(), row_order);
+        return dense_matrix_to_owned(array.as_array(), row_order).map_err(PyValueError::new_err);
     }
     if x.hasattr("indptr")? && x.hasattr("indices")? && x.hasattr("data")? && x.hasattr("shape")? {
         let csr = x.call_method0("tocsr")?; csr.call_method0("sum_duplicates")?; csr.call_method0("sort_indices")?;
@@ -696,7 +696,7 @@ fn matrix_to_owned(x: &Bound<'_, PyAny>, row_order: Option<&[usize]>) -> PyResul
 fn dense_matrix_to_owned<T>(
     view: numpy::ndarray::ArrayView2<'_, T>,
     row_order: Option<&[usize]>,
-) -> PyResult<MatrixData>
+) -> Result<MatrixData, String>
 where
     T: Copy + Into<f64>,
 {
@@ -712,9 +712,7 @@ where
         view.iter().copied().map(Into::into).collect()
     };
     if values.iter().any(|value| value.is_infinite()) {
-        return Err(PyValueError::new_err(
-            "X must not contain infinite values",
-        ));
+        return Err("X must not contain infinite values".into());
     }
     Ok(MatrixData::Dense(values, rows, columns))
 }
@@ -727,4 +725,216 @@ fn class_from_votes(votes: &ClassVotes) -> usize {
 fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<NativeForest>()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use numpy::ndarray::{arr1, array};
+    use xrf::RfInput;
+
+    fn shap_test_input(max_bins: Option<usize>) -> DenseInput {
+        DenseInput::training(
+            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, f64::NAN],
+            9,
+            1,
+            vec![0, 0, 0, 1, 0, 1, 1, 1, 1],
+            vec![1.0; 9],
+            2,
+            0.0,
+            Criterion::Gini,
+            2,
+            1,
+            0.0,
+            max_bins,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn canonical_row_order_refines_feature_ties_then_labels_and_places_nan_last() {
+        let labels = arr1(&[1_i64, 0, 1, 0, 1]);
+        let rows = [
+            [1.0, 5.0],
+            [1.0, 3.0],
+            [2.0, 0.0],
+            [f64::NAN, 4.0],
+            [1.0, 3.0],
+        ];
+
+        let order = canonical_dense_row_order_by(5, 2, labels.view(), |row, feature| {
+            rows[row][feature]
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(order, vec![1, 4, 0, 2, 3]);
+    }
+
+    #[test]
+    fn canonical_row_order_handles_zero_features_and_rejects_label_length_mismatch() {
+        let labels = arr1(&[3_i64, 1, 1, 2]);
+        let order = canonical_dense_row_order_by(4, 0, labels.view(), |_, _| {
+            panic!("zero-feature ordering must not read feature data")
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(order, vec![1, 2, 3, 0]);
+
+        let wrong_labels = arr1(&[0_i64]);
+        let error = canonical_dense_row_order_by(2, 1, wrong_labels.view(), |_, _| 0.0)
+            .unwrap_err();
+        assert_eq!(error, "X and y must contain the same number of rows");
+    }
+
+    #[test]
+    fn numpy_float_order_matches_nan_and_signed_zero_contract() {
+        assert_eq!(compare_numpy_f64(f64::NEG_INFINITY, -1.0), Ordering::Less);
+        assert_eq!(compare_numpy_f64(-0.0, 0.0), Ordering::Equal);
+        assert_eq!(compare_numpy_f64(f64::INFINITY, f64::NAN), Ordering::Less);
+        assert_eq!(compare_numpy_f64(f64::NAN, f64::NAN), Ordering::Equal);
+    }
+
+    #[test]
+    fn dense_conversion_respects_requested_row_order_and_rejects_infinity() {
+        let values = array![[1.0_f64, 2.0], [3.0, 4.0], [5.0, 6.0]];
+        let converted = dense_matrix_to_owned(values.view(), Some(&[2, 0, 1])).unwrap();
+        assert!(matches!(
+            converted,
+            MatrixData::Dense(values, 3, 2) if values == vec![5.0, 6.0, 1.0, 2.0, 3.0, 4.0]
+        ));
+        let unchanged = dense_matrix_to_owned(values.view(), None).unwrap();
+        assert!(matches!(
+            unchanged,
+            MatrixData::Dense(values, 3, 2) if values == vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        ));
+
+        let with_infinity = array![[0.0_f64], [f64::INFINITY]];
+        let error = dense_matrix_to_owned(with_infinity.view(), None).err().unwrap();
+        assert_eq!(error, "X must not contain infinite values");
+    }
+
+    #[test]
+    fn matrix_data_builds_dense_and_sparse_prediction_inputs() {
+        let dense = MatrixData::Dense(vec![0.0, 2.0, 3.0, 4.0], 2, 2)
+            .into_prediction(2, 2, 2, None)
+            .unwrap();
+        assert_eq!(dense.rows(), 2);
+        assert_eq!(dense.value_at(1, 0), 3.0);
+
+        let sparse = MatrixData::Csr {
+            indptr: vec![0, 1, 2],
+            indices: vec![1, 0],
+            data: vec![2.0, 3.0],
+            rows: 2,
+            columns: 2,
+        }
+        .into_prediction(2, 2, 2, None)
+        .unwrap();
+        assert_eq!(sparse.value_at(0, 0), 0.0);
+        assert_eq!(sparse.value_at(1, 0), 3.0);
+    }
+
+    #[test]
+    fn fitted_native_forest_reports_importance_oob_and_shap_tree_arrays() {
+        let input = shap_test_input(Some(4));
+        let forest = Forest::new_with_settings(
+            &input, 24, 1, true, true, true, 61, 4, 2, true, Some(6),
+        );
+        let native = NativeForest {
+            forest: Some(forest),
+            n_classes: 2,
+            n_features: input.feature_count(),
+            n_samples: input.rows(),
+            histogram_edges: input.bin_edges().map(<[Vec<f64>]>::to_vec),
+            training_order: Vec::new(),
+        };
+
+        assert!(native.is_fitted());
+        let split_importance = native.feature_importances().unwrap();
+        let gain_importance = native.gain_importances().unwrap();
+        let permutation_importance = native.permutation_importances().unwrap();
+        assert_eq!(split_importance, vec![1.0]);
+        assert_eq!(gain_importance, vec![1.0]);
+        assert_eq!(permutation_importance.len(), 1);
+        assert!(permutation_importance[0].is_finite());
+
+        let oob = native.oob_predict_proba().unwrap();
+        assert_eq!(oob.len(), input.rows());
+        assert!(oob.iter().all(|row| row.len() == 2));
+        assert!(oob
+            .iter()
+            .flatten()
+            .all(|probability| probability.is_finite()));
+
+        let arrays = native.shap_tree_arrays().unwrap();
+        assert_eq!(arrays.len(), 24);
+        assert!(arrays.iter().any(|(left, _, _, _, _, _, _)| left[0] >= 0));
+        for (left, right, feature, _, cover, values, missing_left) in arrays {
+            assert_eq!(left.len(), right.len());
+            assert_eq!(left.len(), feature.len());
+            assert_eq!(left.len(), cover.len());
+            assert_eq!(left.len(), missing_left.len());
+            assert_eq!(values.len(), left.len() * 2);
+        }
+    }
+
+    #[test]
+    fn native_tree_shap_is_additive_for_exact_and_binned_trees_with_missing_values() {
+        for max_bins in [None, Some(4)] {
+            let input = shap_test_input(max_bins);
+            let forest = Forest::new_with_settings(
+                &input, 1, 1, true, false, false, 53, 4, 4, false, None,
+            );
+            let mut trees = Vec::new();
+            let mut base = vec![0.0; 2];
+            for tree in forest.tree_refs() {
+                let mut nodes = Vec::new();
+                flatten_tree(tree, &mut nodes);
+                let mut vote_covers = vec![0.0; 2];
+                leaf_vote_covers(&nodes, 0, &mut vote_covers);
+                let root_cover = nodes[0].cover.max(1.0);
+                for (base_value, cover) in base.iter_mut().zip(vote_covers) {
+                    *base_value += cover / root_cover;
+                }
+                trees.push(nodes);
+            }
+            let tree_count = trees.len() as f64;
+            for value in &mut base {
+                *value /= tree_count;
+            }
+
+            let expected = forest
+                .predict(&input)
+                .predictions()
+                .map(|(_, votes)| votes.probabilities())
+                .collect::<Vec<_>>();
+            for row in 0..input.rows() {
+                let mut contributions = vec![vec![0.0; 2]; input.feature_count()];
+                for tree in &trees {
+                    tree_shap_one(
+                        tree,
+                        &input,
+                        row,
+                        input.feature_count(),
+                        2,
+                        &mut contributions,
+                    );
+                }
+                for class in 0..2 {
+                    let explained = base[class]
+                        + contributions
+                            .iter()
+                            .map(|feature| feature[class])
+                            .sum::<f64>()
+                            / tree_count;
+                    assert!(
+                        (explained - expected[row][class]).abs() < 1e-10,
+                        "SHAP additivity failed for row {row}, class {class}, bins {max_bins:?}: {explained} != {}",
+                        expected[row][class]
+                    );
+                }
+            }
+        }
+    }
 }

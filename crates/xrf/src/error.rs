@@ -20,3 +20,20 @@ impl fmt::Display for XrfError {
 }
 
 impl std::error::Error for XrfError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn errors_display_stable_actionable_messages() {
+        assert_eq!(
+            XrfError::ParallelCodePanic.to_string(),
+            "Panic in the parallel code"
+        );
+        assert_eq!(
+            XrfError::WalkAggregationFailure.to_string(),
+            "Walk is a corrupted representation of a forest"
+        );
+    }
+}

@@ -216,15 +216,7 @@ impl DenseInput {
         if sample_weights.len() != rows {
             return Err("sample_weight must contain one value per row".to_string());
         }
-        if sample_weights
-            .iter()
-            .any(|weight| !weight.is_finite() || *weight < 0.0)
-        {
-            return Err("sample_weight must contain finite non-negative values".to_string());
-        }
-        if sample_weights.iter().all(|weight| *weight == 0.0) {
-            return Err("sample_weight cannot be all zero".to_string());
-        }
+        let total_weight = validate_sample_weights(&sample_weights)?;
         if n_classes == 0 {
             return Err("at least one class is required".to_string());
         }
@@ -247,7 +239,6 @@ impl DenseInput {
             return Err("bin_sample_size must be a positive integer".into());
         }
 
-        let total_weight = sample_weights.iter().sum();
         let (values, bin_edges, active_features) = match max_bins {
             Some(max_bins) => {
                 let (binned, edges) = histogramize(
@@ -320,6 +311,9 @@ impl DenseInput {
         if threads == 0 {
             return Err("histogram preprocessing requires at least one thread".into());
         }
+        if rows == 0 {
+            return Err("X must contain at least one row".into());
+        }
         if columns == 0 {
             return Err("X must contain at least one feature".into());
         }
@@ -337,15 +331,7 @@ impl DenseInput {
         if sample_weights.len() != rows {
             return Err("sample_weight must contain one value per row".into());
         }
-        if sample_weights
-            .iter()
-            .any(|weight| !weight.is_finite() || *weight < 0.0)
-        {
-            return Err("sample_weight must contain finite non-negative values".into());
-        }
-        if sample_weights.iter().all(|weight| *weight == 0.0) {
-            return Err("sample_weight cannot be all zero".into());
-        }
+        let total_weight = validate_sample_weights(&sample_weights)?;
         if n_classes == 0 {
             return Err("at least one class is required".into());
         }
@@ -378,8 +364,6 @@ impl DenseInput {
                 (!feature_edges.is_empty()).then_some(feature)
             })
             .collect();
-        let total_weight = sample_weights.iter().sum();
-
         Ok(Self {
             values: DenseValues::Binned(Arc::new(binned)),
             labels: Some(Arc::new(labels)),
@@ -544,12 +528,7 @@ impl DenseInput {
         if sample_weights.len() != rows {
             return Err("sample_weight must contain one value per row".into());
         }
-        if sample_weights.iter().any(|w| !w.is_finite() || *w < 0.0) {
-            return Err("sample_weight must contain finite non-negative values".into());
-        }
-        if sample_weights.iter().all(|w| *w == 0.0) {
-            return Err("sample_weight cannot be all zero".into());
-        }
+        let total_weight = validate_sample_weights(&sample_weights)?;
         if n_classes == 0 || labels.iter().any(|&label| label >= n_classes) {
             return Err("labels must be encoded in 0..n_classes".into());
         }
@@ -568,7 +547,6 @@ impl DenseInput {
         if bin_sample_size == 0 {
             return Err("bin_sample_size must be a positive integer".into());
         }
-        let total_weight = sample_weights.iter().sum();
         let bin_edges = max_bins.map(|bins| {
             sparse_histogram_edges(
                 &sparse, rows, columns, bins, threads, binning_strategy, bin_sample_size,
@@ -815,6 +793,26 @@ impl CsrValues {
     }
 }
 
+fn validate_sample_weights(sample_weights: &[f64]) -> Result<f64, String> {
+    if sample_weights
+        .iter()
+        .any(|weight| !weight.is_finite() || *weight < 0.0)
+    {
+        return Err("sample_weight must contain finite non-negative values".into());
+    }
+    if sample_weights.iter().all(|weight| *weight == 0.0) {
+        return Err("sample_weight cannot be all zero".into());
+    }
+    let total_weight = sample_weights.iter().sum::<f64>();
+    if !total_weight.is_finite() {
+        return Err("sample_weight sum must be finite".into());
+    }
+    if total_weight <= 0.0 {
+        return Err("sample_weight sum must be positive".into());
+    }
+    Ok(total_weight)
+}
+
 fn validate_csr(
     indptr: Vec<usize>,
     indices: Vec<usize>,
@@ -828,7 +826,7 @@ fn validate_csr(
     if columns == 0 {
         return Err("X must contain at least one feature".into());
     }
-    if indptr.len() != rows + 1
+    if rows.checked_add(1) != Some(indptr.len())
         || indptr.first() != Some(&0)
         || indptr.last() != Some(&data.len())
         || indices.len() != data.len()
@@ -2018,6 +2016,24 @@ impl RfInput for DenseInput {
 mod histogram_optimization_tests {
     use super::*;
 
+    fn binary_input(max_bins: Option<usize>) -> DenseInput {
+        DenseInput::training(
+            (0..8).map(|row| row as f64).collect(),
+            8,
+            1,
+            vec![0, 0, 0, 0, 1, 1, 1, 1],
+            vec![1.0; 8],
+            2,
+            0.0,
+            Criterion::Gini,
+            2,
+            1,
+            0.0,
+            max_bins,
+        )
+        .unwrap()
+    }
+
     fn training_input() -> DenseInput {
         DenseInput::training(
             vec![0.0, 7.0, 1.0, 7.0, 2.0, 7.0, 3.0, 7.0, 4.0, 7.0, 5.0, 7.0],
@@ -2377,6 +2393,242 @@ mod histogram_optimization_tests {
             assert_eq!(tree_input.sample_weight(1), 2.25);
             assert_eq!(tree_input.sample_weight(2), 7.5);
             assert!(input.shares_feature_storage_with(&tree_input));
+        }
+    }
+
+    #[test]
+    fn training_rejects_weight_sums_that_overflow_in_dense_csr_and_accessor_paths() {
+        let error = "sample_weight sum must be finite";
+        let dense = DenseInput::training(
+            vec![0.0, 1.0],
+            2,
+            1,
+            vec![0, 1],
+            vec![f64::MAX, f64::MAX],
+            2,
+            0.0,
+            Criterion::Gini,
+            2,
+            1,
+            0.0,
+            None,
+        );
+        assert_eq!(dense.err().as_deref(), Some(error));
+
+        let csr = DenseInput::training_csr(
+            vec![0, 1, 2],
+            vec![0, 0],
+            vec![0.0, 1.0],
+            2,
+            1,
+            vec![0, 1],
+            vec![f64::MAX, f64::MAX],
+            2,
+            0.0,
+            Criterion::Gini,
+            2,
+            1,
+            0.0,
+            None,
+        );
+        assert_eq!(csr.err().as_deref(), Some(error));
+
+        let accessor = DenseInput::training_binned_with_accessor(
+            2,
+            1,
+            vec![0, 1],
+            vec![f64::MAX, f64::MAX],
+            2,
+            0.0,
+            Criterion::Gini,
+            2,
+            1,
+            0.0,
+            4,
+            1,
+            BinningStrategy::ExactSort,
+            2,
+            |row, _| row as f64,
+        );
+        assert_eq!(accessor.err().as_deref(), Some(error));
+    }
+
+    #[test]
+    fn csr_validation_rejects_shape_overflow_duplicate_indices_and_infinity() {
+        let shape_overflow = validate_csr(Vec::new(), Vec::new(), Vec::new(), usize::MAX, 1);
+        assert_eq!(shape_overflow.err().as_deref(), Some("invalid CSR matrix structure"));
+
+        let duplicate_columns = validate_csr(
+            vec![0, 2, 2],
+            vec![1, 1],
+            vec![2.0, 3.0],
+            2,
+            2,
+        );
+        assert_eq!(
+            duplicate_columns.err().as_deref(),
+            Some("CSR column indices must be sorted and unique")
+        );
+
+        let infinite_data = validate_csr(
+            vec![0, 1],
+            vec![0],
+            vec![f64::INFINITY],
+            1,
+            1,
+        );
+        assert_eq!(infinite_data.err().as_deref(), Some("X must not contain infinite values"));
+    }
+
+    #[test]
+    fn direct_binning_accessor_rejects_zero_rows_before_sampling() {
+        let result = DenseInput::training_binned_with_accessor(
+            0,
+            1,
+            Vec::new(),
+            Vec::new(),
+            2,
+            0.0,
+            Criterion::Gini,
+            2,
+            1,
+            0.0,
+            4,
+            1,
+            BinningStrategy::ExactSort,
+            1,
+            |_, _| 0.0,
+        );
+
+        assert_eq!(result.err().as_deref(), Some("X must contain at least one row"));
+    }
+
+    #[test]
+    fn csr_prediction_uses_implicit_zeros_and_routes_nan_consistently() {
+        let input = DenseInput::prediction_csr(
+            vec![0, 1, 1, 2],
+            vec![1, 0],
+            vec![3.0, f64::NAN],
+            3,
+            2,
+            2,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(input.value_at(0, 0), 0.0);
+        assert_eq!(input.value_at(0, 1), 3.0);
+        assert_eq!(input.value_at(1, 0), 0.0);
+        assert!(input.value_at(2, 0).is_nan());
+        assert_eq!(
+            input.split_iter(&Mask::new_all(3), 0, &0.0, true).collect::<Vec<_>>(),
+            vec![false, false, true]
+        );
+    }
+
+    #[test]
+    fn exact_and_histogram_forests_fit_predict_in_parallel_and_prune() {
+        for max_bins in [None, Some(4)] {
+            let input = binary_input(max_bins);
+            let forest = xrf::Forest::new_with_settings(
+                &input,
+                1,
+                1,
+                true,
+                false,
+                false,
+                23,
+                4,
+                2,
+                false,
+                None,
+            );
+            let expected = input.labels().to_vec();
+            let predict = |parallel: bool| {
+                let result = if parallel {
+                    forest.predict_parallel(&input, 3)
+                } else {
+                    forest.predict(&input)
+                };
+                result
+                    .predictions()
+                    .map(|(_, votes)| votes.winner())
+                    .collect::<Vec<_>>()
+            };
+
+            assert_eq!(predict(false), expected);
+            assert_eq!(predict(true), expected);
+            let gain = forest.gain_importance_normalised().collect::<Vec<_>>();
+            assert_eq!(gain, vec![(0, 1.0)]);
+
+            let pruned_input = binary_input(max_bins).with_ccp_alpha(1.0);
+            let pruned = xrf::Forest::new_with_settings(
+                &pruned_input,
+                1,
+                1,
+                true,
+                false,
+                false,
+                23,
+                4,
+                2,
+                false,
+                None,
+            );
+            assert!(matches!(
+                &pruned.tree_refs().next().unwrap().nodes[0],
+                xrf::Node::Leaf(..)
+            ));
+            assert_eq!(
+                pruned
+                    .predict(&pruned_input)
+                    .predictions()
+                    .map(|(_, votes)| votes.winner())
+                    .collect::<Vec<_>>(),
+                vec![0; 8]
+            );
+        }
+    }
+
+    #[test]
+    fn serial_and_parallel_forests_match_predictions_oob_votes_and_importance() {
+        let input = binary_input(Some(4));
+        let serial = xrf::Forest::new_with_settings(
+            &input, 24, 1, true, true, true, 91, 4, 2, true, Some(6),
+        );
+        let parallel = xrf::Forest::new_parallel_with_settings(
+            &input, 24, 1, true, true, true, 91, 3, 4, 2, true, Some(6),
+        );
+
+        let collect_probabilities = |forest: &xrf::Forest<DenseInput>| {
+            forest
+                .predict(&input)
+                .predictions()
+                .map(|(_, votes)| votes.probabilities())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(collect_probabilities(&serial), collect_probabilities(&parallel));
+        assert!(serial.has_oob() && parallel.has_oob());
+        assert!(serial.has_importance() && parallel.has_importance());
+        assert_eq!(serial.oob().count(), input.rows());
+        assert_eq!(parallel.oob().count(), input.rows());
+        for forest in [&serial, &parallel] {
+            for (_, votes) in forest.oob() {
+                let probabilities = votes.probabilities();
+                assert!(probabilities.iter().all(|value| value.is_finite()));
+                assert!(probabilities.iter().sum::<f64>() <= 1.0);
+            }
+        }
+        let serial_importance = serial.importance().collect::<Vec<_>>();
+        let parallel_importance = parallel.importance().collect::<Vec<_>>();
+        assert_eq!(serial_importance.len(), parallel_importance.len());
+        for (feature, serial_value) in serial_importance {
+            let parallel_value = parallel_importance
+                .iter()
+                .find(|(parallel_feature, _)| *parallel_feature == feature)
+                .unwrap()
+                .1;
+            assert!((serial_value - parallel_value).abs() < 1e-12);
         }
     }
 }
