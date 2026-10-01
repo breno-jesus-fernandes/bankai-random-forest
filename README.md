@@ -3,13 +3,14 @@
 [![PyPI Latest Release](https://img.shields.io/pypi/v/bankai-random-forest.svg)](https://pypi.org/project/bankai-random-forest/)
 [![Package Status](https://img.shields.io/pypi/status/bankai-random-forest.svg)](https://pypi.org/project/bankai-random-forest/)
 [![Python versions](https://img.shields.io/pypi/pyversions/bankai-random-forest.svg)](https://pypi.org/project/bankai-random-forest/)
+[![uv managed](https://img.shields.io/badge/uv-managed-blue)](https://docs.astral.sh/uv/)
 [![Downloads](https://static.pepy.tech/badge/bankai-random-forest)](https://pepy.tech/project/bankai-random-forest)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](COPYING)
 [![CI](https://github.com/breno-jesus-fernandes/bankai-random-forest/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/breno-jesus-fernandes/bankai-random-forest/actions/workflows/ci.yml)
 [![GitHub stars](https://img.shields.io/github/stars/breno-jesus-fernandes/bankai-random-forest.svg?style=social)](https://github.com/breno-jesus-fernandes/bankai-random-forest)
 
 Bankai is a high-performance random forest for Python, powered by a native Rust
-core based on a maintained fork of [XRF](https://gitlab.com/mbq/xrf/), the engine
+core and LightGBM-style histograms for pre-processing continuous features. The rust core is based on a maintained fork of [XRF](https://gitlab.com/mbq/xrf/), the engine
 behind [FRU](https://www.sciencedirect.com/science/article/pii/S2352711026004097).
 It combines parallel tree building and efficient permutation importance with
 optional LightGBM-style histograms for continuous features.
