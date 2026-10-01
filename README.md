@@ -7,6 +7,7 @@
 [![Downloads](https://static.pepy.tech/badge/bankai-random-forest)](https://pepy.tech/project/bankai-random-forest)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](COPYING)
 [![CI](https://github.com/breno-jesus-fernandes/bankai-random-forest/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/breno-jesus-fernandes/bankai-random-forest/actions/workflows/ci.yml)
+[![Dependency security](https://github.com/breno-jesus-fernandes/bankai-random-forest/actions/workflows/security.yml/badge.svg?branch=master)](https://github.com/breno-jesus-fernandes/bankai-random-forest/actions/workflows/security.yml)
 [![Coverage](https://codecov.io/gh/breno-jesus-fernandes/bankai-random-forest/branch/master/graph/badge.svg)](https://codecov.io/gh/breno-jesus-fernandes/bankai-random-forest)
 [![GitHub Release](https://img.shields.io/github/v/release/breno-jesus-fernandes/bankai-random-forest?include_prereleases)](https://github.com/breno-jesus-fernandes/bankai-random-forest/releases)
 [![PyPI deployment](https://img.shields.io/github/deployments/breno-jesus-fernandes/bankai-random-forest/pypi?label=PyPI%20deployment)](https://github.com/breno-jesus-fernandes/bankai-random-forest/deployments)

@@ -21,7 +21,7 @@ jobs:
       changed: ${{ steps.version.outputs.changed }}
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check whether this version is already on PyPI
         id: version
@@ -58,16 +58,16 @@ jobs:
           - name: macOS ARM64
             runner: macos-15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.2.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: 0.12.21
           enable-cache: true
@@ -92,12 +92,12 @@ jobs:
 
       - name: Upload Python coverage to Codecov
         if: matrix.name == 'Linux x86_64'
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: coverage.xml
           flags: python
           fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && secrets.CODECOV_TOKEN || '' }}
 
       - name: Run Python tests on other platforms
         if: matrix.name != 'Linux x86_64'
@@ -135,10 +135,10 @@ jobs:
             target: aarch64-apple-darwin
             manylinux: "off"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Build wheel
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@fdd104694b233054d6e985e29b3af9f126af7ac6 # v1
         with:
           command: build
           target: ${{ matrix.target }}
@@ -147,7 +147,7 @@ jobs:
           args: --release --locked --out dist
 
       - name: Upload wheel artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-${{ matrix.target }}
           path: dist/*.whl
@@ -159,10 +159,10 @@ jobs:
     needs: test
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.2.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: 0.12.21
           enable-cache: true
@@ -172,7 +172,7 @@ jobs:
         run: uv build --sdist --out-dir dist
 
       - name: Upload source distribution artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-sdist
           path: dist/*.tar.gz
@@ -185,64 +185,87 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Download all distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: release-*
           path: dist
           merge-multiple: true
 
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: 0.12.21
+
+      - name: Install SBOM generators
+        run: cargo install cargo-cyclonedx --locked --version 0.5.9
+
+      - name: Generate Rust and Python CycloneDX SBOMs from lockfiles
+        run: |
+          mkdir dist/packages
+          mv dist/*.whl dist/*.tar.gz dist/packages/
+          cargo metadata --locked --format-version 1 --no-deps >/dev/null
+          cargo cyclonedx --manifest-path Cargo.toml --format json --override-filename rust-sbom
+          mv rust-sbom.json dist/bankai-random-forest-rust.cdx.json
+          uv export --locked --no-dev --no-emit-project --format requirements-txt --output-file dist/requirements-sbom.txt
+          uvx --from cyclonedx-bom cyclonedx-py requirements dist/requirements-sbom.txt --of JSON -o dist/bankai-random-forest-python.cdx.json --no-validate
+          rm dist/requirements-sbom.txt
+
       - name: Upload complete release set
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: bankai-random-forest-release
           path: dist/*
           if-no-files-found: error
           retention-days: 14
 
+  attest:
+    name: Attest release artifacts
+    needs: distributions
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: bankai-random-forest-release
+          path: dist
+      - name: Generate artifact provenance attestations
+        uses: actions/attest-build-provenance@e4d4f7c39adfa4c260fb5c147f0622000aa14b99 # v4.0.0
+        with:
+          subject-path: 'dist/**'
+
   publish:
     name: Publish release to PyPI
-    needs: [release_gate, distributions]
+    needs: [release_gate, distributions, attest]
     if: needs.release_gate.outputs.changed == 'true'
     concurrency:
       group: publish-${{ needs.release_gate.outputs.version }}
       cancel-in-progress: false
     runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
     environment:
       name: pypi
       url: https://pypi.org/project/bankai-random-forest/${{ needs.release_gate.outputs.version }}/
     steps:
       - name: Download release distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: bankai-random-forest-release
           path: dist
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v10.2.0
+      - name: Publish to PyPI with Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@4bb033805d9e19112d8c697528791ff53f6c2f74 # v1.9.0
         with:
-          version: 0.12.21
-
-      - name: Check distributions
-        run: uvx --from twine twine check dist/*
-
-      - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: ${{ secrets.TWINE_USERNAME }}
-          TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
-        run: |
-          if [[ -z "${TWINE_USERNAME}" || -z "${TWINE_PASSWORD}" ]]; then
-            echo "::error::Configure TWINE_USERNAME and TWINE_PASSWORD as GitHub Actions secrets."
-            exit 1
-          fi
-          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "https://pypi.org/pypi/bankai-random-forest/${{ needs.release_gate.outputs.version }}/json")"
-          if [[ "${status}" == "200" ]]; then
-            echo "${{ needs.release_gate.outputs.version }} was published by another run; skipping duplicate upload."
-          elif [[ "${status}" == "404" ]]; then
-            uvx --from twine twine upload --non-interactive dist/*
-          else
-            echo "::error::Could not verify PyPI release state (HTTP ${status})."
-            exit 1
-          fi
+          packages-dir: dist/packages/
 
   github_release:
     name: Create GitHub release
@@ -253,7 +276,7 @@ jobs:
       contents: write
     steps:
       - name: Download release distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: bankai-random-forest-release
           path: dist
@@ -267,4 +290,4 @@ jobs:
           if [[ "${VERSION}" =~ (a|b|rc)[0-9]+$ ]]; then
             release_args+=(--prerelease)
           fi
-          gh release create "v${VERSION}" dist/* "${release_args[@]}"
+          gh release create "v${VERSION}" dist/packages/* dist/*.cdx.json "${release_args[@]}"
