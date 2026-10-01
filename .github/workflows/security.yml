@@ -39,7 +39,7 @@ jobs:
       - name: Verify lockfile and audit Rust dependencies
         run: |
           cargo metadata --locked --format-version 1 --no-deps >/dev/null
-          cargo deny check --locked advisories licenses bans sources
+          cargo deny check advisories licenses bans sources
 
   python_audit:
     name: Python dependency audit
