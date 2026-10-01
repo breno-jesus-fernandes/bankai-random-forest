@@ -6,12 +6,6 @@ behind [FRU](https://www.sciencedirect.com/science/article/pii/S2352711026004097
 It combines parallel tree building and efficient permutation importance with
 optional LightGBM-style histograms for continuous features.
 
-Preliminary results from an earlier run of the [Colab benchmark](https://colab.research.google.com/github/breno-jesus-fernandes/bankai-random-forest/blob/master/benchmarks/benchmark_fit_100k_500f_90_relevant.ipynb)
-reported Bankai's fit-plus-OOB-permutation workload 21× faster than scikit-learn
-fit plus validation permutation importance, and Bankai histogram fit 1.8× faster
-than LightGBM RF. These figures have not been remeasured with the notebook's
-current 1,000-row setup and are workload- and hardware-specific; see the notebook
-for current settings and comparison caveats.
 
 Bankai follows the familiar scikit-learn estimator API, and full compatibility
 is a project goal. The project is in alpha, so APIs and serialized models may
