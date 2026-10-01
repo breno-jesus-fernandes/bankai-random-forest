@@ -96,6 +96,20 @@ jobs:
         run: uv run --no-sync maturin develop --release --locked
 
       - name: Run Python tests
+        if: matrix.name == 'Linux x86_64'
+        run: uv run --no-sync pytest --cov=bankai_random_forest --cov-report=xml:coverage.xml -q
+
+      - name: Upload Python coverage to Codecov
+        if: matrix.name == 'Linux x86_64'
+        uses: codecov/codecov-action@v7
+        with:
+          files: coverage.xml
+          flags: python
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Run Python tests on other platforms
+        if: matrix.name != 'Linux x86_64'
         run: uv run --no-sync pytest -q
 
       - name: Run Rust tests
@@ -201,6 +215,9 @@ jobs:
       group: publish-${{ needs.release_gate.outputs.version }}
       cancel-in-progress: false
     runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/project/bankai-random-forest/${{ needs.release_gate.outputs.version }}/
     steps:
       - name: Download release distributions
         uses: actions/download-artifact@v4
@@ -232,3 +249,28 @@ jobs:
             echo "::error::Could not verify PyPI release state (HTTP ${status})."
             exit 1
           fi
+
+  github_release:
+    name: Create GitHub release
+    needs: [release_gate, publish]
+    if: needs.release_gate.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download release distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: bankai-random-forest-release
+          path: dist
+
+      - name: Create GitHub release with distributions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.release_gate.outputs.version }}
+        run: |
+          release_args=(--repo "$GITHUB_REPOSITORY" --title "v${VERSION}" --generate-notes --target "$GITHUB_SHA")
+          if [[ "${VERSION}" =~ (a|b|rc)[0-9]+$ ]]; then
+            release_args+=(--prerelease)
+          fi
+          gh release create "v${VERSION}" dist/* "${release_args[@]}"

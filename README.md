@@ -7,14 +7,14 @@
 [![Downloads](https://static.pepy.tech/badge/bankai-random-forest)](https://pepy.tech/project/bankai-random-forest)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](COPYING)
 [![CI](https://github.com/breno-jesus-fernandes/bankai-random-forest/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/breno-jesus-fernandes/bankai-random-forest/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/breno-jesus-fernandes/bankai-random-forest/branch/master/graph/badge.svg)](https://codecov.io/gh/breno-jesus-fernandes/bankai-random-forest)
+[![GitHub Release](https://img.shields.io/github/v/release/breno-jesus-fernandes/bankai-random-forest?include_prereleases)](https://github.com/breno-jesus-fernandes/bankai-random-forest/releases)
+[![PyPI deployment](https://img.shields.io/github/deployments/breno-jesus-fernandes/bankai-random-forest/pypi?label=PyPI%20deployment)](https://github.com/breno-jesus-fernandes/bankai-random-forest/deployments)
 [![GitHub stars](https://img.shields.io/github/stars/breno-jesus-fernandes/bankai-random-forest.svg?style=social)](https://github.com/breno-jesus-fernandes/bankai-random-forest)
 
 Bankai is a high-performance random forest for Python, powered by a native Rust
 core and LightGBM-style histograms for pre-processing continuous features. The rust core is based on a maintained fork of [XRF](https://gitlab.com/mbq/xrf/), the engine
 behind [FRU](https://www.sciencedirect.com/science/article/pii/S2352711026004097).
-It combines parallel tree building and efficient permutation importance with
-optional LightGBM-style histograms for continuous features.
-
 
 Bankai follows the familiar scikit-learn estimator API, and full compatibility
 is a project goal. The project is in alpha, so APIs and serialized models may
@@ -168,6 +168,9 @@ uv run cargo test --workspace --locked
 
 Install optional benchmark dependencies with `uv sync --locked --group benchmark`.
 The [roadmap](docs/ROADMAP.md) tracks project status and planned work.
+
+The coverage badge reports Python package coverage from the Linux x86_64 CI job;
+it does not include Rust line coverage.
 
 ## License
 
