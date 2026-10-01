@@ -13,12 +13,12 @@
 [![PyPI deployment](https://img.shields.io/github/deployments/breno-jesus-fernandes/bankai-random-forest/pypi?label=PyPI%20deployment)](https://github.com/breno-jesus-fernandes/bankai-random-forest/deployments)
 [![GitHub stars](https://img.shields.io/github/stars/breno-jesus-fernandes/bankai-random-forest.svg?style=social)](https://github.com/breno-jesus-fernandes/bankai-random-forest)
 
-BankaiRF is a high-performance Random Forest engine powered by a native Rust core. By leveraging LightGBM-style histograms for continuous feature pre-processing, it delivers fast and efficient training while maintaining full compatibility with the familiar scikit-learn estimator API.
+BankaiRF is a high-performance Random Forest engine powered by a native Rust core. By leveraging LightGBM-style histograms for continuous feature pre-processing, it delivers fast and efficient training while maintaining full compatibility with the familiar scikit-learn estimator API. The Rust core is based on a maintained fork of [XRF](https://gitlab.com/mbq/xrf/), the engine
+behind [FRU](https://www.sciencedirect.com/science/article/pii/S2352711026004097).
 
 ⚠️ Project Status: BankaiRF is currently in Alpha. APIs and serialized models are subject to change.
 
-The rust core is based on a maintained fork of [XRF](https://gitlab.com/mbq/xrf/), the engine
-behind [FRU](https://www.sciencedirect.com/science/article/pii/S2352711026004097).
+
 
 ## Install
 
