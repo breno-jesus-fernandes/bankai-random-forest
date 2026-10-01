@@ -16,7 +16,7 @@
 BankaiRF is a high-performance Random Forest powered by a native Rust core and LightGBM-style histograms for pre-processing continuous features. The rust core is based on a maintained fork of [XRF](https://gitlab.com/mbq/xrf/), the engine
 behind [FRU](https://www.sciencedirect.com/science/article/pii/S2352711026004097).
 
-Bankai follows the familiar scikit-learn estimator API, and full compatibility
+BankaiRF follows the familiar scikit-learn estimator API, and full compatibility
 is a project goal. The project is in alpha, so APIs and serialized models may
 change.
 
