@@ -208,7 +208,7 @@ jobs:
 
       - name: Generate Rust and Python CycloneDX SBOMs from lockfiles
         run: |
-          mkdir dist/packages
+          mkdir -p dist/packages
           mv dist/*.whl dist/*.tar.gz dist/packages/
           cargo metadata --locked --format-version 1 --no-deps >/dev/null
           cargo cyclonedx --manifest-path Cargo.toml --format json --override-filename rust-sbom
