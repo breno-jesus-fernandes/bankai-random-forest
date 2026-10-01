@@ -4,6 +4,7 @@ version = "0.1.0-alpha.8"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "Rust core and PyO3 bindings for bankai-random-forest."
+publish = false
 
 [workspace]
 members = ["crates/xrf"]

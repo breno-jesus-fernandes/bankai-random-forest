@@ -35,7 +35,7 @@ jobs:
         with:
           toolchain: stable
       - name: Install cargo-deny
-        run: cargo install cargo-deny --locked --version 0.18.4
+        run: cargo install cargo-deny --locked --version 0.20.2
       - name: Verify lockfile and audit Rust dependencies
         run: |
           cargo metadata --locked --format-version 1 --no-deps >/dev/null
