@@ -13,13 +13,11 @@
 [![PyPI deployment](https://img.shields.io/github/deployments/breno-jesus-fernandes/bankai-random-forest/pypi?label=PyPI%20deployment)](https://github.com/breno-jesus-fernandes/bankai-random-forest/deployments)
 [![GitHub stars](https://img.shields.io/github/stars/breno-jesus-fernandes/bankai-random-forest.svg?style=social)](https://github.com/breno-jesus-fernandes/bankai-random-forest)
 
-Bankai is a high-performance random forest for Python, powered by a native Rust
-core and LightGBM-style histograms for pre-processing continuous features. The rust core is based on a maintained fork of [XRF](https://gitlab.com/mbq/xrf/), the engine
+BankaiRF is a high-performance Random Forest engine powered by a native Rust core. By leveraging LightGBM-style histograms for continuous feature pre-processing, it delivers fast and efficient training while maintaining full compatibility with the familiar scikit-learn estimator API. The Rust core is based on a maintained fork of [XRF](https://gitlab.com/mbq/xrf/), the engine
 behind [FRU](https://www.sciencedirect.com/science/article/pii/S2352711026004097).
 
-Bankai follows the familiar scikit-learn estimator API, and full compatibility
-is a project goal. The project is in alpha, so APIs and serialized models may
-change.
+⚠️ BankaiRF is currently in Alpha. APIs and serialized models are subject to change.
+
 
 ## Install
 
@@ -31,147 +29,156 @@ python -m pip install bankai-random-forest
 
 ## Quick start
 
+This example uses the Covertype forest-cover dataset, which has 581,012 rows and 54 named features. It samples 100,000 rows with seed `2077`, then treats cover type 2 as the positive class and all other cover types as the negative class. The dataset is provided by scikit-learn and downloaded on first use. [Dataset details](https://scikit-learn.org/stable/modules/generated/sklearn.datasets.fetch_covtype.html)
+
 ```python
-from sklearn.datasets import load_breast_cancer
-from sklearn.metrics import accuracy_score
+import pandas as pd
+from sklearn.datasets import fetch_covtype
+from sklearn.metrics import f1_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
 from bankai_random_forest import BankaiRandomForestClassifier
 
-X, y = load_breast_cancer(return_X_y=True)
+covertype = fetch_covtype(as_frame=True)
+X = covertype.data
+y = (covertype.target == 2).astype("int8")
+
+X, _, y, _ = train_test_split(
+    X, y, train_size=100_000, random_state=2077, stratify=y
+)
+
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
+    X, y, test_size=0.2, random_state=2077, stratify=y
 )
 
 model = BankaiRandomForestClassifier(
-    n_estimators=200,
-    max_bins=63,
-    binning_strategy="sampled_select",
-    importance_type="permutation",
+    n_estimators=40,
+    criterion="gini",
+    max_depth=20,
+    max_leaf_nodes=511,
+    min_samples_leaf=5,
+    max_features=None,
+    bootstrap=True,
+    max_samples=0.8,
     n_jobs=-1,
-    random_state=42,
+    random_state=2077,
+    importance_type="permutation", # Native permutation importance
+    max_bins=63, # Enable histogram binning
 )
 model.fit(X_train, y_train)
 
 predictions = model.predict(X_test)
-probabilities = model.predict_proba(X_test)
-print(f"Accuracy: {accuracy_score(y_test, predictions):.3f}")
-print("Probabilities:", probabilities[:3])
-print("Feature importances:", model.feature_importances_)
+positive_class = list(model.classes_).index(1)
+probabilities = model.predict_proba(X_test)[:, positive_class]
+print(f"F1: {f1_score(y_test, predictions):.3f}")
+print(f"ROC-AUC: {roc_auc_score(y_test, probabilities):.3f}")
+
+importances = pd.Series(model.feature_importances_, index=X.columns, name="importance")
+print(importances.sort_values(ascending=False).head(10))
 ```
 
-`max_bins` enables histogram-based split search in this example. Set
-`max_bins=None` to use exact split search. Histogram cuts can change the fitted
-trees and the accuracy/speed trade-off; evaluate both on your data when that
-matters.
+The pandas DataFrame keeps the 54 original feature names, so the feature importances are labeled with names such as `Elevation`, `Aspect`, and `Slope`.
 
-## Training options
+## Classifier reference
 
-Bankai follows the familiar `RandomForestClassifier` estimator pattern and
-supports common options such as `n_estimators`, `criterion`, `max_depth`,
-`min_samples_split`, `min_samples_leaf`, `max_features`, `max_leaf_nodes`,
-`bootstrap`, `max_samples`, `class_weight`, `random_state`, `n_jobs`,
-`oob_score`, and `ccp_alpha`.
-
-| Option | Behavior |
-| --- | --- |
-| `n_jobs` | `None` uses one worker. Negative values follow joblib-style CPU-count rules; `n_jobs=-1` uses all visible logical CPUs. |
-| `max_bins` | `None` (default) uses exact split search. An integer from 2 to 255 enables histogram training. |
-| `binning_strategy` | With histograms, choose `exact_sort` (default), `sampled_sort`, `exact_select`, or `sampled_select`. |
-| `bin_sample_size` | Maximum number of rows used per feature by sampled strategies; defaults to 200,000. |
-| `importance_type` | `gain` (default), `split`, or `permutation`. Permutation importance uses out-of-bag accuracy decrease and requires `bootstrap=True`; it can add fit time. |
-| `monotonic_cst` | One `-1`, `0`, or `1` constraint per feature; currently limited to binary, single-output classification without NaN values. |
-
-Sampled binning strategies use a deterministic subset of rows to construct
-feature cuts. Selection strategies avoid fully sorting each feature, while
-repeated feature values can produce cuts that differ from the sort strategies.
-For reproducible model comparisons, keep the strategy, sample size, seed, and
-thread count fixed.
-
-## API and supported inputs
-
-- Dense NumPy arrays and SciPy CSR/CSC matrices are supported. Numeric features
-  are expected; encode categorical columns in a scikit-learn transformer such
-  as `OneHotEncoder`.
-- NaN feature values are supported in dense and sparse inputs and are routed by
-  the fitted trees. Infinite values are rejected.
-- Binary, multiclass, multioutput, and multilabel classification targets are
-  supported. Bankai trains a separate native forest for each output, so its
-  multioutput trees and probabilities need not match scikit-learn's shared-tree
-  implementation.
-- `feature_importances_` defaults to gain-based importance; its values are not
-  guaranteed to match scikit-learn's impurity importance. Bankai also provides
-  split-count and out-of-bag permutation importance.
-- `warm_start=True` does not append only new trees: a later `fit` rebuilds the
-  forest. For multioutput models, `estimators_`, `apply`, `decision_path`, and
-  TreeSHAP inspection expose the first output forest.
-
-Tested with scikit-learn 1.9.1 (`>=1.9.1,<1.10`).
-
-## Feature explanations
-
-SHAP is optional and is not a runtime dependency. For TreeSHAP, pass a fitted
-single-output classifier directly to `TreeExplainer`:
+`BankaiRandomForestClassifier` follows scikit-learn's estimator pattern. The defaults and parameter meanings are listed here; behavior marked as a Bankai limitation is intentionally called out because it differs from scikit-learn.
 
 ```python
-import shap
+from bankai_random_forest import BankaiRandomForestClassifier
 
-explainer = shap.TreeExplainer(model)
-explanation = explainer(X_test[:10])
+model = BankaiRandomForestClassifier(
+    n_estimators=100,
+    criterion="gini",
+    max_depth=None,
+    min_samples_split=2,
+    min_samples_leaf=1,
+    min_weight_fraction_leaf=0.0,
+    max_features="sqrt",
+    max_leaf_nodes=None,
+    min_impurity_decrease=0.0,
+    bootstrap=True,
+    oob_score=False,
+    n_jobs=None,
+    random_state=None,
+    verbose=0,
+    warm_start=False,
+    class_weight=None,
+    ccp_alpha=0.0,
+    max_samples=None,
+    monotonic_cst=None,
+    importance_type="gain",
+    max_bins=None,
+    binning_strategy="exact_sort",
+    bin_sample_size=200_000,
+)
 ```
 
-See the [SHAP compatibility notes](docs/SHAP_COMPATIBILITY.md) for output
-shapes, multioutput limitations, and model-agnostic alternatives.
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `n_estimators` | `100` | Number of trees in the forest. |
+| `criterion` | `"gini"` | Split criterion: `"gini"`, `"entropy"`, or `"log_loss"`. `entropy` and `log_loss` use the same entropy criterion. |
+| `max_depth` | `None` | Maximum tree depth. `None` uses Bankai's internal depth cap of 512; otherwise use an integer of at least 1. |
+| `min_samples_split` | `2` | Minimum samples required to split a node. Accepts an integer of at least 2 or a fraction in `(0, 1]` of the training rows. |
+| `min_samples_leaf` | `1` | Minimum samples required at a leaf. Accepts an integer of at least 1 or a fraction in `(0, 1]` of the training rows. |
+| `min_weight_fraction_leaf` | `0.0` | Minimum fraction of the total sample weight required at a leaf; must be between 0 and 0.5. |
+| `max_features` | `"sqrt"` | Features considered at each split: `"sqrt"`, `"log2"`, `None` (all features), an integer count, or a fraction in `(0, 1]`. |
+| `max_leaf_nodes` | `None` | Maximum number of leaves per tree. `None` means no explicit leaf limit; otherwise use an integer of at least 1. |
+| `min_impurity_decrease` | `0.0` | A split is made only when its impurity decrease is at least this non-negative value. |
+| `bootstrap` | `True` | Whether each tree is trained on a bootstrap sample. Required for out-of-bag scoring and permutation importance. |
+| `oob_score` | `False` | If true, calculate out-of-bag predictions and accuracy; a callable can provide a custom score. Requires `bootstrap=True`. |
+| `n_jobs` | `None` | Number of worker threads. `None` uses one worker, a positive integer sets the count, and negative values follow joblib CPU-count rules (`-1` uses all available CPUs). `0` is invalid. |
+| `random_state` | `None` | Seed or `RandomState` controlling bootstrap samples, feature selection, and other randomized steps. Set it for repeatable fits. |
+| `verbose` | `0` | Non-negative integer verbosity level. Values above zero print fit progress. |
+| `warm_start` | `False` | Accepted for estimator compatibility. Currently, calling `fit` again rebuilds the forest instead of adding trees to the previous fit. |
+| `class_weight` | `None` | `None`, `"balanced"`, `"balanced_subsample"`, a class-to-weight dictionary, or (for multioutput targets) a list of dictionaries, one per output. |
+| `ccp_alpha` | `0.0` | Non-negative cost-complexity pruning strength. Larger values prune more of each tree. |
+| `max_samples` | `None` | Number or fraction of rows sampled for each tree. Accepts an integer count or a fraction in `(0, 1]`; only valid with `bootstrap=True`. `None` samples the full training size. |
+| `monotonic_cst` | `None` | One constraint per input feature: `-1` decreasing, `0` unconstrained, or `1` increasing. Currently supported only for binary single-output classification. |
+| `importance_type` | `"gain"` | How `feature_importances_` is calculated: `"gain"` (impurity reduction), `"split"` (split counts), or `"permutation"` (out-of-bag accuracy decrease). Permutation importance requires `bootstrap=True` and adds work during `fit`. |
+| `max_bins` | `None` | `None` uses exact split search. An integer from 2 to 255 enables histogram split search. |
+| `binning_strategy` | `"exact_sort"` | How histogram cut points are found: `"exact_sort"`, `"sampled_sort"`, `"exact_select"`, or `"sampled_select"`. Applies only when `max_bins` is set. |
+| `bin_sample_size` | `200_000` | Positive maximum number of rows used per feature by sampled histogram strategies. Applies only when `max_bins` is set. |
 
-## Performance
+Call `fit(X, y, sample_weight=None)` to train. `sample_weight` accepts one finite, non-negative weight per row. The fitted estimator exposes scikit-learn-style methods including `predict`, `predict_proba`, and `predict_log_proba`, plus `classes_`, `feature_importances_`, `n_features_in_`, and `feature_names_in_` when the input has named columns.
 
-Fit time depends on the data, tree settings, hardware, and importance
-calculation. The benchmark report includes stage breakdowns, later Bankai
-measurements, and comparison caveats; results are specific to the recorded
-workload and are not a performance guarantee.
+`predict_proba` returns one probability array for a single target and a list of arrays for multioutput targets. `monotonic_cst` is not supported for multioutput classification. `oob_score=True` computes accuracy; to use another metric, pass a callable with signature `metric(y_true, y_pred)`.
 
-Run the [binary classification fit benchmark in Google Colab](https://colab.research.google.com/github/breno-jesus-fernandes/bankai-random-forest/blob/master/benchmarks/benchmark_fit_100k_500f_90_relevant.ipynb)
-or [view the notebook in this repository](benchmarks/benchmark_fit_100k_500f_90_relevant.ipynb).
-It compares scikit-learn RF, LightGBM RF, and Bankai on one shared dataset with
-`n_jobs=-1`; the first cell installs the packages. The scikit-learn comparison
-times fit plus validation permutation importance against Bankai fit with OOB
-permutation importance. The LightGBM comparison remains fit-only with gain on
-both models.
+## Regressor
 
-## Save and restore models
-
-Fitted models can be saved with joblib:
-
-```python
-import joblib
-
-joblib.dump(model, "classifier.joblib")
-restored = joblib.load("classifier.joblib")
-predictions = restored.predict(X_test)
-```
-
-Bankai's serialized state includes training arrays and rebuilds the native
-forest when loaded. Loading therefore has reconstruction cost and model files
-can be large. Keep Bankai and Python versions consistent when restoring a
-model, and only load joblib files from trusted sources. See the
-[serialization notes](docs/JOBLIB_COMPATIBILITY.md).
+`BankaiRandomForestRegressor` follows the `RandomForestRegressor` parameter defaults and
+supports single and multioutput regression. Regression currently delegates training and
+prediction to scikit-learn; `max_bins`, `binning_strategy`, and `bin_sample_size` are
+accepted for API consistency but do not affect regression training. The supported criteria
+are `squared_error`, `absolute_error`, and `poisson`; Poisson targets must
+be nonnegative and have a positive sum. With `importance_type="permutation"`, set
+`oob_score=True`; importance is the decrease in R² from aggregated OOB predictions.
 
 ## Development
 
-Building from source requires Python 3.11 or newer, Rust, and `uv`:
+To build and run the project locally, install Git, Python 3.11 or newer, a stable Rust toolchain, and [`uv`](https://docs.astral.sh/uv/getting-started/installation/). On Windows, install the Rust MSVC build tools; on macOS, install the Xcode command-line tools.
+
+Clone the repository and create the locked development environment:
 
 ```bash
+git clone https://github.com/breno-jesus-fernandes/bankai-random-forest.git
+cd bankai-random-forest
+uv python install 3.11
 uv sync --locked --no-install-project
 uv run maturin develop --release --locked
+```
+
+Run the Python and Rust test suites from the repository root:
+
+```bash
 uv run pytest -q
 uv run cargo test --workspace --locked
 ```
 
-Install optional benchmark dependencies with `uv sync --locked --group benchmark`.
-The [roadmap](docs/ROADMAP.md) tracks project status and planned work.
+Benchmark scripts use an additional dependency group. Install it when needed with `uv sync --locked --group benchmark`. All commands use the versions recorded in `uv.lock` and `Cargo.lock`.
 
-The coverage badge reports Python package coverage from the Linux x86_64 CI job;
-it does not include Rust line coverage.
+Contributors are expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+See the [contribution guide](CONTRIBUTING.md) for the fork and pull request workflow,
+local checks, and maintainer review expectations.
 
 ## License
 
