@@ -1,0 +1,110 @@
+SHAP global nativo: racional, aceleracao e verificacao de qualidade
+====================================================================
+
+Motivacao
+---------
+
+A importância SHAP global é a média, por linha explicada, do valor absoluto das
+contribuições SHAP do ensemble. Em classificadores multiclasse, as classes são
+agregadas por média uniforme e o vetor final é normalizado para somar 1.
+
+O núcleo já calculava TreeSHAP path-dependent em Rust. A primeira versão da
+importância global evitava devolver o tensor completo ao Python, mas mantinha o
+mesmo percurso recursivo. A medição preliminar confirmou que reduzir o resultado
+no Rust, por si só, quase não alterava o tempo: 0,1543 s contra 0,1548 s no modo
+exato e 0,1895 s contra 0,1898 s com histogramas.
+
+O gargalo estava nas ramificações da recursão, que copiavam quatro vetores de
+caminho dimensionados pelo número total de nós da árvore. Isso criava alocações
+e cópias repetidas, embora só o prefixo do caminho ativo fosse necessário.
+
+Implementacao
+-------------
+
+O núcleo Rust cria um workspace de buffers por worker e reutiliza um frame por
+nível da recursão. Cada ramificação copia somente o prefixo ativo para o frame
+seguinte, sem alocar memória no heap por nó. As contribuições do ensemble são
+acumuladas por linha num vetor contíguo e reduzidas diretamente para o vetor
+global de importâncias.
+
+As linhas explicadas são independentes e podem ser distribuídas segundo
+n_jobs. Cada worker mantém o próprio acumulador e workspace; os acumuladores
+são combinados em ordem determinística. O cálculo permanece path-dependent,
+usa os covers das folhas e soma as árvores antes de aplicar o valor absoluto.
+SHAP não é dependência de runtime.
+
+Benchmark de desempenho
+-----------------------
+
+Comando:
+  uv run maturin develop --release --skip-install --features shap-benchmark-legacy
+  uv run python benchmarks/run_shap_importance_reduction_benchmark.py
+
+A feature shap-benchmark-legacy compila a rota recursiva anterior apenas para
+medição; ela não faz parte do build padrão. Carga: 1.000 linhas de treino, 20
+features, 100 árvores, profundidade máxima configurada 12 e 100 linhas
+explicadas. Foram feitas cinco repetições após aquecimento e reportada a
+mediana. O processo detectou 8 workers. O modo serial mede os buffers
+reutilizados; n_jobs=-1 mede buffers mais paralelismo.
+
+Modo             Sem aceleração   Otimizado, 1 worker   Otimizado, n_jobs=-1
+Exato            163,3 ms         42,5 ms               10,5 ms
+Histograma, 32   200,9 ms         50,9 ms               13,8 ms
+
+Ganho frente à rota sem aceleração:
+  Exato:                 3,84x serial; 15,55x com n_jobs=-1.
+  Histograma, 32 bins:   3,95x serial; 14,59x com n_jobs=-1.
+
+O tensor de referência tem payload numérico de 32.000 bytes (100 x 20 x 2 x
+8), sem contar cabeçalhos e alocações das listas aninhadas. O workspace dos
+frames foi estimado em 5,4 KB por worker no modo exato e 6,3 KB com
+histogramas. São estimativas estruturais, não uma medição de pico de RSS.
+
+Verificacao de qualidade
+-----------------------
+
+Comando:
+  uv run maturin develop --release --skip-install --features shap-benchmark-legacy
+  uv run python benchmarks/run_shap_importance_quality_benchmark.py
+
+O benchmark cobre oito combinações: binário/multiclasse, exato/16 bins e
+denso/CSR. Todos os conjuntos contêm valores ausentes. Em cada combinação,
+compara a implementação acelerada com a rota recursiva anterior, com a média
+absoluta calculada a partir do tensor SHAP individual e, em paralelo, com a
+execução serial. As métricas são erro máximo/médio absoluto, correlação do
+ranking das features e sobreposição do top 5.
+
+Resultados agregados das oito combinações:
+  Erro máximo serial contra a rota anterior:          0.
+  Erro máximo paralelo contra a rota anterior:        2,22e-16.
+  Erro máximo reduzido contra o tensor individual:    2,78e-16.
+  Erro médio absoluto máximo contra o tensor:          4,51e-17.
+  Correlação de ranking em todas as comparações:      1,0.
+  Sobreposição do top 5 em todas as comparações:      100%.
+
+Os resultados demonstram paridade numérica nas cargas testadas e nenhum efeito
+observável no ranking das features. Isso não é uma garantia estatística para
+qualquer modelo ou dataset; os dados explicados e a amostragem continuam
+determinando a importância medida.
+
+Cobertura adicional e regressao encontrada
+-------------------------------------------
+
+Os testes de integração também verificam seleção determinística sem reposição,
+modo sampled quando o tamanho pedido excede os dados, modo all, modo explicit,
+normalização quando a floresta não tem splits, validação de parâmetros e de X,
+serialização joblib e equivalência entre workers. A comparação densa/CSR com
+histogramas revelou que valores ausentes esparsos chegavam ao TreeSHAP como um
+bin numérico sentinela. O núcleo foi corrigido para preservar NaN na leitura de
+valores de predição, permitindo que SHAP use a direção de missing da árvore.
+
+Arquivos dos benchmarks
+-----------------------
+
+  benchmarks/run_shap_importance_reduction_benchmark.py
+    Compara latência e resultado entre a rota anterior, a redução serial e a
+    redução paralela; também informa payload SHAP e estimativa do workspace.
+
+  benchmarks/run_shap_importance_quality_benchmark.py
+    Compara qualidade entre a rota anterior, a redução acelerada, os valores
+    individuais e os modos serial/paralelo.

@@ -475,6 +475,8 @@ impl NativeForest {
         if columns != self.n_features { return Err(PyValueError::new_err("X has a different number of features")); }
         let input = matrix.into_prediction(rows, columns, self.n_classes, self.histogram_edges.as_deref()).map_err(PyValueError::new_err)?;
         let trees: Vec<Vec<ShapNode>> = forest.tree_refs().map(|tree| { let mut nodes = Vec::new(); flatten_tree(tree, &mut nodes); nodes }).collect();
+        let max_tree_depth = trees.iter().map(|tree| tree_max_depth(tree)).max().unwrap_or(0);
+        let mut workspace = ShapWorkspace::new(max_tree_depth, self.n_features);
         let count = trees.len() as f64;
         let mut base = vec![0.0; self.n_classes];
         for tree in &trees {
@@ -486,11 +488,98 @@ impl NativeForest {
         }
         for value in &mut base { *value /= count; }
         let mut output = vec![vec![vec![0.0; self.n_classes]; self.n_features]; rows];
+        let mut flat_output = vec![0.0; self.n_features * self.n_classes];
         for row in 0..rows {
-            for tree in &trees { tree_shap_one(tree, &input, row, self.n_features, self.n_classes, &mut output[row]); }
-            for feature in &mut output[row] { for value in feature { *value /= count; } }
+            flat_output.fill(0.0);
+            for tree in &trees { tree_shap_one_with_workspace(tree, &input, row, self.n_features, self.n_classes, &mut flat_output, &mut workspace); }
+            for feature in 0..self.n_features {
+                for class in 0..self.n_classes {
+                    output[row][feature][class] = flat_output[feature * self.n_classes + class] / count;
+                }
+            }
         }
         Ok((output, base))
+    }
+
+    /// Reduce ensemble TreeSHAP values directly to normalized global importances.
+    #[pyo3(signature = (x, n_jobs=1))]
+    fn shap_importances(&self, x: &Bound<'_, PyAny>, n_jobs: usize) -> PyResult<Vec<f64>> {
+        let forest = self.forest.as_ref().ok_or_else(|| PyRuntimeError::new_err("forest is not fitted"))?;
+        let matrix = matrix_to_owned(x, None)?;
+        let (rows, columns) = matrix.shape();
+        if columns != self.n_features { return Err(PyValueError::new_err("X has a different number of features")); }
+        if rows == 0 { return Err(PyValueError::new_err("X must contain at least one row")); }
+        let input = matrix.into_prediction(rows, columns, self.n_classes, self.histogram_edges.as_deref()).map_err(PyValueError::new_err)?;
+        let trees: Vec<Vec<ShapNode>> = forest.tree_refs().map(|tree| { let mut nodes = Vec::new(); flatten_tree(tree, &mut nodes); nodes }).collect();
+        let max_tree_depth = trees.iter().map(|tree| tree_max_depth(tree)).max().unwrap_or(0);
+        let workers = n_jobs.max(1).min(rows);
+        let chunk_size = rows.div_ceil(workers);
+        let partials = std::thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(workers);
+            for start in (0..rows).step_by(chunk_size) {
+                let end = (start + chunk_size).min(rows);
+                let input_ref = &input;
+                let trees_ref = &trees;
+                handles.push(scope.spawn(move || {
+                    let mut workspace = ShapWorkspace::new(max_tree_depth, self.n_features);
+                    let mut sums = vec![0.0; self.n_features];
+                    let mut ensemble = vec![0.0; self.n_features * self.n_classes];
+                    for row in start..end {
+                        ensemble.fill(0.0);
+                        for tree in trees_ref {
+                            tree_shap_one_with_workspace(tree, input_ref, row, self.n_features, self.n_classes, &mut ensemble, &mut workspace);
+                        }
+                        let tree_count = trees_ref.len() as f64;
+                        for feature in 0..self.n_features {
+                            let class_offset = feature * self.n_classes;
+                            for class in 0..self.n_classes {
+                                sums[feature] += (ensemble[class_offset + class] / tree_count).abs()
+                                    / self.n_classes as f64;
+                            }
+                        }
+                    }
+                    sums
+                }));
+            }
+            handles.into_iter().map(|handle| handle.join().expect("SHAP worker panicked")).collect::<Vec<_>>()
+        });
+        let mut importances = vec![0.0; self.n_features];
+        for partial in partials { for (total, value) in importances.iter_mut().zip(partial) { *total += value; } }
+        let total: f64 = importances.iter().sum();
+        if total > 0.0 { for value in &mut importances { *value /= total; } }
+        Ok(importances)
+    }
+
+    /// Legacy allocation-heavy reducer used only for before/after benchmarks.
+    #[cfg(feature = "shap-benchmark-legacy")]
+    fn shap_importances_unaccelerated_for_benchmark(
+        &self,
+        x: &Bound<'_, PyAny>,
+    ) -> PyResult<Vec<f64>> {
+        let forest = self.forest.as_ref().ok_or_else(|| PyRuntimeError::new_err("forest is not fitted"))?;
+        let matrix = matrix_to_owned(x, None)?;
+        let (rows, columns) = matrix.shape();
+        if columns != self.n_features { return Err(PyValueError::new_err("X has a different number of features")); }
+        if rows == 0 { return Err(PyValueError::new_err("X must contain at least one row")); }
+        let input = matrix.into_prediction(rows, columns, self.n_classes, self.histogram_edges.as_deref()).map_err(PyValueError::new_err)?;
+        let trees: Vec<Vec<ShapNode>> = forest.tree_refs().map(|tree| { let mut nodes = Vec::new(); flatten_tree(tree, &mut nodes); nodes }).collect();
+        let mut importances = vec![0.0; self.n_features];
+        for row in 0..rows {
+            let mut ensemble = vec![vec![0.0; self.n_classes]; self.n_features];
+            for tree in &trees {
+                tree_shap_one_legacy(tree, &input, row, self.n_features, self.n_classes, &mut ensemble);
+            }
+            let tree_count = trees.len() as f64;
+            for feature in 0..self.n_features {
+                for class in 0..self.n_classes {
+                    importances[feature] += (ensemble[feature][class] / tree_count).abs()
+                        / self.n_classes as f64;
+                }
+            }
+        }
+        let total: f64 = importances.iter().sum();
+        if total > 0.0 { for value in &mut importances { *value /= total; } }
+        Ok(importances)
     }
 }
 
@@ -519,20 +608,127 @@ fn leaf_vote_covers(tree: &[ShapNode], index: usize, out: &mut [f64]) {
     leaf_vote_covers(tree, node.right, out);
 }
 
+struct PathFrame { features: Vec<usize>, zero: Vec<f64>, one: Vec<f64>, weights: Vec<f64> }
+
+struct ShapWorkspace { frames: Vec<PathFrame> }
+
+impl ShapWorkspace {
+    fn new(max_depth: usize, n_features: usize) -> Self {
+        // A feature can occur at most once on TreeSHAP's active path because
+        // repeated splits unwind the earlier occurrence.
+        let path_capacity = max_depth.min(n_features) + 2;
+        let frames = (0..=max_depth + 1).map(|_| PathFrame {
+            features: vec![0; path_capacity], zero: vec![0.0; path_capacity],
+            one: vec![0.0; path_capacity], weights: vec![0.0; path_capacity],
+        }).collect();
+        Self { frames }
+    }
+}
+
+fn tree_max_depth(tree: &[ShapNode]) -> usize {
+    let mut stack = vec![(0usize, 0usize)];
+    let mut maximum = 0;
+    while let Some((index, depth)) = stack.pop() {
+        let node = &tree[index];
+        if node.vote.is_none() {
+            let next = depth + 1;
+            maximum = maximum.max(next);
+            stack.push((node.left, next));
+            stack.push((node.right, next));
+        }
+    }
+    maximum
+}
+
+#[cfg(test)]
 fn tree_shap_one(tree: &[ShapNode], input: &DenseInput, row: usize, features: usize, classes: usize, out: &mut [Vec<f64>]) {
-    let max_depth = tree.len() + 2;
-    let mut path_features = vec![0usize; max_depth]; let mut zero = vec![0.0; max_depth]; let mut one = vec![0.0; max_depth]; let mut weights = vec![0.0; max_depth];
-    recurse_shap(tree, input, row, features, classes, out, 0, 0, &mut path_features, &mut zero, &mut one, &mut weights, 1.0, 1.0, usize::MAX);
+    let mut flat = vec![0.0; features * classes];
+    let mut workspace = ShapWorkspace::new(tree_max_depth(tree), features);
+    tree_shap_one_with_workspace(tree, input, row, features, classes, &mut flat, &mut workspace);
+    for feature in 0..features {
+        for class in 0..classes { out[feature][class] += flat[feature * classes + class]; }
+    }
+}
+
+fn tree_shap_one_with_workspace(tree: &[ShapNode], input: &DenseInput, row: usize, features: usize, classes: usize, out: &mut [f64], workspace: &mut ShapWorkspace) {
+    recurse_shap(tree, input, row, features, classes, out, 0, 0, 0, workspace, 1.0, 1.0, usize::MAX);
+}
+
+#[cfg(feature = "shap-benchmark-legacy")]
+fn tree_shap_one_legacy(tree: &[ShapNode], input: &DenseInput, row: usize, features: usize, classes: usize, out: &mut [Vec<f64>]) {
+    let capacity = tree.len() + 2;
+    let mut path_features = vec![0usize; capacity];
+    let mut zero = vec![0.0; capacity];
+    let mut one = vec![0.0; capacity];
+    let mut weights = vec![0.0; capacity];
+    recurse_shap_legacy(tree, input, row, features, classes, out, 0, 0, &mut path_features, &mut zero, &mut one, &mut weights, 1.0, 1.0, usize::MAX);
+}
+
+#[cfg(feature = "shap-benchmark-legacy")]
+#[allow(clippy::too_many_arguments)]
+fn recurse_shap_legacy(tree: &[ShapNode], input: &DenseInput, row: usize, _features: usize, classes: usize, out: &mut [Vec<f64>], index: usize, depth: usize, pf: &mut [usize], z: &mut [f64], o: &mut [f64], w: &mut [f64], parent_zero: f64, parent_one: f64, parent_feature: usize) {
+    pf[depth] = parent_feature;
+    z[depth] = parent_zero;
+    o[depth] = parent_one;
+    w[depth] = if depth == 0 { 1.0 } else { 0.0 };
+    for i in (0..depth).rev() {
+        w[i + 1] += parent_one * w[i] * (i + 1) as f64 / (depth + 1) as f64;
+        w[i] = parent_zero * w[i] * (depth - i) as f64 / (depth + 1) as f64;
+    }
+    let node = &tree[index];
+    if let Some(vote) = node.vote {
+        for i in 1..=depth {
+            let contribution = unwound_sum(z, o, w, depth, i) * (o[i] - z[i]);
+            out[pf[i]][vote] += contribution;
+        }
+        return;
+    }
+    let feature = node.feature as usize;
+    let value = input.value_at(row, feature);
+    let hot = if value.is_nan() {
+        if node.missing_left { node.left } else { node.right }
+    } else if value > node.threshold { node.left } else { node.right };
+    let cold = if hot == node.left { node.right } else { node.left };
+    let cover = node.cover.max(1.0);
+    let hot_zero = tree[hot].cover / cover;
+    let cold_zero = tree[cold].cover / cover;
+    let mut incoming_zero = 1.0;
+    let mut incoming_one = 1.0;
+    let mut new_depth = depth;
+    if let Some(path_index) = (0..=depth).find(|&i| pf[i] == feature) {
+        incoming_zero = z[path_index];
+        incoming_one = o[path_index];
+        unwind(pf, z, o, w, depth, path_index);
+        new_depth -= 1;
+    }
+    let (mut hot_pf, mut hot_z, mut hot_o, mut hot_w) = (pf.to_vec(), z.to_vec(), o.to_vec(), w.to_vec());
+    recurse_shap_legacy(tree, input, row, _features, classes, out, hot, new_depth + 1, &mut hot_pf, &mut hot_z, &mut hot_o, &mut hot_w, hot_zero * incoming_zero, incoming_one, feature);
+    let (mut cold_pf, mut cold_z, mut cold_o, mut cold_w) = (pf.to_vec(), z.to_vec(), o.to_vec(), w.to_vec());
+    recurse_shap_legacy(tree, input, row, _features, classes, out, cold, new_depth + 1, &mut cold_pf, &mut cold_z, &mut cold_o, &mut cold_w, cold_zero * incoming_zero, 0.0, feature);
 }
 
 #[allow(clippy::too_many_arguments)]
-fn recurse_shap(tree: &[ShapNode], input: &DenseInput, row: usize, _features: usize, classes: usize, out: &mut [Vec<f64>], index: usize, depth: usize, pf: &mut [usize], z: &mut [f64], o: &mut [f64], w: &mut [f64], parent_zero: f64, parent_one: f64, parent_feature: usize) {
+fn recurse_shap(tree: &[ShapNode], input: &DenseInput, row: usize, _features: usize, classes: usize, out: &mut [f64], index: usize, level: usize, depth: usize, workspace: &mut ShapWorkspace, parent_zero: f64, parent_one: f64, parent_feature: usize) {
+    if level > 0 {
+        let (parent, current) = workspace.frames.split_at_mut(level);
+        let source = &parent[level - 1];
+        let target = &mut current[0];
+        target.features[..=depth].copy_from_slice(&source.features[..=depth]);
+        target.zero[..=depth].copy_from_slice(&source.zero[..=depth]);
+        target.one[..=depth].copy_from_slice(&source.one[..=depth]);
+        target.weights[..=depth].copy_from_slice(&source.weights[..=depth]);
+    }
+    let frame = &mut workspace.frames[level];
+    let pf = &mut frame.features;
+    let z = &mut frame.zero;
+    let o = &mut frame.one;
+    let w = &mut frame.weights;
     pf[depth] = parent_feature; z[depth] = parent_zero; o[depth] = parent_one;
     if depth == 0 { w[depth] = 1.0; } else { w[depth] = 0.0; }
     for i in (0..depth).rev() { w[i + 1] += parent_one * w[i] * (i + 1) as f64 / (depth + 1) as f64; w[i] = parent_zero * w[i] * (depth - i) as f64 / (depth + 1) as f64; }
     let node = &tree[index];
     if let Some(vote) = node.vote {
-        for i in 1..=depth { let s = unwound_sum(z, o, w, depth, i); out[pf[i]][vote] += s * (o[i] - z[i]); }
+        for i in 1..=depth { let s = unwound_sum(z, o, w, depth, i); out[pf[i] * classes + vote] += s * (o[i] - z[i]); }
         return;
     }
     let feature = node.feature as usize;
@@ -543,12 +739,10 @@ fn recurse_shap(tree: &[ShapNode], input: &DenseInput, row: usize, _features: us
     let hot_zero = tree[hot].cover / cover; let cold_zero = tree[cold].cover / cover;
     let mut incoming_zero = 1.0; let mut incoming_one = 1.0; let mut new_depth = depth;
     if let Some(path_index) = (0..=depth).find(|&i| pf[i] == feature) { incoming_zero = z[path_index]; incoming_one = o[path_index]; unwind(pf, z, o, w, depth, path_index); new_depth -= 1; }
-    // Each branch extends its own copy of the unique path. Sharing these
-    // buffers would let the hot branch overwrite the cold branch's path.
-    let (mut hot_pf, mut hot_z, mut hot_o, mut hot_w) = (pf.to_vec(), z.to_vec(), o.to_vec(), w.to_vec());
-    recurse_shap(tree, input, row, _features, classes, out, hot, new_depth + 1, &mut hot_pf, &mut hot_z, &mut hot_o, &mut hot_w, hot_zero * incoming_zero, incoming_one, feature);
-    let (mut cold_pf, mut cold_z, mut cold_o, mut cold_w) = (pf.to_vec(), z.to_vec(), o.to_vec(), w.to_vec());
-    recurse_shap(tree, input, row, _features, classes, out, cold, new_depth + 1, &mut cold_pf, &mut cold_z, &mut cold_o, &mut cold_w, cold_zero * incoming_zero, 0.0, feature);
+    // Each recursion depth owns a reusable path frame. Sibling branches copy
+    // only the active prefix into that frame, with no heap allocation per node.
+    recurse_shap(tree, input, row, _features, classes, out, hot, level + 1, new_depth + 1, workspace, hot_zero * incoming_zero, incoming_one, feature);
+    recurse_shap(tree, input, row, _features, classes, out, cold, level + 1, new_depth + 1, workspace, cold_zero * incoming_zero, 0.0, feature);
 }
 
 fn unwind(pf: &mut [usize], z: &mut [f64], o: &mut [f64], w: &mut [f64], depth: usize, at: usize) { let one = o[at]; let zero = z[at]; let mut next = w[depth]; for i in (0..depth).rev() { if one != 0.0 { let tmp = w[i]; w[i] = next * (depth + 1) as f64 / ((i + 1) as f64 * one); next = tmp - w[i] * zero * (depth - i) as f64 / (depth + 1) as f64; } else { w[i] = w[i] * (depth + 1) as f64 / (zero * (depth - i) as f64); } } for i in at..depth { pf[i] = pf[i + 1]; z[i] = z[i + 1]; o[i] = o[i + 1]; } }

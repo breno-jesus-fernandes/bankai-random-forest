@@ -134,7 +134,7 @@ model = BankaiRandomForestClassifier(
 | `ccp_alpha` | `0.0` | Non-negative cost-complexity pruning strength. Larger values prune more of each tree. |
 | `max_samples` | `None` | Number or fraction of rows sampled for each tree. Accepts an integer count or a fraction in `(0, 1]`; only valid with `bootstrap=True`. `None` samples the full training size. |
 | `monotonic_cst` | `None` | One constraint per input feature: `-1` decreasing, `0` unconstrained, or `1` increasing. Currently supported only for binary single-output classification. |
-| `importance_type` | `"gain"` | How `feature_importances_` is calculated: `"gain"` (impurity reduction), `"split"` (split counts), or `"permutation"` (out-of-bag accuracy decrease). Permutation importance requires `bootstrap=True` and adds work during `fit`. |
+| `importance_type` | `"gain"` | How `feature_importances_` is calculated: `"gain"`, `"split"`, `"permutation"`, or `"shap"` (mean absolute native TreeSHAP). Permutation requires `bootstrap=True`. SHAP supports `shap_mode="sampled"` (up to `shap_sample_size=1000` training rows), `"all"`, or `"explicit"`; explicit mode exposes `shap_importances(X)`. |
 | `max_bins` | `None` | `None` uses exact split search. An integer from 2 to 255 enables histogram split search. |
 | `binning_strategy` | `"exact_sort"` | How histogram cut points are found: `"exact_sort"`, `"sampled_sort"`, `"exact_select"`, or `"sampled_select"`. Applies only when `max_bins` is set. |
 | `bin_sample_size` | `200_000` | Positive maximum number of rows used per feature by sampled histogram strategies. Applies only when `max_bins` is set. |

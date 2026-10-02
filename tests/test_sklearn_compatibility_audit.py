@@ -25,6 +25,8 @@ def test_bankai_keeps_sklearn_parameters_and_adds_backend_controls():
         "max_bins",
         "binning_strategy",
         "bin_sample_size",
+        "shap_mode",
+        "shap_sample_size",
     }
 
 
