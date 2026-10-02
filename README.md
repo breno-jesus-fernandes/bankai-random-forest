@@ -77,7 +77,7 @@ importances = pd.Series(model.feature_importances_, index=X.columns, name="impor
 print(importances.sort_values(ascending=False).head(10))
 ```
 
-The pandas DataFrame keeps the 54 original feature names, so the feature importances are labeled with names such as `Elevation`, `Aspect`, and `Slope`. This project currently provides `BankaiRandomForestClassifier`; a regressor may be added later.
+The pandas DataFrame keeps the 54 original feature names, so the feature importances are labeled with names such as `Elevation`, `Aspect`, and `Slope`.
 
 ## Classifier reference
 
@@ -145,7 +145,13 @@ Call `fit(X, y, sample_weight=None)` to train. `sample_weight` accepts one finit
 
 ## Regressor
 
-`BankaiRandomForestRegressor` is not available yet. The current package provides the classifier described above; regression support may be added in a future release.
+`BankaiRandomForestRegressor` follows the `RandomForestRegressor` parameter defaults and
+supports single and multioutput regression. Regression currently delegates training and
+prediction to scikit-learn; `max_bins`, `binning_strategy`, and `bin_sample_size` are
+accepted for API consistency but do not affect regression training. The supported criteria
+are `squared_error`, `absolute_error`, and `poisson`; Poisson targets must
+be nonnegative and have a positive sum. With `importance_type="permutation"`, set
+`oob_score=True`; importance is the decrease in R² from aggregated OOB predictions.
 
 ## Development
 
