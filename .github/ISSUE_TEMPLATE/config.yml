@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/breno-jesus-fernandes/bankai-random-forest/blob/master/.github/SECURITY.md
+    about: Please follow the private reporting instructions. Do not report vulnerabilities publicly.

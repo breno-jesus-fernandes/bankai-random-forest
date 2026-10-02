@@ -171,6 +171,8 @@ uv run cargo test --workspace --locked
 Benchmark scripts use an additional dependency group. Install it when needed with `uv sync --locked --group benchmark`. All commands use the versions recorded in `uv.lock` and `Cargo.lock`.
 
 Contributors are expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+See the [contribution guide](CONTRIBUTING.md) for the fork and pull request workflow,
+local checks, and maintainer review expectations.
 
 ## License
 
