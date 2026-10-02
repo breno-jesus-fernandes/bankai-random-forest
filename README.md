@@ -19,7 +19,6 @@ behind [FRU](https://www.sciencedirect.com/science/article/pii/S2352711026004097
 ⚠️ BankaiRF is currently in Alpha. APIs and serialized models are subject to change.
 
 
-
 ## Install
 
 Python 3.11 or newer is required. Install the package from PyPI:
@@ -30,39 +29,51 @@ python -m pip install bankai-random-forest
 
 ## Quick start
 
+This example uses the California Housing dataset (about 20,000 records and 8 named features). It turns the house-value target into a binary label: at or above the dataset median.
+
 ```python
-from sklearn.datasets import load_breast_cancer
-from sklearn.metrics import accuracy_score
+import pandas as pd
+from sklearn.datasets import fetch_california_housing
+from sklearn.metrics import f1_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
 from bankai_random_forest import BankaiRandomForestClassifier
 
-X, y = load_breast_cancer(return_X_y=True)
+housing = fetch_california_housing(as_frame=True)
+X = housing.data
+y = (housing.target >= housing.target.median()).astype("int8")
+
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
+    X, y, test_size=0.2, random_state=2077, stratify=y
 )
 
 model = BankaiRandomForestClassifier(
-    n_estimators=200,
-    max_bins=63,
-    binning_strategy="sampled_select",
-    importance_type="permutation",
+    n_estimators=40,
+    criterion="gini",
+    max_depth=20,
+    max_leaf_nodes=511,
+    min_samples_leaf=5,
+    max_features=None,
+    bootstrap=True,
+    max_samples=0.8,
     n_jobs=-1,
-    random_state=42,
+    random_state=2077,
 )
 model.fit(X_train, y_train)
 
 predictions = model.predict(X_test)
-probabilities = model.predict_proba(X_test)
-print(f"Accuracy: {accuracy_score(y_test, predictions):.3f}")
-print("Probabilities:", probabilities[:3])
-print("Feature importances:", model.feature_importances_)
+positive_class = list(model.classes_).index(1)
+probabilities = model.predict_proba(X_test)[:, positive_class]
+print(f"F1: {f1_score(y_test, predictions):.3f}")
+print(f"ROC-AUC: {roc_auc_score(y_test, probabilities):.3f}")
+
+importances = pd.Series(model.feature_importances_, index=X.columns, name="importance")
+print(importances.sort_values(ascending=False).head(10))
 ```
 
-`max_bins` enables histogram-based split search in this example. Set
-`max_bins=None` to use exact split search. Histogram cuts can change the fitted
-trees and the accuracy/speed trade-off; evaluate both on your data when that
-matters.
+`fetch_california_housing` downloads the dataset on first use. The pandas column names are retained so the feature importances are labeled with the original feature names.
+
+[![Open this project's 10k × 500-feature benchmark in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/breno-jesus-fernandes/bankai-random-forest/blob/master/benchmarks/benchmark_fit_10k_500f_90_relevant.ipynb) · [View the notebook in this repository](benchmarks/benchmark_fit_10k_500f_90_relevant.ipynb)
 
 ## Training options
 
@@ -86,74 +97,6 @@ feature cuts. Selection strategies avoid fully sorting each feature, while
 repeated feature values can produce cuts that differ from the sort strategies.
 For reproducible model comparisons, keep the strategy, sample size, seed, and
 thread count fixed.
-
-## API and supported inputs
-
-- Dense NumPy arrays and SciPy CSR/CSC matrices are supported. Numeric features
-  are expected; encode categorical columns in a scikit-learn transformer such
-  as `OneHotEncoder`.
-- NaN feature values are supported in dense and sparse inputs and are routed by
-  the fitted trees. Infinite values are rejected.
-- Binary, multiclass, multioutput, and multilabel classification targets are
-  supported. Bankai trains a separate native forest for each output, so its
-  multioutput trees and probabilities need not match scikit-learn's shared-tree
-  implementation.
-- `feature_importances_` defaults to gain-based importance; its values are not
-  guaranteed to match scikit-learn's impurity importance. Bankai also provides
-  split-count and out-of-bag permutation importance.
-- `warm_start=True` does not append only new trees: a later `fit` rebuilds the
-  forest. For multioutput models, `estimators_`, `apply`, `decision_path`, and
-  TreeSHAP inspection expose the first output forest.
-
-Tested with scikit-learn 1.9.1 (`>=1.9.1,<1.10`).
-
-## Feature explanations
-
-SHAP is optional and is not a runtime dependency. For TreeSHAP, pass a fitted
-single-output classifier directly to `TreeExplainer`:
-
-```python
-import shap
-
-explainer = shap.TreeExplainer(model)
-explanation = explainer(X_test[:10])
-```
-
-See the [SHAP compatibility notes](docs/SHAP_COMPATIBILITY.md) for output
-shapes, multioutput limitations, and model-agnostic alternatives.
-
-## Performance
-
-Fit time depends on the data, tree settings, hardware, and importance
-calculation. The benchmark report includes stage breakdowns, later Bankai
-measurements, and comparison caveats; results are specific to the recorded
-workload and are not a performance guarantee.
-
-Run the [binary classification fit benchmark in Google Colab](https://colab.research.google.com/github/breno-jesus-fernandes/bankai-random-forest/blob/master/benchmarks/benchmark_fit_100k_500f_90_relevant.ipynb)
-or [view the notebook in this repository](benchmarks/benchmark_fit_100k_500f_90_relevant.ipynb).
-It compares scikit-learn RF, LightGBM RF, and Bankai on one shared dataset with
-`n_jobs=-1`; the first cell installs the packages. The scikit-learn comparison
-times fit plus validation permutation importance against Bankai fit with OOB
-permutation importance. The LightGBM comparison remains fit-only with gain on
-both models.
-
-## Save and restore models
-
-Fitted models can be saved with joblib:
-
-```python
-import joblib
-
-joblib.dump(model, "classifier.joblib")
-restored = joblib.load("classifier.joblib")
-predictions = restored.predict(X_test)
-```
-
-Bankai's serialized state includes training arrays and rebuilds the native
-forest when loaded. Loading therefore has reconstruction cost and model files
-can be large. Keep Bankai and Python versions consistent when restoring a
-model, and only load joblib files from trusted sources. See the
-[serialization notes](docs/JOBLIB_COMPATIBILITY.md).
 
 ## Development
 
