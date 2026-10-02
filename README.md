@@ -79,8 +79,6 @@ print(importances.sort_values(ascending=False).head(10))
 
 The pandas DataFrame keeps the 54 original feature names, so the feature importances are labeled with names such as `Elevation`, `Aspect`, and `Slope`. This project currently provides `BankaiRandomForestClassifier`; a regressor may be added later.
 
-[![Open this project's 10k × 500-feature benchmark in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/breno-jesus-fernandes/bankai-random-forest/blob/master/benchmarks/benchmark_fit_10k_500f_90_relevant.ipynb) · [View the notebook in this repository](benchmarks/benchmark_fit_10k_500f_90_relevant.ipynb)
-
 ## Classifier reference
 
 `BankaiRandomForestClassifier` follows scikit-learn's estimator pattern. The defaults and parameter meanings are listed here; behavior marked as a Bankai limitation is intentionally called out because it differs from scikit-learn.
