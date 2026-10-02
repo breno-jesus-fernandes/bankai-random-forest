@@ -62,6 +62,8 @@ model = BankaiRandomForestClassifier(
     max_samples=0.8,
     n_jobs=-1,
     random_state=2077,
+    importance_type="permutation", # Native permutation importance
+    max_bins=63, # Enable histogram binning
 )
 model.fit(X_train, y_train)
 
