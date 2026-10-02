@@ -730,9 +730,13 @@ impl DenseInput {
             }
             DenseValues::Sparse(values) => {
                 let value = values.get(row, column);
-                self.bin_edges.as_ref().map_or(value, |edges| {
-                    if value.is_nan() { (edges[column].len() + 1) as f64 } else { edges[column].partition_point(|edge| value > *edge) as f64 }
-                })
+                if value.is_nan() {
+                    value
+                } else {
+                    self.bin_edges.as_ref().map_or(value, |edges| {
+                        edges[column].partition_point(|edge| value > *edge) as f64
+                    })
+                }
             }
         }
     }

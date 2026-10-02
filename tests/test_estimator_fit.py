@@ -269,7 +269,7 @@ def test_permutation_importance_type_is_deterministic_across_thread_counts():
 def test_rejects_unknown_importance_type(separable_data):
     x, y = separable_data
 
-    with pytest.raises(ValueError, match="importance_type must be 'gain', 'split', or 'permutation'"):
+    with pytest.raises(ValueError, match="importance_type must be 'gain', 'split', 'permutation', or 'shap'"):
         BankaiRandomForestClassifier(importance_type="unknown").fit(x, y)
 
 

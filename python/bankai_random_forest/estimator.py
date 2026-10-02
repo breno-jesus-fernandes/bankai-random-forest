@@ -104,6 +104,8 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         max_bins=None,
         binning_strategy="exact_sort",
         bin_sample_size=200_000,
+        shap_mode="sampled",
+        shap_sample_size=1000,
     ):
         self.n_estimators = n_estimators
         self.criterion = criterion
@@ -128,6 +130,8 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         self.max_bins = max_bins
         self.binning_strategy = binning_strategy
         self.bin_sample_size = bin_sample_size
+        self.shap_mode = shap_mode
+        self.shap_sample_size = shap_sample_size
 
     @property
     def estimators_(self):
@@ -246,6 +250,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         self._fit_max_leaves = self._resolve_max_leaf_nodes()
         self._fit_verbose = self._resolve_verbose()
         self._fit_importance_type = self._resolve_importance_type()
+        self._fit_shap_mode = self._resolve_shap_mode()
         self._fit_max_bins = self._resolve_max_bins()
         self._fit_binning_strategy = self._resolve_binning_strategy()
         self._fit_bin_sample_size = self._resolve_bin_sample_size()
@@ -287,7 +292,12 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         self._forest = forest
         self._shap_estimators_cache = None
         self._fitted_n_estimators = self.n_estimators
-        self.feature_importances_ = self._selected_feature_importances(forest)
+        if self._fit_importance_type == "shap":
+            self.feature_importances_ = (
+                None if self._fit_shap_mode == "explicit" else self._sampled_shap_importances()
+            )
+        else:
+            self.feature_importances_ = self._selected_feature_importances(forest)
         if self.oob_score:
             self.oob_decision_function_ = np.asarray(
                 forest.oob_predict_proba(), dtype=np.float64
@@ -544,7 +554,12 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         )
         self._forest = forest
         self._shap_estimators_cache = None
-        self.feature_importances_ = self._selected_feature_importances(forest)
+        if self._fit_importance_type == "shap":
+            self.feature_importances_ = (
+                None if self._fit_shap_mode == "explicit" else self._sampled_shap_importances()
+            )
+        else:
+            self.feature_importances_ = self._selected_feature_importances(forest)
 
     def _next_seed(self):
         random_state = check_random_state(self.random_state)
@@ -661,11 +676,42 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         raise ValueError("verbose must be a non-negative integer")
 
     def _resolve_importance_type(self):
-        if self.importance_type not in ("gain", "split", "permutation"):
-            raise ValueError("importance_type must be 'gain', 'split', or 'permutation'")
+        if self.importance_type not in ("gain", "split", "permutation", "shap"):
+            raise ValueError("importance_type must be 'gain', 'split', 'permutation', or 'shap'")
         if self.importance_type == "permutation" and self.bootstrap is not True:
             raise ValueError("importance_type='permutation' requires bootstrap=True")
         return self.importance_type
+
+    def _resolve_shap_mode(self):
+        if self.shap_mode not in ("sampled", "all", "explicit"):
+            raise ValueError("shap_mode must be 'sampled', 'all', or 'explicit'")
+        if not isinstance(self.shap_sample_size, (int, np.integer)) or isinstance(self.shap_sample_size, (bool, np.bool_)) or self.shap_sample_size < 1:
+            raise ValueError("shap_sample_size must be a positive integer")
+        return self.shap_mode
+
+    def _sampled_shap_importances(self):
+        n_rows = self._fit_X.shape[0]
+        if self._fit_shap_mode == "all" or n_rows <= self.shap_sample_size:
+            selected = self._fit_X
+        else:
+            rng = check_random_state(self.random_state)
+            rows = np.sort(rng.choice(n_rows, size=self.shap_sample_size, replace=False))
+            selected = self._fit_X[rows]
+        return self.shap_importances(selected)
+
+    def shap_importances(self, X):
+        """Return normalized mean absolute native TreeSHAP importance."""
+        check_is_fitted(self, "_forest")
+        options = dict(reset=False, dtype=np.float64, ensure_2d=True, ensure_all_finite="allow-nan")
+        if sparse.issparse(X):
+            options["accept_sparse"] = ("csr", "csc")
+        X = validate_data(self, X, **options)
+        if sparse.issparse(X):
+            X = X.tocsr(copy=False)
+        return np.asarray(
+            self._forest.shap_importances(X, n_jobs=self._resolve_n_jobs()),
+            dtype=np.float64,
+        )
 
     def _resolve_max_bins(self):
         if self.max_bins is None:
