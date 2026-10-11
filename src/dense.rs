@@ -28,6 +28,8 @@ pub struct DenseInput {
     monotonic_constraints: Option<Arc<Vec<i8>>>,
     has_missing_values: bool,
     histogram_threads: usize,
+    extra_trees: bool,
+    extra_seed: u64,
 }
 
 #[derive(Clone)]
@@ -58,6 +60,8 @@ struct HistogramCache {
 }
 
 const HISTOGRAM_PARALLEL_MIN_CELLS: usize = 32 * 1024;
+const DEFAULT_BINNING_SEED: u64 = 6;
+const LEGACY_BINNING_SAMPLE_STATE: u64 = 0x6a09_e667_f3bc_c909;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BinningStrategy {
@@ -205,6 +209,32 @@ impl DenseInput {
         binning_strategy: BinningStrategy,
         bin_sample_size: usize,
     ) -> Result<Self, String> {
+        Self::training_with_binning_seed_options(
+            values, rows, columns, labels, sample_weights, n_classes, min_leaf_weight,
+            criterion, min_samples_split, min_samples_leaf, min_impurity_decrease,
+            max_bins, threads, binning_strategy, bin_sample_size, DEFAULT_BINNING_SEED,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn training_with_binning_seed_options(
+        values: Vec<f64>,
+        rows: usize,
+        columns: usize,
+        labels: Vec<usize>,
+        sample_weights: Vec<f64>,
+        n_classes: usize,
+        min_leaf_weight: f64,
+        criterion: Criterion,
+        min_samples_split: usize,
+        min_samples_leaf: usize,
+        min_impurity_decrease: f64,
+        max_bins: Option<usize>,
+        threads: usize,
+        binning_strategy: BinningStrategy,
+        bin_sample_size: usize,
+        binning_seed: u64,
+    ) -> Result<Self, String> {
         if threads == 0 {
             return Err("histogram preprocessing requires at least one thread".into());
         }
@@ -243,6 +273,7 @@ impl DenseInput {
             Some(max_bins) => {
                 let (binned, edges) = histogramize(
                     &values, rows, columns, max_bins, threads, binning_strategy, bin_sample_size,
+                    binning_seed,
                 );
                 let active = edges
                     .iter()
@@ -284,6 +315,8 @@ impl DenseInput {
             monotonic_constraints: None,
             has_missing_values,
             histogram_threads: 1,
+            extra_trees: false,
+            extra_seed: 6,
         })
     }
 
@@ -303,6 +336,35 @@ impl DenseInput {
         threads: usize,
         strategy: BinningStrategy,
         sample_size: usize,
+        value_at: F,
+    ) -> Result<Self, String>
+    where
+        F: Fn(usize, usize) -> f64 + Sync,
+    {
+        Self::training_binned_with_accessor_and_seed(
+            rows, columns, labels, sample_weights, n_classes, min_leaf_weight,
+            criterion, min_samples_split, min_samples_leaf, min_impurity_decrease,
+            max_bins, threads, strategy, sample_size, DEFAULT_BINNING_SEED, value_at,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn training_binned_with_accessor_and_seed<F>(
+        rows: usize,
+        columns: usize,
+        labels: Vec<usize>,
+        sample_weights: Vec<f64>,
+        n_classes: usize,
+        min_leaf_weight: f64,
+        criterion: Criterion,
+        min_samples_split: usize,
+        min_samples_leaf: usize,
+        min_impurity_decrease: f64,
+        max_bins: usize,
+        threads: usize,
+        strategy: BinningStrategy,
+        sample_size: usize,
+        binning_seed: u64,
         value_at: F,
     ) -> Result<Self, String>
     where
@@ -355,6 +417,7 @@ impl DenseInput {
             threads,
             strategy,
             sample_size,
+            binning_seed,
             &value_at,
         )?;
         let active_features = edges
@@ -385,6 +448,8 @@ impl DenseInput {
             monotonic_constraints: None,
             has_missing_values,
             histogram_threads: 1,
+            extra_trees: false,
+            extra_seed: 6,
         })
     }
 
@@ -434,6 +499,8 @@ impl DenseInput {
             monotonic_constraints: None,
             has_missing_values,
             histogram_threads: 1,
+            extra_trees: false,
+            extra_seed: 6,
         })
     }
 
@@ -517,6 +584,35 @@ impl DenseInput {
         binning_strategy: BinningStrategy,
         bin_sample_size: usize,
     ) -> Result<Self, String> {
+        Self::training_csr_with_binning_seed_options(
+            indptr, indices, data, rows, columns, labels, sample_weights, n_classes,
+            min_leaf_weight, criterion, min_samples_split, min_samples_leaf,
+            min_impurity_decrease, max_bins, threads, binning_strategy, bin_sample_size,
+            DEFAULT_BINNING_SEED,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn training_csr_with_binning_seed_options(
+        indptr: Vec<usize>,
+        indices: Vec<usize>,
+        data: Vec<f64>,
+        rows: usize,
+        columns: usize,
+        labels: Vec<usize>,
+        sample_weights: Vec<f64>,
+        n_classes: usize,
+        min_leaf_weight: f64,
+        criterion: Criterion,
+        min_samples_split: usize,
+        min_samples_leaf: usize,
+        min_impurity_decrease: f64,
+        max_bins: Option<usize>,
+        threads: usize,
+        binning_strategy: BinningStrategy,
+        bin_sample_size: usize,
+        binning_seed: u64,
+    ) -> Result<Self, String> {
         if threads == 0 {
             return Err("histogram preprocessing requires at least one thread".into());
         }
@@ -550,6 +646,7 @@ impl DenseInput {
         let bin_edges = max_bins.map(|bins| {
             sparse_histogram_edges(
                 &sparse, rows, columns, bins, threads, binning_strategy, bin_sample_size,
+                binning_seed,
             )
         });
         let active_features = bin_edges.as_ref().map_or_else(
@@ -583,6 +680,8 @@ impl DenseInput {
             monotonic_constraints: None,
             has_missing_values,
             histogram_threads: 1,
+            extra_trees: false,
+            extra_seed: 6,
         })
     }
 
@@ -624,6 +723,8 @@ impl DenseInput {
             monotonic_constraints: None,
             has_missing_values,
             histogram_threads: 1,
+            extra_trees: false,
+            extra_seed: 6,
         })
     }
 
@@ -651,6 +752,12 @@ impl DenseInput {
 
     pub fn with_histogram_threads(mut self, threads: usize) -> Self {
         self.histogram_threads = threads.max(1);
+        self
+    }
+
+    pub fn with_extra_trees(mut self, enabled: bool, seed: u64) -> Self {
+        self.extra_trees = enabled;
+        self.extra_seed = seed;
         self
     }
 
@@ -863,6 +970,7 @@ fn sparse_histogram_edges(
     threads: usize,
     strategy: BinningStrategy,
     sample_size: usize,
+    binning_seed: u64,
 ) -> Vec<Vec<f64>> {
     let preprocessing_threads = if rows.saturating_mul(columns) >= HISTOGRAM_PARALLEL_MIN_CELLS {
         threads
@@ -870,7 +978,7 @@ fn sparse_histogram_edges(
         1
     };
     let sampled_rows = (strategy.samples() && sample_size < rows)
-        .then(|| deterministic_sample_rows(rows, sample_size));
+        .then(|| deterministic_sample_rows_with_seed(rows, sample_size, binning_seed));
     let workers = preprocessing_threads.max(1).min(columns);
     let build = |column| {
         let mut observations = Vec::with_capacity(sampled_rows.as_ref().map_or(rows, Vec::len));
@@ -901,10 +1009,15 @@ fn sparse_histogram_edges(
     })
 }
 
-fn deterministic_sample_rows(rows: usize, sample_size: usize) -> Vec<usize> {
+fn deterministic_sample_rows_with_seed(
+    rows: usize,
+    sample_size: usize,
+    seed: u64,
+) -> Vec<usize> {
     let count = rows.min(sample_size);
     let mut indices = (0..rows).collect::<Vec<_>>();
-    let mut state = 0x6a09_e667_f3bc_c909;
+    // Seed 6 retains the historical sampled-binning row order.
+    let mut state = LEGACY_BINNING_SAMPLE_STATE ^ seed ^ DEFAULT_BINNING_SEED;
     for index in 0..count {
         state = splitmix64(state);
         let remaining = rows - index;
@@ -1033,6 +1146,7 @@ fn histogramize(
     threads: usize,
     strategy: BinningStrategy,
     sample_size: usize,
+    binning_seed: u64,
 ) -> (Vec<u8>, Vec<Vec<f64>>) {
     let value_at = |row, feature| values[row * columns + feature];
     let (binned, edges, _) = histogramize_from_accessor(
@@ -1042,6 +1156,7 @@ fn histogramize(
         threads,
         strategy,
         sample_size,
+        binning_seed,
         &value_at,
     )
     .expect("training values were validated before histogramization");
@@ -1055,6 +1170,7 @@ fn histogramize_from_accessor<F>(
     threads: usize,
     strategy: BinningStrategy,
     sample_size: usize,
+    binning_seed: u64,
     value_at: &F,
 ) -> Result<(Vec<u8>, Vec<Vec<f64>>, bool), String>
 where
@@ -1066,7 +1182,7 @@ where
         1
     };
     let sampled_rows = (strategy.samples() && sample_size < rows)
-        .then(|| deterministic_sample_rows(rows, sample_size));
+        .then(|| deterministic_sample_rows_with_seed(rows, sample_size, binning_seed));
     let sampled_rows = sampled_rows.as_deref();
     let workers = preprocessing_threads.max(1).min(columns);
     let edges_by_feature: Vec<Vec<f64>> = if workers == 1 {
@@ -1536,6 +1652,7 @@ fn best_split(
     monotonic_constraint: i8,
     lower_bound: f64,
     upper_bound: f64,
+    rng: &mut RfRng,
 ) -> Option<(f64, bool, f64)> {
     let best = if input.histogram_bins.is_some() {
         best_split_histogram(
@@ -1545,6 +1662,7 @@ fn best_split(
             monotonic_constraint,
             lower_bound,
             upper_bound,
+            rng,
         )
     } else {
         best_split_exact(
@@ -1704,6 +1822,7 @@ fn best_split_histogram(
     monotonic_constraint: i8,
     lower_bound: f64,
     upper_bound: f64,
+    rng: &mut RfRng,
 ) -> Option<(f64, bool, f64)> {
     if input.n_classes == 2 {
         best_split_histogram_classes::<2>(
@@ -1713,6 +1832,7 @@ fn best_split_histogram(
             monotonic_constraint,
             lower_bound,
             upper_bound,
+            rng,
         )
     } else {
         best_split_histogram_classes::<0>(
@@ -1722,6 +1842,7 @@ fn best_split_histogram(
             monotonic_constraint,
             lower_bound,
             upper_bound,
+            rng,
         )
     }
 }
@@ -1732,6 +1853,7 @@ fn best_split_histogram_classes<const CLASSES: usize>(
     monotonic_constraint: i8,
     lower_bound: f64,
     upper_bound: f64,
+    rng: &mut RfRng,
 ) -> Option<(f64, bool, f64)> {
     let classes = if CLASSES == 0 {
         input.n_classes
@@ -1810,6 +1932,11 @@ fn best_split_histogram_classes<const CLASSES: usize>(
     } else {
         bin_count.saturating_sub(1)
     };
+    let random_bin = if input.extra_trees && split_bin_end > 0 {
+        Some(((rng.get_u64() ^ input.extra_seed) % split_bin_end as u64) as usize)
+    } else {
+        None
+    };
     for bin in 0..split_bin_end {
         for class in 0..classes {
             let weight = histogram.class_weights[bin * classes + class];
@@ -1818,6 +1945,9 @@ fn best_split_histogram_classes<const CLASSES: usize>(
             left_weight += weight;
         }
         left_count += histogram.sample_counts[bin];
+        if random_bin.is_some_and(|selected| selected != bin) {
+            continue;
+        }
         let pivot = bin as f64 + 0.5;
         if missing_count == 0 {
             let right_count = total_count - left_count;
@@ -2069,9 +2199,9 @@ impl RfInput for DenseInput {
         feature: Self::FeatureId,
         target: &Self::DecisionSlice,
         split_cache: &Self::SplitCache,
-        _: &mut RfRng,
+        rng: &mut RfRng,
     ) -> Option<(Self::Pivot, bool, f64)> {
-        best_split(self, mask, feature, target, split_cache, 0, 0.0, 1.0)
+        best_split(self, mask, feature, target, split_cache, 0, 0.0, 1.0, rng)
     }
 
     fn new_split_with_bounds(
@@ -2080,7 +2210,7 @@ impl RfInput for DenseInput {
         feature: Self::FeatureId,
         target: &Self::DecisionSlice,
         split_cache: &Self::SplitCache,
-        _: &mut RfRng,
+        rng: &mut RfRng,
         lower_bound: f64,
         upper_bound: f64,
     ) -> Option<(Self::Pivot, bool, f64)> {
@@ -2095,6 +2225,7 @@ impl RfInput for DenseInput {
                 .map_or(0, |c| c[feature]),
             lower_bound,
             upper_bound,
+            rng,
         )
     }
 
@@ -2284,8 +2415,13 @@ mod histogram_optimization_tests {
 
     #[test]
     fn sampled_binning_is_deterministic_and_produces_ordered_edges() {
-        let first = deterministic_sample_rows(1000, 200);
-        assert_eq!(first, deterministic_sample_rows(1000, 200));
+        let first = deterministic_sample_rows_with_seed(1000, 200, DEFAULT_BINNING_SEED);
+        assert_eq!(
+            first,
+            deterministic_sample_rows_with_seed(1000, 200, DEFAULT_BINNING_SEED)
+        );
+        assert_eq!(first, deterministic_sample_rows_with_seed(1000, 200, 6));
+        assert_ne!(first, deterministic_sample_rows_with_seed(1000, 200, 7));
         assert_eq!(first.len(), 200);
         assert!(first.windows(2).all(|pair| pair[0] < pair[1]));
 

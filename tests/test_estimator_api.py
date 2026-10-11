@@ -14,8 +14,11 @@ def test_default_constructor_matches_sklearn_random_forest_classifier():
     assert bankai_params.pop("max_bins") is None
     assert bankai_params.pop("binning_strategy") == "exact_sort"
     assert bankai_params.pop("bin_sample_size") == 200_000
+    assert bankai_params.pop("binning_seed") == 6
     assert bankai_params.pop("shap_mode") == "sampled"
     assert bankai_params.pop("shap_sample_size") == 1000
+    assert bankai_params.pop("extra_trees") is False
+    assert bankai_params.pop("extra_seed") == 6
     assert bankai_params == RandomForestClassifier().get_params(
         deep=False
     )

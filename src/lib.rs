@@ -50,7 +50,7 @@ impl NativeForest {
         self.training_order.clone().into_pyarray(py)
     }
 
-    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1, max_bins=None, balanced_subsample=false, ccp_alpha=0.0, monotonic_cst=None, binning_strategy="exact_sort", bin_sample_size=200000))]
+    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1, max_bins=None, balanced_subsample=false, ccp_alpha=0.0, monotonic_cst=None, binning_strategy="exact_sort", bin_sample_size=200000, binning_seed=6, extra_trees=false, extra_seed=6))]
     fn fit(
         &mut self,
         x: &Bound<'_, PyAny>,
@@ -77,9 +77,17 @@ impl NativeForest {
         monotonic_cst: Option<Vec<i8>>,
         binning_strategy: &str,
         bin_sample_size: usize,
+        binning_seed: u64,
+        extra_trees: bool,
+        extra_seed: u64,
     ) -> PyResult<()> {
         if n_estimators == 0 {
             return Err(PyValueError::new_err("n_estimators must be at least 1"));
+        }
+        if extra_trees && max_bins.is_none() {
+            return Err(PyValueError::new_err(
+                "extra_trees=True requires max_bins to enable histogram splits",
+            ));
         }
         if !ccp_alpha.is_finite() || ccp_alpha < 0.0 {
             return Err(PyValueError::new_err(
@@ -169,7 +177,7 @@ impl NativeForest {
         };
         let input = if let Some(array) = direct_f32 {
             let view = array.as_array();
-            DenseInput::training_binned_with_accessor(
+            DenseInput::training_binned_with_accessor_and_seed(
                 rows,
                 columns,
                 labels,
@@ -184,11 +192,12 @@ impl NativeForest {
                 n_jobs.max(1),
                 binning_strategy,
                 bin_sample_size,
+                binning_seed,
                 |row, feature| f64::from(view[[row_order[row], feature]]),
             )
         } else if let Some(array) = direct_f64 {
             let view = array.as_array();
-            DenseInput::training_binned_with_accessor(
+            DenseInput::training_binned_with_accessor_and_seed(
                 rows,
                 columns,
                 labels,
@@ -203,11 +212,12 @@ impl NativeForest {
                 n_jobs.max(1),
                 binning_strategy,
                 bin_sample_size,
+                binning_seed,
                 |row, feature| view[[row_order[row], feature]],
             )
         } else {
             match matrix.expect("non-histogram input owns its matrix") {
-                MatrixData::Dense(values, ..) => DenseInput::training_with_binning_options(
+                MatrixData::Dense(values, ..) => DenseInput::training_with_binning_seed_options(
                     values,
                     rows,
                     columns,
@@ -223,13 +233,14 @@ impl NativeForest {
                     n_jobs.max(1),
                     binning_strategy,
                     bin_sample_size,
+                    binning_seed,
                 ),
                 MatrixData::Csr {
                     indptr,
                     indices,
                     data,
                     ..
-                } => DenseInput::training_csr_with_binning_options(
+                } => DenseInput::training_csr_with_binning_seed_options(
                     indptr,
                     indices,
                     data,
@@ -247,6 +258,7 @@ impl NativeForest {
                     n_jobs.max(1),
                     binning_strategy,
                     bin_sample_size,
+                    binning_seed,
                 ),
             }
         }
@@ -281,6 +293,7 @@ impl NativeForest {
             1
         };
         let input = input
+            .with_extra_trees(extra_trees && max_bins.is_some(), extra_seed)
             .with_ccp_alpha(ccp_alpha)
             .with_histogram_threads(histogram_threads);
 
