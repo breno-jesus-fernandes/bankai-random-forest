@@ -110,6 +110,9 @@ model = BankaiRandomForestClassifier(
     max_bins=None,
     binning_strategy="exact_sort",
     bin_sample_size=200_000,
+    binning_seed=6,
+    extra_trees=False,
+    extra_seed=6,
 )
 ```
 
@@ -138,6 +141,13 @@ model = BankaiRandomForestClassifier(
 | `max_bins` | `None` | `None` uses exact split search. An integer from 2 to 255 enables histogram split search. |
 | `binning_strategy` | `"exact_sort"` | How histogram cut points are found: `"exact_sort"`, `"sampled_sort"`, `"exact_select"`, or `"sampled_select"`. Applies only when `max_bins` is set. |
 | `bin_sample_size` | `200_000` | Positive maximum number of rows used per feature by sampled histogram strategies. Applies only when `max_bins` is set. |
+| `binning_seed` | `6` | Seed for row sampling in `"sampled_sort"` and `"sampled_select"`. Independent of `random_state`; the default preserves the historical sampled rows. |
+| `extra_trees` | `False` | With histogram splits enabled, evaluate one randomly selected bin threshold per sampled feature instead of searching all thresholds. Requires `max_bins` to be set. |
+| `extra_seed` | `6` | Seed offset for random histogram threshold selection when `extra_trees=True`. Combine with `random_state` for repeatable forests. |
+
+`extra_trees=True` uses the histogram path, so set `max_bins` (for example, `max_bins=63`). This option currently applies to classification; the exact split path is unchanged.
+
+`binning_seed` only affects sampled binning strategies and does not change tree bootstrap or feature-sampling randomness. It lets repeated experiments vary the rows used to build histogram cut points independently of the forest's `random_state`.
 
 Call `fit(X, y, sample_weight=None)` to train. `sample_weight` accepts one finite, non-negative weight per row. The fitted estimator exposes scikit-learn-style methods including `predict`, `predict_proba`, and `predict_log_proba`, plus `classes_`, `feature_importances_`, `n_features_in_`, and `feature_names_in_` when the input has named columns.
 

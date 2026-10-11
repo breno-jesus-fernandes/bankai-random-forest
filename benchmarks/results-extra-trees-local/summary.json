@@ -1,0 +1,139 @@
+{
+  "config": {
+    "output_dir": "benchmarks/results-extra-trees-local",
+    "rows": 8000,
+    "features": 200,
+    "informative": 20,
+    "signal_strength": 0.12,
+    "trees": 100,
+    "leaves": 31,
+    "min_leaf": 5,
+    "bins": 63,
+    "sample_fraction": 0.8,
+    "feature_fraction": 0.8,
+    "jobs": 4,
+    "data_seeds": [
+      1729,
+      1730,
+      1731
+    ],
+    "model_seeds": [
+      6,
+      42,
+      43
+    ],
+    "warmups": 1
+  },
+  "environment": {
+    "python": "3.11.11",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "cpus": 8,
+    "packages": {
+      "numpy": "2.4.6",
+      "scikit-learn": "1.9.1",
+      "lightgbm": "4.7.0",
+      "bankai-random-forest": "0.1.0a10"
+    },
+    "commit": "229a615647f40d67d64e17dbcbd71093f20e56ec",
+    "bankai_extension": "/Users/jesus/Documents/Code/bankai-random-forest-v2/python/bankai_random_forest/_core.abi3.so",
+    "bankai_extension_sha256": "fd24e02b6bafca373a65a1bbcb166280301edd9f8410524fd26789274d5d3315"
+  },
+  "summary": {
+    "median_by_variant": {
+      "bankai": {
+        "fit_seconds": 0.22644683299586177,
+        "recall_at_k": 0.95,
+        "false_discoveries_at_k": 1.0,
+        "feature_average_precision": 0.9758837741635729,
+        "test_roc_auc": 0.5976642664266428,
+        "test_recall": 0.5101626016260162
+      },
+      "bankai_extra_trees": {
+        "fit_seconds": 0.16868404200067744,
+        "recall_at_k": 0.9,
+        "false_discoveries_at_k": 2.0,
+        "feature_average_precision": 0.9547103205830827,
+        "test_roc_auc": 0.5972277227722772,
+        "test_recall": 0.498989898989899
+      },
+      "lightgbm_extra_trees": {
+        "fit_seconds": 0.3617395420005778,
+        "recall_at_k": 0.95,
+        "false_discoveries_at_k": 1.0,
+        "feature_average_precision": 0.9976190476190476,
+        "test_roc_auc": 0.5992059205920591,
+        "test_recall": 0.4949186991869919
+      }
+    },
+    "paired_comparisons": {
+      "bankai_vs_bankai_extra_trees": {
+        "first_variant": "bankai",
+        "second_variant": "bankai_extra_trees",
+        "paired_median_fit_time_ratio_first_over_second": 1.3497446759043181,
+        "paired_fit_time_ratios_first_over_second": [
+          1.3010242670560488,
+          1.3762289463816328,
+          1.3155627652860973,
+          1.3497446759043181,
+          1.3430196310429057,
+          1.485890966174492,
+          1.5524156695181544,
+          0.9786221577307931,
+          1.3706611205097434
+        ],
+        "median_deltas_first_minus_second": {
+          "recall_at_k": 0.0,
+          "false_discoveries_at_k": 0.0,
+          "feature_average_precision": 0.017085137085137037,
+          "test_roc_auc": 0.0016089118814415215
+        }
+      },
+      "bankai_vs_lightgbm_extra_trees": {
+        "first_variant": "bankai",
+        "second_variant": "lightgbm_extra_trees",
+        "paired_median_fit_time_ratio_first_over_second": 0.6277029394201797,
+        "paired_fit_time_ratios_first_over_second": [
+          0.47851416470561253,
+          0.7466490903970346,
+          0.6277029394201797,
+          0.5129529312601135,
+          0.6028722757409085,
+          0.7178965407049308,
+          0.7629938359149985,
+          0.6487102919935921,
+          0.5480845069732874
+        ],
+        "median_deltas_first_minus_second": {
+          "recall_at_k": 0.0,
+          "false_discoveries_at_k": 0.0,
+          "feature_average_precision": 0.0023809523809523725,
+          "test_roc_auc": 0.004101049868766471
+        }
+      },
+      "bankai_extra_trees_vs_lightgbm_extra_trees": {
+        "first_variant": "bankai_extra_trees",
+        "second_variant": "lightgbm_extra_trees",
+        "paired_median_fit_time_ratio_first_over_second": 0.4771364437968662,
+        "paired_fit_time_ratios_first_over_second": [
+          0.3677980317679946,
+          0.5425326159285611,
+          0.4771364437968662,
+          0.3800370102711753,
+          0.44889312248753604,
+          0.4831421396639855,
+          0.4914881052133543,
+          0.6628812630789056,
+          0.3998687193880986
+        ],
+        "median_deltas_first_minus_second": {
+          "recall_at_k": 0.0,
+          "false_discoveries_at_k": 0.0,
+          "feature_average_precision": -0.012188386326317358,
+          "test_roc_auc": 0.0017219408168490657
+        }
+      }
+    }
+  },
+  "raw_records": 54
+}

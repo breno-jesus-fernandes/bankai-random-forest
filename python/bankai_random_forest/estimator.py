@@ -104,8 +104,11 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         max_bins=None,
         binning_strategy="exact_sort",
         bin_sample_size=200_000,
+        binning_seed=6,
         shap_mode="sampled",
         shap_sample_size=1000,
+        extra_trees=False,
+        extra_seed=6,
     ):
         self.n_estimators = n_estimators
         self.criterion = criterion
@@ -130,8 +133,11 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         self.max_bins = max_bins
         self.binning_strategy = binning_strategy
         self.bin_sample_size = bin_sample_size
+        self.binning_seed = binning_seed
         self.shap_mode = shap_mode
         self.shap_sample_size = shap_sample_size
+        self.extra_trees = extra_trees
+        self.extra_seed = extra_seed
 
     @property
     def estimators_(self):
@@ -254,6 +260,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         self._fit_max_bins = self._resolve_max_bins()
         self._fit_binning_strategy = self._resolve_binning_strategy()
         self._fit_bin_sample_size = self._resolve_bin_sample_size()
+        self._fit_binning_seed = self._resolve_binning_seed()
         if self._fit_verbose:
             print(
                 f"[BankaiRandomForestClassifier] building {self.n_estimators} trees",
@@ -283,6 +290,9 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             max_bins=self._fit_max_bins,
             binning_strategy=self._fit_binning_strategy,
             bin_sample_size=self._fit_bin_sample_size,
+            binning_seed=self._fit_binning_seed,
+            extra_trees=self.extra_trees,
+            extra_seed=self.extra_seed,
             balanced_subsample=(
                 self.class_weight == "balanced_subsample" and self.bootstrap is True
             ),
@@ -546,6 +556,11 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             bin_sample_size=getattr(
                 self, "_fit_bin_sample_size", getattr(self, "bin_sample_size", 200_000)
             ),
+            binning_seed=getattr(
+                self, "_fit_binning_seed", getattr(self, "binning_seed", 6)
+            ),
+            extra_trees=getattr(self, "extra_trees", False),
+            extra_seed=getattr(self, "extra_seed", 6),
             balanced_subsample=(
                 self.class_weight == "balanced_subsample" and self.bootstrap is True
             ),
@@ -739,6 +754,15 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         ):
             return int(self.bin_sample_size)
         raise ValueError("bin_sample_size must be a positive integer")
+
+    def _resolve_binning_seed(self):
+        if (
+            isinstance(self.binning_seed, (int, np.integer))
+            and not isinstance(self.binning_seed, (bool, np.bool_))
+            and 0 <= self.binning_seed <= np.iinfo(np.uint64).max
+        ):
+            return int(self.binning_seed)
+        raise ValueError("binning_seed must be an integer in [0, 2**64 - 1]")
 
     def _selected_feature_importances(self, forest):
         method = (
