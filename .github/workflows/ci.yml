@@ -47,16 +47,31 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux x86_64
+          - name: Linux x86_64 / Python 3.11
             runner: ubuntu-24.04
-          - name: Linux ARM64
+            python: "3.11"
+            coverage: true
+          - name: Linux x86_64 / Python 3.12
+            runner: ubuntu-24.04
+            python: "3.12"
+          - name: Linux x86_64 / Python 3.13
+            runner: ubuntu-24.04
+            python: "3.13"
+          - name: Linux x86_64 / Python 3.14
+            runner: ubuntu-24.04
+            python: "3.14"
+          - name: Linux ARM64 / Python 3.11
             runner: ubuntu-24.04-arm
-          - name: Windows x86_64
+            python: "3.11"
+          - name: Windows x86_64 / Python 3.11
             runner: windows-2025
-          - name: macOS x86_64
+            python: "3.11"
+          - name: macOS x86_64 / Python 3.11
             runner: macos-15-intel
-          - name: macOS ARM64
+            python: "3.11"
+          - name: macOS ARM64 / Python 3.11
             runner: macos-15
+            python: "3.11"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -76,10 +91,10 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install Python
-        run: uv python install 3.11
+        run: uv python install ${{ matrix.python }}
 
       - name: Install project and test dependencies
-        run: uv sync --python 3.11 --locked --no-install-project
+        run: uv sync --python ${{ matrix.python }} --locked --no-install-project
 
       - name: Add uv Python shared library to runtime path
         if: matrix.runner == 'ubuntu-24.04' || matrix.runner == 'ubuntu-24.04-arm'
@@ -89,7 +104,7 @@ jobs:
         run: uv run --no-sync maturin develop --release --locked
 
       - name: Run Python tests
-        if: matrix.name == 'Linux x86_64'
+        if: matrix.coverage == true
         run: uv run --no-sync pytest --cov=bankai_random_forest --cov-report=xml:coverage.xml -q
 
       - name: Upload Python coverage to Codecov
@@ -102,7 +117,7 @@ jobs:
           token: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && secrets.CODECOV_TOKEN || '' }}
 
       - name: Run Python tests on other platforms
-        if: matrix.name != 'Linux x86_64'
+        if: matrix.coverage != true
         run: uv run --no-sync pytest -q
 
       - name: Run Rust tests
@@ -147,6 +162,37 @@ jobs:
           manylinux: ${{ matrix.manylinux }}
           maturin-version: v1.9.6
           args: --release --locked --out dist
+
+      - name: Verify wheel ABI and platform tag
+        shell: bash
+        env:
+          WHEEL_TARGET: ${{ matrix.target }}
+        run: |
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          if [[ "${#wheels[@]}" -ne 1 ]]; then
+            echo "Expected exactly one platform wheel, found ${#wheels[@]}" >&2
+            exit 1
+          fi
+          wheel="${wheels[0]}"
+          if [[ "${wheel}" != *-cp311-abi3-* ]]; then
+            echo "Expected a CPython 3.11 stable-ABI wheel: ${wheel}" >&2
+            exit 1
+          fi
+          case "${WHEEL_TARGET}" in
+            x86_64-unknown-linux-gnu)
+              [[ "${wheel}" == *manylinux*x86_64.whl ]] ;;
+            aarch64-unknown-linux-gnu)
+              [[ "${wheel}" == *manylinux*aarch64.whl ]] ;;
+            x86_64-pc-windows-msvc)
+              [[ "${wheel}" == *win_amd64.whl ]] ;;
+            x86_64-apple-darwin)
+              [[ "${wheel}" == *macosx*x86_64.whl ]] ;;
+            aarch64-apple-darwin)
+              [[ "${wheel}" == *macosx*arm64.whl ]] ;;
+            *) echo "Unknown wheel target: ${WHEEL_TARGET}" >&2; exit 1 ;;
+          esac
+          echo "Validated ${wheel}"
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
