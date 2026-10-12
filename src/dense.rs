@@ -1673,6 +1673,7 @@ fn best_split(
             monotonic_constraint,
             lower_bound,
             upper_bound,
+            rng,
         )
     }?;
     Some((best.0, best.1, best.2 * target.total_weight / input.total_weight))
@@ -1686,7 +1687,13 @@ fn best_split_exact(
     monotonic_constraint: i8,
     lower_bound: f64,
     upper_bound: f64,
+    rng: &mut RfRng,
 ) -> Option<(f64, bool, f64)> {
+    if input.extra_trees && matches!(input.values, DenseValues::Exact(_)) {
+        return best_random_split_exact(
+            input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng,
+        );
+    }
     let mut ranked: Vec<(f64, usize, f64)> = match &input.values {
         DenseValues::Exact(values) => mask
             .iter()
@@ -1737,6 +1744,16 @@ fn best_split_exact(
         return None;
     }
 
+    // Sparse inputs retain the original sorted Extra Trees implementation.
+    let random_threshold = if input.extra_trees {
+        let min = ranked.first()?.0;
+        let max = ranked.last()?.0;
+        if min >= max { return None; }
+        let unit = ((rng.get_u64() ^ input.extra_seed) >> 11) as f64
+            * (1.0 / ((1u64 << 53) as f64));
+        Some(min * (1.0 - unit) + max * unit)
+    } else { None };
+
     let total_weight = target.total_weight;
     let parent_impurity = impurity(input.criterion, &target.class_weights, total_weight);
     let mut left = vec![0.0; input.n_classes];
@@ -1757,9 +1774,11 @@ fn best_split_exact(
         if value.total_cmp(&next).is_eq() {
             continue;
         }
-
+        if random_threshold.is_some_and(|threshold| !(value <= threshold && threshold < next)) {
+            continue;
+        }
         let midpoint = value * 0.5 + next * 0.5;
-        let pivot = if midpoint >= next { value } else { midpoint };
+        let pivot = random_threshold.unwrap_or_else(|| if midpoint >= next { value } else { midpoint });
         let finite_left_count = index + 1;
         let finite_right_count = ranked.len() - finite_left_count;
         if missing_count == 0 {
@@ -1814,6 +1833,184 @@ fn best_split_exact(
 
     best
 }
+
+/// Extra Trees only needs one random threshold, so avoid constructing and sorting
+/// the per-feature sample list used by the exact CART search.
+fn best_random_split_exact(
+    input: &DenseInput,
+    mask: &Mask,
+    feature: usize,
+    target: &DenseDecisionSlice,
+    monotonic_constraint: i8,
+    lower_bound: f64,
+    upper_bound: f64,
+    rng: &mut RfRng,
+) -> Option<(f64, bool, f64)> {
+    if input.n_classes == 2 {
+        return best_random_split_exact_binary(
+            input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng,
+        );
+    }
+    let value_at = |row: usize| match &input.values {
+        DenseValues::Exact(values) => values[row * input.columns + feature],
+        DenseValues::Binned(values) => values[row * input.columns + feature] as f64,
+        DenseValues::Sparse(values) => values.get(row, feature),
+    };
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    let mut missing_classes = vec![0.0; input.n_classes];
+    let mut missing_count = 0usize;
+    let mut missing_weight = 0.0;
+    for (&row, &label) in mask.iter().zip(&target.labels) {
+        let value = value_at(row);
+        if value.is_nan() {
+            missing_count += 1;
+            let weight = input.sample_weight(row);
+            missing_weight += weight;
+            missing_classes[label] += weight;
+        } else {
+            min = min.min(value);
+            max = max.max(value);
+        }
+    }
+    if min >= max { return None; }
+    let unit = ((rng.get_u64() ^ input.extra_seed) >> 11) as f64
+        * (1.0 / ((1u64 << 53) as f64));
+    let threshold = min * (1.0 - unit) + max * unit;
+
+    let mut low_classes = vec![0.0; input.n_classes];
+    let mut low_count = 0usize;
+    let mut low_weight = 0.0;
+    for (&row, &label) in mask.iter().zip(&target.labels) {
+        let value = value_at(row);
+        if !value.is_nan() && value <= threshold {
+            low_count += 1;
+            let weight = input.sample_weight(row);
+            low_weight += weight;
+            low_classes[label] += weight;
+        }
+    }
+    let finite_count = mask.len() - missing_count;
+    let high_count = finite_count - low_count;
+    if low_count == 0 || high_count == 0 { return None; }
+    let total_weight = target.total_weight;
+    let parent = impurity(input.criterion, &target.class_weights, total_weight);
+    let mut best = None;
+    // `missing_left` means NaNs route with values above the threshold.
+    for missing_to_low in [false, true] {
+        let left_count = low_count + if missing_to_low { missing_count } else { 0 };
+        let right_count = high_count + if missing_to_low { 0 } else { missing_count };
+        let left_weight = low_weight + if missing_to_low { missing_weight } else { 0.0 };
+        let right_weight = total_weight - left_weight;
+        if left_count < input.min_samples_leaf || right_count < input.min_samples_leaf
+            || left_weight < input.min_leaf_weight || right_weight < input.min_leaf_weight
+            || left_weight <= 0.0 || right_weight <= 0.0 { continue; }
+        let mut left = low_classes.clone();
+        let mut right = target.class_weights.clone();
+        for c in 0..input.n_classes { right[c] -= low_classes[c]; }
+        if missing_to_low {
+            for c in 0..input.n_classes { left[c] += missing_classes[c]; right[c] -= missing_classes[c]; }
+        }
+        if monotonic_constraint != 0 {
+            let lp = left[1] / left_weight;
+            let rp = right[1] / right_weight;
+            if lp < lower_bound || lp > upper_bound || rp < lower_bound || rp > upper_bound
+                || (lp - rp) * monotonic_constraint as f64 > 0.0 { continue; }
+        }
+        let gain = parent - (left_weight / total_weight) * impurity(input.criterion, &left, left_weight)
+            - (right_weight / total_weight) * impurity(input.criterion, &right, right_weight);
+        if gain >= input.min_impurity_decrease && best.as_ref().is_none_or(|(_, _, g)| gain > *g) {
+            best = Some((threshold, !missing_to_low, gain));
+        }
+    }
+    best
+}
+
+fn best_random_split_exact_binary(
+    input: &DenseInput,
+    mask: &Mask,
+    feature: usize,
+    target: &DenseDecisionSlice,
+    monotonic_constraint: i8,
+    lower_bound: f64,
+    upper_bound: f64,
+    rng: &mut RfRng,
+) -> Option<(f64, bool, f64)> {
+    let DenseValues::Exact(values) = &input.values else { unreachable!() };
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    let mut missing_count = 0usize;
+    let mut missing_weight = 0.0;
+    let mut missing_class_0 = 0.0;
+    let mut missing_class_1 = 0.0;
+    for (&row, &label) in mask.iter().zip(&target.labels) {
+        let value = values[row * input.columns + feature];
+        if value.is_nan() {
+            let weight = input.sample_weight(row);
+            missing_count += 1;
+            missing_weight += weight;
+            if label == 0 { missing_class_0 += weight; } else { missing_class_1 += weight; }
+        } else {
+            min = min.min(value);
+            max = max.max(value);
+        }
+    }
+    if min >= max { return None; }
+    let unit = ((rng.get_u64() ^ input.extra_seed) >> 11) as f64
+        * (1.0 / ((1u64 << 53) as f64));
+    let threshold = min * (1.0 - unit) + max * unit;
+
+    let mut low_count = 0usize;
+    let mut low_weight = 0.0;
+    let mut low_class_0 = 0.0;
+    let mut low_class_1 = 0.0;
+    for (&row, &label) in mask.iter().zip(&target.labels) {
+        let value = values[row * input.columns + feature];
+        if !value.is_nan() && value <= threshold {
+            let weight = input.sample_weight(row);
+            low_count += 1;
+            low_weight += weight;
+            if label == 0 { low_class_0 += weight; } else { low_class_1 += weight; }
+        }
+    }
+    let high_count = mask.len() - missing_count - low_count;
+    if low_count == 0 || high_count == 0 { return None; }
+    let total_weight = target.total_weight;
+    let parent_impurity = impurity(input.criterion, &target.class_weights, total_weight);
+    let mut best: Option<(f64, bool, f64)> = None;
+    for missing_to_low in [false, true] {
+        let left_count = low_count + usize::from(missing_to_low) * missing_count;
+        let right_count = high_count + usize::from(!missing_to_low) * missing_count;
+        let left_weight = low_weight + if missing_to_low { missing_weight } else { 0.0 };
+        let right_weight = total_weight - left_weight;
+        if left_count < input.min_samples_leaf || right_count < input.min_samples_leaf
+            || left_weight < input.min_leaf_weight || right_weight < input.min_leaf_weight
+            || left_weight <= 0.0 || right_weight <= 0.0 { continue; }
+        let left_classes = if missing_to_low {
+            [low_class_0 + missing_class_0, low_class_1 + missing_class_1]
+        } else { [low_class_0, low_class_1] };
+        let right_classes = [
+            target.class_weights[0] - left_classes[0],
+            target.class_weights[1] - left_classes[1],
+        ];
+        if monotonic_constraint != 0 {
+            let lp = left_classes[1] / left_weight;
+            let rp = right_classes[1] / right_weight;
+            if lp < lower_bound || lp > upper_bound || rp < lower_bound || rp > upper_bound
+                || (lp - rp) * monotonic_constraint as f64 > 0.0 { continue; }
+        }
+        let child_impurity = (left_weight / total_weight)
+            * impurity(input.criterion, &left_classes, left_weight)
+            + (right_weight / total_weight)
+                * impurity(input.criterion, &right_classes, right_weight);
+        let gain = parent_impurity - child_impurity;
+        if gain >= input.min_impurity_decrease && best.as_ref().is_none_or(|(_, _, g)| gain > *g) {
+            best = Some((threshold, !missing_to_low, gain));
+        }
+    }
+    best
+}
+
 
 fn best_split_histogram(
     input: &DenseInput,
@@ -2105,14 +2302,24 @@ impl AccuracyDecreaseAggregator<DenseInput> for PermutationImportance {
 
 pub struct UniformFeatureSampler {
     active_features: Vec<usize>,
+    shuffled_features: Vec<usize>,
+    remaining: usize,
+    without_replacement: bool,
 }
 
 impl FeatureSampler<DenseInput> for UniformFeatureSampler {
     fn random_feature(&mut self, rng: &mut RfRng) -> usize {
-        self.active_features[rng.up_to(self.active_features.len())]
+        if self.without_replacement && self.remaining > 0 {
+            let selected = rng.up_to(self.remaining);
+            self.remaining -= 1;
+            self.shuffled_features.swap(selected, self.remaining);
+            self.shuffled_features[self.remaining]
+        } else {
+            self.active_features[rng.up_to(self.active_features.len())]
+        }
     }
 
-    fn reload(&mut self) {}
+    fn reload(&mut self) { self.remaining = self.shuffled_features.len(); }
 
     fn reset(&mut self) {}
 }
@@ -2155,6 +2362,11 @@ impl RfInput for DenseInput {
     fn feature_sampler(&self) -> Self::FeatureSampler {
         UniformFeatureSampler {
             active_features: self.active_features.clone(),
+            shuffled_features: self.active_features.clone(),
+            remaining: self.active_features.len(),
+            without_replacement: self.extra_trees
+                && self.histogram_bins.is_none()
+                && matches!(self.values, DenseValues::Exact(_)),
         }
     }
 

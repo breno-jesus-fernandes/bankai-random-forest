@@ -84,11 +84,6 @@ impl NativeForest {
         if n_estimators == 0 {
             return Err(PyValueError::new_err("n_estimators must be at least 1"));
         }
-        if extra_trees && max_bins.is_none() {
-            return Err(PyValueError::new_err(
-                "extra_trees=True requires max_bins to enable histogram splits",
-            ));
-        }
         if !ccp_alpha.is_finite() || ccp_alpha < 0.0 {
             return Err(PyValueError::new_err(
                 "ccp_alpha must be a finite non-negative number",
@@ -293,7 +288,7 @@ impl NativeForest {
             1
         };
         let input = input
-            .with_extra_trees(extra_trees && max_bins.is_some(), extra_seed)
+            .with_extra_trees(extra_trees, extra_seed)
             .with_ccp_alpha(ccp_alpha)
             .with_histogram_threads(histogram_threads);
 

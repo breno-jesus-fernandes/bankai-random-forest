@@ -1,0 +1,8 @@
+Python: 3.11.11
+NumPy: 2.4.6
+scikit-learn: 1.9.1
+Platform: macOS-26.6.2-arm64-arm-64bit
+Jobs: 1
+Bins: 63
+Seeds: 5
+Bankai release build should be compiled with RUSTFLAGS='-C target-cpu=native'.
