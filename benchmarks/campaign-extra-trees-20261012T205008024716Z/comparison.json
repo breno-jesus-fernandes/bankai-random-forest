@@ -1,0 +1,14 @@
+{
+  "scenario": "credit_default",
+  "jobs": 6,
+  "bootstrap": true,
+  "max_samples": 0.8,
+  "repeats": 3,
+  "rows": 500000,
+  "features": 500,
+  "trees": 100,
+  "measured_fits": 9,
+  "extra_vs_control_fit_difference_between_medians_seconds": -6.3338425000001735,
+  "extra_vs_control_fit_speedup_percent": 22.18557906755805,
+  "extra_vs_control_ap_difference_between_medians": 0.08423864944308379
+}

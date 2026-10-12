@@ -1,6 +1,45 @@
 use std::collections::HashMap;
+use std::cell::RefCell;
+
+thread_local! {
+    // One contiguous feature workspace per tree worker; retained across nodes.
+    static EXTRA_FEATURE_VALUES: RefCell<Vec<f64>> = const { RefCell::new(Vec::new()) };
+}
 use std::sync::Arc;
 use std::thread;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::time::Instant;
+
+#[derive(Default)]
+pub struct FitProfile {
+    split_ns: AtomicU64,
+    bootstrap_ns: AtomicU64,
+    partition_ns: AtomicU64,
+    feature_visits: AtomicU64,
+    sample_visits: AtomicU64,
+    rejected: AtomicU64,
+    buffer_bytes: AtomicU64,
+}
+
+impl FitProfile {
+    pub fn snapshot(&self) -> HashMap<String, f64> {
+        [("split_search_seconds", self.split_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9),
+         ("bootstrap_seconds", self.bootstrap_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9),
+         ("partition_seconds", self.partition_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9),
+         ("feature_visits", self.feature_visits.load(AtomicOrdering::Relaxed) as f64),
+         ("sample_visits", self.sample_visits.load(AtomicOrdering::Relaxed) as f64),
+         ("rejected_candidates", self.rejected.load(AtomicOrdering::Relaxed) as f64),
+         ("feature_buffer_peak_bytes_per_worker", self.buffer_bytes.load(AtomicOrdering::Relaxed) as f64)]
+         .into_iter().map(|(k,v)| (k.to_string(),v)).collect()
+    }
+}
+
+struct ProfileTimer<'a>(Option<(&'a AtomicU64, Instant)>);
+impl Drop for ProfileTimer<'_> {
+    fn drop(&mut self) {
+        if let Some((counter, start)) = self.0 { counter.fetch_add(start.elapsed().as_nanos() as u64, AtomicOrdering::Relaxed); }
+    }
+}
 use xrf::{
     AccuracyDecreaseAggregator, DecisionSlice, FairBest, FeatureSampler, Mask, RfInput, RfRng,
     VoteAggregator,
@@ -30,13 +69,27 @@ pub struct DenseInput {
     histogram_threads: usize,
     extra_trees: bool,
     extra_seed: u64,
+    profile: Option<Arc<FitProfile>>,
 }
 
 #[derive(Clone)]
 enum DenseValues {
-    Exact(Arc<Vec<f64>>),
+    Exact(Arc<ExactValues>),
     Binned(Arc<Vec<u8>>),
     Sparse(Arc<CsrValues>),
+}
+
+#[derive(Clone)]
+enum ExactValues {
+    F64(Vec<f64>),
+    F32(Vec<f32>),
+}
+
+impl ExactValues {
+    #[inline]
+    fn at(&self, index: usize) -> f64 {
+        match self { Self::F64(values) => values[index], Self::F32(values) => f64::from(values[index]) }
+    }
 }
 
 #[derive(Clone)]
@@ -102,7 +155,14 @@ impl HistogramCache {
     }
 }
 
-pub struct DenseSplitCache(Option<HistogramCache>);
+pub struct DenseSplitCache(Option<HistogramCache>, RefCell<Vec<usize>>);
+impl DenseSplitCache {
+    fn new(histogram: Option<HistogramCache>) -> Self { Self(histogram, RefCell::new(Vec::new())) }
+    fn constant(&self, feature: usize) -> bool { self.1.borrow().contains(&feature) }
+    fn mark_constant(&self, feature: usize) {
+        if !self.constant(feature) { self.1.borrow_mut().push(feature); }
+    }
+}
 
 enum DenseSplitIter<'a> {
     Lazy {
@@ -112,6 +172,15 @@ enum DenseSplitIter<'a> {
         pivot: f64,
     },
     Buffered(std::vec::IntoIter<bool>),
+}
+
+struct ProfiledSplitIter<'a> {
+    inner: DenseSplitIter<'a>,
+    _timer: ProfileTimer<'a>,
+}
+impl Iterator for ProfiledSplitIter<'_> {
+    type Item = bool;
+    fn next(&mut self) -> Option<bool> { self.inner.next() }
 }
 
 impl Iterator for DenseSplitIter<'_> {
@@ -289,7 +358,7 @@ impl DenseInput {
                 )
             }
             None => (
-                DenseValues::Exact(Arc::new(values)),
+                DenseValues::Exact(Arc::new(ExactValues::F64(values))),
                 None,
                 (0..columns).collect(),
             ),
@@ -317,6 +386,7 @@ impl DenseInput {
             histogram_threads: 1,
             extra_trees: false,
             extra_seed: 6,
+            profile: None,
         })
     }
 
@@ -450,6 +520,7 @@ impl DenseInput {
             histogram_threads: 1,
             extra_trees: false,
             extra_seed: 6,
+            profile: None,
         })
     }
 
@@ -475,7 +546,7 @@ impl DenseInput {
                     &values, rows, columns, edges,
                 )))
             }
-            None => DenseValues::Exact(Arc::new(values)),
+            None => DenseValues::Exact(Arc::new(ExactValues::F64(values))),
         };
 
         Ok(Self {
@@ -501,6 +572,7 @@ impl DenseInput {
             histogram_threads: 1,
             extra_trees: false,
             extra_seed: 6,
+            profile: None,
         })
     }
 
@@ -682,6 +754,7 @@ impl DenseInput {
             histogram_threads: 1,
             extra_trees: false,
             extra_seed: 6,
+            profile: None,
         })
     }
 
@@ -725,6 +798,7 @@ impl DenseInput {
             histogram_threads: 1,
             extra_trees: false,
             extra_seed: 6,
+            profile: None,
         })
     }
 
@@ -734,6 +808,15 @@ impl DenseInput {
 
     pub fn bin_edges(&self) -> Option<&[Vec<f64>]> {
         self.bin_edges.as_ref().map(|edges| edges.as_slice())
+    }
+
+    pub fn with_float32_storage(mut self) -> Self {
+        if let DenseValues::Exact(values) = &self.values {
+            if let ExactValues::F64(values) = values.as_ref() {
+                self.values = DenseValues::Exact(Arc::new(ExactValues::F32(values.iter().map(|&v| v as f32).collect())));
+            }
+        }
+        self
     }
 
     pub fn value_at(&self, row: usize, column: usize) -> f64 {
@@ -752,6 +835,11 @@ impl DenseInput {
 
     pub fn with_histogram_threads(mut self, threads: usize) -> Self {
         self.histogram_threads = threads.max(1);
+        self
+    }
+
+    pub fn with_profiling(mut self, profile: Option<Arc<FitProfile>>) -> Self {
+        self.profile = profile;
         self
     }
 
@@ -829,7 +917,7 @@ impl DenseInput {
 
     fn value(&self, row: usize, column: usize) -> f64 {
         match &self.values {
-            DenseValues::Exact(values) => values[row * self.columns + column],
+            DenseValues::Exact(values) => values.at(row * self.columns + column),
             DenseValues::Binned(values) => {
                 let bin = values[row * self.columns + column];
                 let missing_bin = self.bin_edges.as_ref().map_or(usize::MAX, |e| e[column].len() + 1);
@@ -852,7 +940,7 @@ impl DenseInput {
     fn routes_left(&self, row: usize, column: usize, pivot: f64, missing_left: bool) -> bool {
         if !self.has_missing_values {
             return match &self.values {
-                DenseValues::Exact(values) => values[row * self.columns + column] > pivot,
+                DenseValues::Exact(values) => values.at(row * self.columns + column) > pivot,
                 DenseValues::Binned(values) => (values[row * self.columns + column] as f64) > pivot,
                 DenseValues::Sparse(values) => {
                     let value = values.get(row, column);
@@ -863,7 +951,7 @@ impl DenseInput {
         }
         match &self.values {
             DenseValues::Exact(values) => {
-                let value = values[row * self.columns + column];
+                let value = values.at(row * self.columns + column);
                 if value.is_nan() { missing_left } else { value > pivot }
             }
             DenseValues::Binned(values) => {
@@ -1654,7 +1742,19 @@ fn best_split(
     upper_bound: f64,
     rng: &mut RfRng,
 ) -> Option<(f64, bool, f64)> {
-    let best = if input.histogram_bins.is_some() {
+    if input.extra_trees && split_cache.constant(feature) { return None; }
+    let _timer = ProfileTimer(input.profile.as_ref().map(|p| (&p.split_ns, Instant::now())));
+    if let Some(p) = &input.profile { p.feature_visits.fetch_add(1, AtomicOrdering::Relaxed); }
+    // Extra Trees only needs one random threshold for the selected feature.
+    // In histogram mode, building a complete cache for every feature at every
+    // node is strictly more work than scanning the node for the sampled
+    // feature. Keep this branch ahead of the histogram path so the specialized
+    // implementation is also used for binned dense inputs.
+    let best = if input.extra_trees {
+        best_random_split(
+            input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng, split_cache,
+        )
+    } else if input.histogram_bins.is_some() {
         best_split_histogram(
             input,
             target,
@@ -1689,18 +1789,13 @@ fn best_split_exact(
     upper_bound: f64,
     rng: &mut RfRng,
 ) -> Option<(f64, bool, f64)> {
-    if input.extra_trees && matches!(input.values, DenseValues::Exact(_)) {
-        return best_random_split_exact(
-            input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng,
-        );
-    }
     let mut ranked: Vec<(f64, usize, f64)> = match &input.values {
         DenseValues::Exact(values) => mask
             .iter()
             .zip(&target.labels)
             .map(|(&row, &label)| {
                 (
-                    values[row * input.columns + feature],
+                    values.at(row * input.columns + feature),
                     label,
                     input.sample_weight(row),
                 )
@@ -1749,7 +1844,7 @@ fn best_split_exact(
         let min = ranked.first()?.0;
         let max = ranked.last()?.0;
         if min >= max { return None; }
-        let unit = ((rng.get_u64() ^ input.extra_seed) >> 11) as f64
+        let unit = ((rng.get_u64() ^ input.extra_seed.wrapping_mul(0x9e37_79b9_7f4a_7c15)) >> 11) as f64
             * (1.0 / ((1u64 << 53) as f64));
         Some(min * (1.0 - unit) + max * unit)
     } else { None };
@@ -1835,8 +1930,10 @@ fn best_split_exact(
 }
 
 /// Extra Trees only needs one random threshold, so avoid constructing and sorting
-/// the per-feature sample list used by the exact CART search.
-fn best_random_split_exact(
+/// the per-feature sample list used by the exact CART search. This deliberately
+/// also accepts binned values: the bin ids are the values used by split_iter,
+/// which avoids materializing histogram statistics for all features.
+fn best_random_split(
     input: &DenseInput,
     mask: &Mask,
     feature: usize,
@@ -1845,15 +1942,27 @@ fn best_random_split_exact(
     lower_bound: f64,
     upper_bound: f64,
     rng: &mut RfRng,
+    split_cache: &DenseSplitCache,
 ) -> Option<(f64, bool, f64)> {
-    if input.n_classes == 2 {
-        return best_random_split_exact_binary(
-            input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng,
+    if input.n_classes == 2 && matches!(input.values, DenseValues::Exact(_)) {
+        return best_random_split_binary(
+            input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng, split_cache,
         );
     }
     let value_at = |row: usize| match &input.values {
-        DenseValues::Exact(values) => values[row * input.columns + feature],
-        DenseValues::Binned(values) => values[row * input.columns + feature] as f64,
+        DenseValues::Exact(values) => values.at(row * input.columns + feature),
+        DenseValues::Binned(values) => {
+            let bin = values[row * input.columns + feature] as usize;
+            let missing_bin = input
+                .bin_edges
+                .as_ref()
+                .map_or(usize::MAX, |edges| edges[feature].len() + 1);
+            if input.has_missing_values && bin == missing_bin {
+                f64::NAN
+            } else {
+                bin as f64
+            }
+        }
         DenseValues::Sparse(values) => values.get(row, feature),
     };
     let mut min = f64::INFINITY;
@@ -1873,8 +1982,8 @@ fn best_random_split_exact(
             max = max.max(value);
         }
     }
-    if min >= max { return None; }
-    let unit = ((rng.get_u64() ^ input.extra_seed) >> 11) as f64
+    if min >= max { split_cache.mark_constant(feature); return None; }
+    let unit = ((rng.get_u64() ^ input.extra_seed.wrapping_mul(0x9e37_79b9_7f4a_7c15)) >> 11) as f64
         * (1.0 / ((1u64 << 53) as f64));
     let threshold = min * (1.0 - unit) + max * unit;
 
@@ -1926,7 +2035,7 @@ fn best_random_split_exact(
     best
 }
 
-fn best_random_split_exact_binary(
+fn best_random_split_binary(
     input: &DenseInput,
     mask: &Mask,
     feature: usize,
@@ -1935,6 +2044,21 @@ fn best_random_split_exact_binary(
     lower_bound: f64,
     upper_bound: f64,
     rng: &mut RfRng,
+    split_cache: &DenseSplitCache,
+) -> Option<(f64, bool, f64)> {
+    EXTRA_FEATURE_VALUES.with(|workspace| {
+        let mut workspace = workspace.borrow_mut();
+        workspace.clear();
+        best_random_split_binary_buffered(input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng, &mut workspace, split_cache)
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn best_random_split_binary_buffered(
+    input: &DenseInput, mask: &Mask, feature: usize, target: &DenseDecisionSlice,
+    monotonic_constraint: i8, lower_bound: f64, upper_bound: f64, rng: &mut RfRng,
+    workspace: &mut Vec<f64>,
+    split_cache: &DenseSplitCache,
 ) -> Option<(f64, bool, f64)> {
     let DenseValues::Exact(values) = &input.values else { unreachable!() };
     let mut min = f64::INFINITY;
@@ -1944,7 +2068,8 @@ fn best_random_split_exact_binary(
     let mut missing_class_0 = 0.0;
     let mut missing_class_1 = 0.0;
     for (&row, &label) in mask.iter().zip(&target.labels) {
-        let value = values[row * input.columns + feature];
+        let value = values.at(row * input.columns + feature);
+        workspace.push(value);
         if value.is_nan() {
             let weight = input.sample_weight(row);
             missing_count += 1;
@@ -1955,8 +2080,16 @@ fn best_random_split_exact_binary(
             max = max.max(value);
         }
     }
-    if min >= max { return None; }
-    let unit = ((rng.get_u64() ^ input.extra_seed) >> 11) as f64
+    if let Some(p) = &input.profile {
+        p.sample_visits.fetch_add(mask.len() as u64, AtomicOrdering::Relaxed);
+        p.buffer_bytes.fetch_max((workspace.capacity() * 8) as u64, AtomicOrdering::Relaxed);
+    }
+    if min >= max {
+        split_cache.mark_constant(feature);
+        if let Some(p) = &input.profile { p.rejected.fetch_add(1, AtomicOrdering::Relaxed); }
+        return None;
+    }
+    let unit = ((rng.get_u64() ^ input.extra_seed.wrapping_mul(0x9e37_79b9_7f4a_7c15)) >> 11) as f64
         * (1.0 / ((1u64 << 53) as f64));
     let threshold = min * (1.0 - unit) + max * unit;
 
@@ -1964,8 +2097,7 @@ fn best_random_split_exact_binary(
     let mut low_weight = 0.0;
     let mut low_class_0 = 0.0;
     let mut low_class_1 = 0.0;
-    for (&row, &label) in mask.iter().zip(&target.labels) {
-        let value = values[row * input.columns + feature];
+    for ((&row, &label), &value) in mask.iter().zip(&target.labels).zip(workspace.iter()) {
         if !value.is_nan() && value <= threshold {
             let weight = input.sample_weight(row);
             low_count += 1;
@@ -1973,6 +2105,7 @@ fn best_random_split_exact_binary(
             if label == 0 { low_class_0 += weight; } else { low_class_1 += weight; }
         }
     }
+    if let Some(p) = &input.profile { p.sample_visits.fetch_add(mask.len() as u64, AtomicOrdering::Relaxed); }
     let high_count = mask.len() - missing_count - low_count;
     if low_count == 0 || high_count == 0 { return None; }
     let total_weight = target.total_weight;
@@ -2008,6 +2141,7 @@ fn best_random_split_exact_binary(
             best = Some((threshold, !missing_to_low, gain));
         }
     }
+    if best.is_none() { if let Some(p) = &input.profile { p.rejected.fetch_add(1, AtomicOrdering::Relaxed); } }
     best
 }
 
@@ -2130,7 +2264,7 @@ fn best_split_histogram_classes<const CLASSES: usize>(
         bin_count.saturating_sub(1)
     };
     let random_bin = if input.extra_trees && split_bin_end > 0 {
-        Some(((rng.get_u64() ^ input.extra_seed) % split_bin_end as u64) as usize)
+        Some(((rng.get_u64() ^ input.extra_seed.wrapping_mul(0x9e37_79b9_7f4a_7c15)) % split_bin_end as u64) as usize)
     } else {
         None
     };
@@ -2321,7 +2455,12 @@ impl FeatureSampler<DenseInput> for UniformFeatureSampler {
 
     fn reload(&mut self) { self.remaining = self.shuffled_features.len(); }
 
-    fn reset(&mut self) {}
+    fn reset(&mut self) {
+        if self.without_replacement {
+            self.shuffled_features.clone_from(&self.active_features);
+            self.remaining = self.active_features.len();
+        }
+    }
 }
 
 impl RfInput for DenseInput {
@@ -2338,6 +2477,12 @@ impl RfInput for DenseInput {
         self.rows
     }
 
+    fn training_mask(&self) -> Mask {
+        if self.extra_trees {
+            Mask::from_vec((0..self.rows).filter(|&row| self.sample_weight(row) > 0.0).collect())
+        } else { Mask::new_all(self.rows) }
+    }
+
     fn ccp_alpha(&self) -> f64 {
         self.ccp_alpha
     }
@@ -2345,6 +2490,46 @@ impl RfInput for DenseInput {
     fn tree_input(&self, bag: &Mask) -> Option<Self> {
         self.balanced_subsample
             .then(|| self.balanced_tree_view(bag))
+    }
+
+    fn bootstrap_input(&self, size: usize, rng: &mut RfRng) -> Option<(Mask, Mask, Self)> {
+        if !self.extra_trees { return None; }
+        let _timer = ProfileTimer(self.profile.as_ref().map(|p| (&p.bootstrap_ns, Instant::now())));
+        let weights = self.sample_weights.as_ref()?;
+        let mut cumulative = Vec::with_capacity(self.rows);
+        let mut sum = 0.0;
+        for &weight in weights.iter() { sum += weight; cumulative.push(sum); }
+        let mut counts = vec![0usize; self.rows];
+        for _ in 0..size {
+            let unit = (rng.get_u64() >> 11) as f64 / (1u64 << 53) as f64;
+            let row = cumulative.partition_point(|&value| value <= unit * sum).min(self.rows - 1);
+            counts[row] += 1;
+        }
+        let bag = Mask::from_vec((0..self.rows).filter(|&row| counts[row] > 0).collect());
+        let oob = Mask::from_vec((0..self.rows).filter(|&row| counts[row] == 0).collect());
+        let mut tree_weights: Vec<f64> = counts.iter().map(|&n| n as f64).collect();
+        if self.balanced_subsample {
+            let mut classes = vec![0usize; self.n_classes];
+            for row in 0..self.rows { classes[self.labels()[row]] += counts[row]; }
+            let present = classes.iter().filter(|&&n| n > 0).count();
+            for row in 0..self.rows {
+                let n = classes[self.labels()[row]];
+                if n > 0 { tree_weights[row] *= size as f64 / (present * n) as f64; }
+            }
+        }
+        let total_weight = tree_weights.iter().sum();
+        let tree = Self {
+            sample_weights: Some(Arc::new(tree_weights)), total_weight,
+            min_leaf_weight: self.min_leaf_weight / self.total_weight * total_weight,
+            balanced_subsample: false, ..self.clone()
+        };
+        Some((bag, oob, tree))
+    }
+
+    fn known_constant(&self, feature: usize, cache: &DenseSplitCache) -> bool { self.extra_trees && cache.constant(feature) }
+    fn feature_search_continues(&self, visited: usize, nonconstant: usize, tries: usize, has_split: bool) -> bool {
+        if self.extra_trees { visited < self.active_features.len() && (nonconstant < tries || !has_split) }
+        else { visited < tries }
     }
 
     fn feature_count(&self) -> usize {
@@ -2356,7 +2541,9 @@ impl RfInput for DenseInput {
     }
 
     fn can_split(&self, mask: &Mask) -> bool {
-        mask.len() >= self.min_samples_split && !self.active_features.is_empty()
+        mask.len() >= self.min_samples_split
+            && (!self.extra_trees || mask.len() >= self.min_samples_leaf.saturating_mul(2))
+            && !self.active_features.is_empty()
     }
 
     fn feature_sampler(&self) -> Self::FeatureSampler {
@@ -2364,16 +2551,17 @@ impl RfInput for DenseInput {
             active_features: self.active_features.clone(),
             shuffled_features: self.active_features.clone(),
             remaining: self.active_features.len(),
-            without_replacement: self.extra_trees
-                && self.histogram_bins.is_none()
-                && matches!(self.values, DenseValues::Exact(_)),
+            // Extra Trees samples candidate features without replacement at
+            // each node, regardless of whether the input is exact or binned.
+            // Once all active features have been visited, the sampler keeps
+            // the existing fallback to replacement for tries > n_features.
+            without_replacement: self.extra_trees,
         }
     }
 
     fn split_cache(&self, on: &Mask) -> Self::SplitCache {
-        DenseSplitCache(
-            self.histogram_bins
-                .is_some()
+        DenseSplitCache::new(
+            ((!self.extra_trees) && self.histogram_bins.is_some())
                 .then(|| build_histograms(self, on)),
         )
     }
@@ -2386,21 +2574,22 @@ impl RfInput for DenseInput {
         right: &Mask,
     ) -> (Self::SplitCache, Self::SplitCache) {
         let Some(parent_histograms) = parent_cache.0 else {
-            return (DenseSplitCache(None), DenseSplitCache(None));
+            let constants = parent_cache.1.into_inner();
+            return (DenseSplitCache(None, RefCell::new(constants.clone())), DenseSplitCache(None, RefCell::new(constants)));
         };
         if left.len() <= right.len() {
             let left_histograms = build_histograms(self, left);
             let right_histograms = subtract_histograms(parent_histograms, &left_histograms);
             (
-                DenseSplitCache(Some(left_histograms)),
-                DenseSplitCache(Some(right_histograms)),
+                DenseSplitCache::new(Some(left_histograms)),
+                DenseSplitCache::new(Some(right_histograms)),
             )
         } else {
             let right_histograms = build_histograms(self, right);
             let left_histograms = subtract_histograms(parent_histograms, &right_histograms);
             (
-                DenseSplitCache(Some(left_histograms)),
-                DenseSplitCache(Some(right_histograms)),
+                DenseSplitCache::new(Some(left_histograms)),
+                DenseSplitCache::new(Some(right_histograms)),
             )
         }
     }
@@ -2454,11 +2643,12 @@ impl RfInput for DenseInput {
         pivot: &'a Self::Pivot,
         missing_left: bool,
     ) -> impl Iterator<Item = bool> + 'a {
-        if self.labels.is_none() {
+        let timer = ProfileTimer(self.profile.as_ref().map(|p| (&p.partition_ns, Instant::now())));
+        let inner = if self.labels.is_none() {
             let values = match &self.values {
                 DenseValues::Exact(values) => {
-                    if self.has_missing_values { mask.iter().map(|&row| { let value = values[row * self.columns + feature]; if value.is_nan() { missing_left } else { value > *pivot } }).collect::<Vec<_>>().into_iter() }
-                    else { mask.iter().map(|&row| values[row * self.columns + feature] > *pivot).collect::<Vec<_>>().into_iter() }
+                    if self.has_missing_values { mask.iter().map(|&row| { let value = values.at(row * self.columns + feature); if value.is_nan() { missing_left } else { value > *pivot } }).collect::<Vec<_>>().into_iter() }
+                    else { mask.iter().map(|&row| values.at(row * self.columns + feature) > *pivot).collect::<Vec<_>>().into_iter() }
                 }
                 DenseValues::Binned(values) => {
                     if self.has_missing_values { mask.iter().map(|&row| { let bin = values[row * self.columns + feature]; let missing_bin = self.bin_edges.as_ref().map_or(usize::MAX, |e| e[feature].len() + 1); if bin as usize == missing_bin { missing_left } else { (bin as f64) > *pivot } }).collect::<Vec<_>>().into_iter() }
@@ -2482,7 +2672,8 @@ impl RfInput for DenseInput {
             } else {
                 DenseSplitIter::Lazy { input: self, rows: mask.iter(), feature, pivot: *pivot }
             }
-        }
+        };
+        ProfiledSplitIter { inner, _timer: timer }
     }
 }
 
@@ -2756,6 +2947,23 @@ mod histogram_optimization_tests {
         assert_eq!(derived_right, direct_right);
         assert_eq!(derived_right.class_weights.as_ptr(), weights_ptr);
         assert_eq!(derived_right.sample_counts.as_ptr(), counts_ptr);
+    }
+
+    #[test]
+    fn extra_trees_histograms_use_direct_node_scans_without_a_global_cache() {
+        let input = binary_input(Some(4)).with_extra_trees(true, 17);
+        let mask = Mask::from_vec((0..8).collect());
+        let cache = input.split_cache(&mask);
+
+        assert!(cache.0.is_none());
+
+        let target = input.decision_slice(&mask);
+        let mut rng = RfRng::from_seed(31, 1);
+        let split = input.new_split(&mask, 0, &target, &cache, &mut rng);
+        assert!(
+            split.is_some(),
+            "the direct binned Extra Trees split must remain viable"
+        );
     }
 
     #[test]

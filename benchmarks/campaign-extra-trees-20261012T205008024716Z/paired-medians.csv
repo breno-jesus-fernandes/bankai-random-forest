@@ -1,0 +1,2 @@
+scenario,fit_seconds,feature_average_precision,recall_at_24,precision_at_24,informative_missing,roc_auc,pr_auc,nodes,depth
+credit_default,-0.14718100000209233,0.011005183004413,0.04166666666666663,0.04166666666666663,-1.0,-0.017402794247033948,-0.005596092102435071,874.0,0.0
