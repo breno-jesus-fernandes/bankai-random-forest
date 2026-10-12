@@ -28,6 +28,7 @@ def test_bankai_keeps_sklearn_parameters_and_adds_backend_controls():
         "binning_seed",
         "extra_trees",
         "extra_seed",
+        "extra_trees_backend",
         "shap_mode",
         "shap_sample_size",
     }

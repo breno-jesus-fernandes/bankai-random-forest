@@ -19,6 +19,7 @@ def test_default_constructor_matches_sklearn_random_forest_classifier():
     assert bankai_params.pop("shap_sample_size") == 1000
     assert bankai_params.pop("extra_trees") is False
     assert bankai_params.pop("extra_seed") == 6
+    assert bankai_params.pop("extra_trees_backend") == "exact"
     assert bankai_params == RandomForestClassifier().get_params(
         deep=False
     )

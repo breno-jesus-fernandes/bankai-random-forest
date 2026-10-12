@@ -68,7 +68,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         tags.target_tags.required = True
         tags.target_tags.one_d_labels = False
         tags.target_tags.single_output = False
-        tags.input_tags.sparse = True
+        tags.input_tags.sparse = getattr(self, "extra_trees_backend", "exact") != "binned"
         tags.input_tags.allow_nan = True
         return tags
 
@@ -111,6 +111,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         shap_sample_size=1000,
         extra_trees=False,
         extra_seed=6,
+        extra_trees_backend="exact",
     ):
         self.n_estimators = n_estimators
         self.criterion = criterion
@@ -140,6 +141,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         self.shap_sample_size = shap_sample_size
         self.extra_trees = extra_trees
         self.extra_seed = extra_seed
+        self.extra_trees_backend = extra_trees_backend
 
     @property
     def estimators_(self):
@@ -180,6 +182,9 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         profile_start = time.perf_counter() if os.environ.get("BANKAI_PROFILE_FIT") else None
         self._reject_unsupported_baseline_parameters(sample_weight)
         sparse_input = sparse.issparse(X)
+        self._resolve_extra_trees_backend()
+        if sparse_input and self.extra_trees_backend == "binned":
+            raise ValueError("extra_trees_backend='binned' supports dense input only")
         raw_dtype = X.dtype if sparse_input else np.asarray(X).dtype
         if sparse_input:
             X = X.tocsr(copy=True)
@@ -262,6 +267,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         self._fit_verbose = self._resolve_verbose()
         self._fit_importance_type = self._resolve_importance_type()
         self._fit_shap_mode = self._resolve_shap_mode()
+        self._fit_extra_trees_backend = self._resolve_extra_trees_backend()
         self._fit_max_bins = self._resolve_max_bins()
         self._fit_binning_strategy = self._resolve_binning_strategy()
         self._fit_bin_sample_size = self._resolve_bin_sample_size()
@@ -299,6 +305,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             binning_seed=self._fit_binning_seed,
             extra_trees=self.extra_trees,
             extra_seed=self.extra_seed,
+            extra_trees_backend=self._fit_extra_trees_backend,
             balanced_subsample=(
                 self.class_weight == "balanced_subsample" and self.bootstrap is True
             ),
@@ -533,6 +540,8 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        if not hasattr(self, "extra_trees_backend"):
+            self.extra_trees_backend = "exact"
         multioutput_models = getattr(self, "_multioutput_models", None)
         if multioutput_models:
             self._forest = multioutput_models[0]._forest
@@ -575,6 +584,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             ),
             extra_trees=getattr(self, "extra_trees", False),
             extra_seed=getattr(self, "extra_seed", 6),
+            extra_trees_backend=getattr(self, "_fit_extra_trees_backend", "exact"),
             balanced_subsample=(
                 self.class_weight == "balanced_subsample" and self.bootstrap is True
             ),
@@ -742,9 +752,17 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             dtype=np.float64,
         )
 
+    def _resolve_extra_trees_backend(self):
+        backend = getattr(self, "extra_trees_backend", "exact")
+        if backend not in ("exact", "binned"):
+            raise ValueError("extra_trees_backend must be 'exact' or 'binned'")
+        if backend == "binned" and (not self.extra_trees or self.max_bins is None):
+            raise ValueError("extra_trees_backend='binned' requires extra_trees=True and integer max_bins")
+        return backend
+
     def _resolve_max_bins(self):
-        if self.extra_trees and self.max_bins is not None:
-            raise ValueError("max_bins must be None when extra_trees=True; histogram binning is not supported in this mode")
+        if self.extra_trees and self.max_bins is not None and self._resolve_extra_trees_backend() != "binned":
+            raise ValueError("max_bins must be None when extra_trees=True; use extra_trees_backend='binned' to enable experimental binning")
         if self.max_bins is None:
             return None
         if (

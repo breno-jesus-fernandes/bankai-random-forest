@@ -110,3 +110,14 @@ def test_native_extra_trees_rejects_histogram_binning(max_bins):
         forest.fit(np.array([[0.], [1.]]), np.array([0, 1], dtype=np.int64),
                    n_estimators=1, max_features=1, random_state=0,
                    extra_trees=True, max_bins=max_bins)
+
+
+@pytest.mark.parametrize('extra_trees, backend, bins', [
+    (False, 'binned', 63), (True, 'binned', None), (True, 'unknown', 63),
+])
+def test_native_binned_backend_validates_configuration(extra_trees, backend, bins):
+    forest = _core.NativeForest()
+    with pytest.raises(ValueError, match='extra_trees_backend'):
+        forest.fit(np.array([[0.], [1.]]), np.array([0, 1], dtype=np.int64),
+            n_estimators=1, max_features=1, random_state=1,
+            extra_trees=extra_trees, extra_trees_backend=backend, max_bins=bins)
