@@ -138,14 +138,14 @@ model = BankaiRandomForestClassifier(
 | `max_samples` | `None` | Number or fraction of rows sampled for each tree. Accepts an integer count or a fraction in `(0, 1]`; only valid with `bootstrap=True`. `None` samples the full training size. |
 | `monotonic_cst` | `None` | One constraint per input feature: `-1` decreasing, `0` unconstrained, or `1` increasing. Currently supported only for binary single-output classification. |
 | `importance_type` | `"gain"` | How `feature_importances_` is calculated: `"gain"`, `"split"`, `"permutation"`, or `"shap"` (mean absolute native TreeSHAP). Permutation requires `bootstrap=True`. SHAP supports `shap_mode="sampled"` (up to `shap_sample_size=1000` training rows), `"all"`, or `"explicit"`; explicit mode exposes `shap_importances(X)`. |
-| `max_bins` | `None` | `None` uses exact split search. An integer from 2 to 255 enables histogram split search. |
+| `max_bins` | `None` | `None` uses exact split search. An integer from 2 to 255 enables histogram split search for Random Forest. Must be `None` with `extra_trees=True`. |
 | `binning_strategy` | `"exact_sort"` | How histogram cut points are found: `"exact_sort"`, `"sampled_sort"`, `"exact_select"`, or `"sampled_select"`. Applies only when `max_bins` is set. |
 | `bin_sample_size` | `200_000` | Positive maximum number of rows used per feature by sampled histogram strategies. Applies only when `max_bins` is set. |
 | `binning_seed` | `6` | Seed for row sampling in `"sampled_sort"` and `"sampled_select"`. Independent of `random_state`; the default preserves the historical sampled rows. |
-| `extra_trees` | `False` | Evaluate one random threshold per sampled feature. With `max_bins=None`, the threshold is uniform over the observed feature range in the node; with `max_bins` set, one histogram threshold is selected. Classification only. |
+| `extra_trees` | `False` | Evaluate one continuous random threshold per sampled feature over its original observed range. Binning is bypassed. Classification only. |
 | `extra_seed` | `6` | Seed offset for random threshold selection when `extra_trees=True`. Combine with `random_state` for repeatable forests. |
 
-`extra_trees=True` works with exact splits (`max_bins=None`) and histogram splits. In exact mode, a single continuous threshold is sampled uniformly between the node's observed minimum and maximum for each feature considered. If it cannot satisfy the leaf constraints, that feature does not split the node. In histogram mode, one bin threshold is sampled as before. This option currently applies to classification.
+`extra_trees=True` samples a continuous threshold uniformly between the node's original observed minimum and maximum for each feature considered. `max_bins` must be `None`; setting an integer with `extra_trees=True` raises `ValueError`. Features are sampled without replacement; constants are inherited by descendants, and search continues when needed to find a valid partition. Bootstrap uses effective sample weights as sampling probabilities and counts distinct sampled rows for leaf limits. Gain importance is normalized within each tree before aggregation. This option currently applies to classification. See the [campaign notes](docs/performance/extra-trees-campaign.md) for validation and profiling.
 
 `binning_seed` only affects sampled binning strategies and does not change tree bootstrap or feature-sampling randomness. It lets repeated experiments vary the rows used to build histogram cut points independently of the forest's `random_state`.
 

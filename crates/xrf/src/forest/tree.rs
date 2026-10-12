@@ -261,15 +261,19 @@ impl<I: RfInput> Tree<I> {
             let cache = cache.unwrap_or_else(|| input.split_cache(&mask));
             sampler.reload();
             let mut best = FairBest::new();
-            for _ in 0..tries {
+            let (mut visited, mut nonconstant, mut has_split) = (0, 0, false);
+            while input.feature_search_continues(visited, nonconstant, tries, has_split) {
+                visited += 1;
                 let feature = sampler.random_feature(rng);
                 if let Some((pivot, missing_left, score)) = input
                     .new_split_with_bounds(&mask, feature, &target, &cache, rng, bounds.0, bounds.1)
                 {
                     if score.is_finite() {
+                        has_split = true;
                         best.ingest(score, (feature, pivot, missing_left), rng);
                     }
                 }
+                if !input.known_constant(feature, &cache) { nonconstant += 1; }
             }
             if let Some((score, (feature, pivot, missing_left))) = best.consume() {
                 heap.push(Candidate {
@@ -411,23 +415,20 @@ impl<I: RfInput> Tree<I> {
             )
         } else {
             feature_sampler.reload();
-            std::iter::repeat_n((), tries)
-                .fold(FairBest::new(), |mut fair_best: FairBest<_, f64>, _| {
-                    let feature = feature_sampler.random_feature(rng);
-                    if let Some((pivot, missing_left, score)) = input.new_split_with_bounds(
-                        mask,
-                        feature,
-                        &y,
-                        &split_cache,
-                        rng,
-                        lower_bound,
-                        upper_bound,
-                    ) {
-                        fair_best.ingest(score, (feature, pivot, missing_left), rng);
-                    }
-                    fair_best
-                })
-                .consume()
+            let mut fair_best: FairBest<_, f64> = FairBest::new();
+            let (mut visited, mut nonconstant, mut has_split) = (0, 0, false);
+            while input.feature_search_continues(visited, nonconstant, tries, has_split) {
+                visited += 1;
+                let feature = feature_sampler.random_feature(rng);
+                if let Some((pivot, missing_left, score)) = input.new_split_with_bounds(
+                    mask, feature, &y, &split_cache, rng, lower_bound, upper_bound,
+                ) {
+                    has_split = true;
+                    fair_best.ingest(score, (feature, pivot, missing_left), rng);
+                }
+                if !input.known_constant(feature, &split_cache) { nonconstant += 1; }
+            }
+            fair_best.consume()
                 .map(|best| {
                     *leaf_count += 1;
                     let (best_score, (feature, pivot, missing_left)) = best;

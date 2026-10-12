@@ -25,7 +25,7 @@ def test_native_forest_fits_and_predicts_a_separable_binary_problem():
     np.testing.assert_array_equal(forest.predict(x), y)
 
 
-def test_histogram_extra_trees_is_repeatable_across_thread_counts():
+def test_continuous_extra_trees_seed_is_repeatable_across_thread_counts():
     x = np.arange(64, dtype=np.float64).reshape(64, 1)
     y = (x[:, 0] > 31).astype(np.intp)
 
@@ -33,7 +33,7 @@ def test_histogram_extra_trees_is_repeatable_across_thread_counts():
         forest = _core.NativeForest()
         forest.fit(
             x, y, n_estimators=1, max_features=1, random_state=4,
-            n_jobs=n_jobs, max_bins=16, bootstrap=False, max_depth=1,
+            n_jobs=n_jobs, max_bins=None, bootstrap=False, max_depth=1,
             extra_trees=True, extra_seed=seed,
         )
         return np.asarray(forest.predict(x)), np.asarray(forest.feature_importances())
@@ -101,3 +101,12 @@ def test_sampled_binning_seed_is_repeatable_and_independent():
 
     np.testing.assert_array_equal(fit(6), fit(6))
     assert not np.array_equal(fit(6), fit(7))
+
+
+@pytest.mark.parametrize('max_bins', [2, 63, 255])
+def test_native_extra_trees_rejects_histogram_binning(max_bins):
+    forest = _core.NativeForest()
+    with pytest.raises(ValueError, match='max_bins must be None when extra_trees=True'):
+        forest.fit(np.array([[0.], [1.]]), np.array([0, 1], dtype=np.int64),
+                   n_estimators=1, max_features=1, random_state=0,
+                   extra_trees=True, max_bins=max_bins)

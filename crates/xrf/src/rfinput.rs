@@ -24,6 +24,8 @@ pub trait RfInput: Sized {
     type SplitCache;
     /// Number of observations, used to generate masks; has to be accurate.
     fn observation_count(&self) -> usize;
+    /// Rows participating in a tree fitted without bootstrap.
+    fn training_mask(&self) -> Mask { Mask::new_all(self.observation_count()) }
     /// Cost-complexity threshold requested for trees trained on this input.
     fn ccp_alpha(&self) -> f64 {
         0.0
@@ -33,8 +35,16 @@ pub trait RfInput: Sized {
     fn tree_input(&self, _bag: &Mask) -> Option<Self> {
         None
     }
+    /// Optional bootstrap implementation with input-specific sampling weights.
+    fn bootstrap_input(&self, _size: usize, _rng: &mut RfRng) -> Option<(Mask, Mask, Self)> {
+        None
+    }
     /// Number of features; not actually used by xrf, but usually useful for implementers.
     fn feature_count(&self) -> usize;
+    fn known_constant(&self, _feature: Self::FeatureId, _cache: &Self::SplitCache) -> bool { false }
+    fn feature_search_continues(&self, visited: usize, _nonconstant: usize, tries: usize, _has_split: bool) -> bool {
+        visited < tries
+    }
     /// Constructor of the DecisionSlice object for elements in the mask.
     fn decision_slice(&self, mask: &Mask) -> Self::DecisionSlice;
     /// Whether this node has enough observations to attempt a split.

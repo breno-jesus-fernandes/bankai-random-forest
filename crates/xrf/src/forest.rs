@@ -106,16 +106,19 @@ impl<I: RfInput> Forest<I> {
         let mut feature_sampler = input.feature_sampler();
         for tree_id in 0..num_trees {
             let mut rng = RfRng::from_seed(seed, 1 + tree_id as u64);
-            let (bag, oob) = if bootstrap {
+            let specialized = if bootstrap { input.bootstrap_input(sample_size.unwrap_or(input.observation_count()), &mut rng) } else { None };
+            let (bag, oob) = if let Some((bag, oob, _)) = &specialized {
+                (bag.clone(), oob.clone())
+            } else if bootstrap {
                 Mask::new_bag_oob_with_size(
                     input.observation_count(),
                     sample_size.unwrap_or(input.observation_count()),
                     &mut rng,
                 )
             } else {
-                (Mask::new_all(input.observation_count()), Mask::new_all(0))
+                (input.training_mask(), Mask::new_all(0))
             };
-            let tree_input = input.tree_input(&bag);
+            let tree_input = specialized.map(|(_, _, tree)| tree).or_else(|| input.tree_input(&bag));
             let tree_input = tree_input.as_ref().unwrap_or(input);
             let mut tree = Tree::new(
                 tree_input,
@@ -243,16 +246,19 @@ impl<I: RfInput> Forest<I> {
                         let e = tree_idx.fetch_add(1, Ordering::SeqCst);
                         if e < num_trees {
                             let mut rng = RfRng::from_seed(seed, 1 + e as u64);
-                            let (bag, oob) = if bootstrap {
+                            let specialized = if bootstrap { input.bootstrap_input(sample_size.unwrap_or(input.observation_count()), &mut rng) } else { None };
+            let (bag, oob) = if let Some((bag, oob, _)) = &specialized {
+                (bag.clone(), oob.clone())
+            } else if bootstrap {
                                 Mask::new_bag_oob_with_size(
                                     input.observation_count(),
                                     sample_size.unwrap_or(input.observation_count()),
                                     &mut rng,
                                 )
                             } else {
-                                (Mask::new_all(input.observation_count()), Mask::new_all(0))
+                                (input.training_mask(), Mask::new_all(0))
                             };
-                            let tree_input = input.tree_input(&bag);
+                            let tree_input = specialized.map(|(_, _, tree)| tree).or_else(|| input.tree_input(&bag));
                             let tree_input = tree_input.as_ref().unwrap_or(input);
                             let mut tree = Tree::new(
                                 tree_input,

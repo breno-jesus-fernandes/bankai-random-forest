@@ -1,3 +1,5 @@
+import os
+import time
 import numpy as np
 from scipy import sparse
 from sklearn.base import BaseEstimator, ClassifierMixin
@@ -175,6 +177,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         return np.asarray(values, dtype=np.float64), np.asarray(base_values, dtype=np.float64)
 
     def fit(self, X, y, sample_weight=None):
+        profile_start = time.perf_counter() if os.environ.get("BANKAI_PROFILE_FIT") else None
         self._reject_unsupported_baseline_parameters(sample_weight)
         sparse_input = sparse.issparse(X)
         raw_dtype = X.dtype if sparse_input else np.asarray(X).dtype
@@ -227,7 +230,8 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         if getattr(self, "_track_training_row_order", False):
             X, encoded_y, sample_weight, self._training_row_order = (
                 self._prepare_training_data(
-                    X, encoded_y, sample_weight, return_order=True
+                    X, encoded_y, sample_weight, return_order=True,
+                    preserve_weights=self.extra_trees,
                 )
             )
         else:
@@ -236,6 +240,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
                 encoded_y,
                 sample_weight,
                 defer_dense_sort=not sparse_input,
+                preserve_weights=self.extra_trees,
             )
         self._fit_seed = self._fit_seed if warm_refit else self._next_seed()
         self._fit_max_features = self._resolve_max_features()
@@ -268,6 +273,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
             )
 
         forest = _core.NativeForest()
+        validation_seconds = time.perf_counter() - profile_start if profile_start is not None else None
         forest.fit(
             self._fit_X,
             self._fit_y,
@@ -302,12 +308,20 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         self._forest = forest
         self._shap_estimators_cache = None
         self._fitted_n_estimators = self.n_estimators
+        importance_start = time.perf_counter() if profile_start is not None else None
         if self._fit_importance_type == "shap":
             self.feature_importances_ = (
                 None if self._fit_shap_mode == "explicit" else self._sampled_shap_importances()
             )
         else:
             self.feature_importances_ = self._selected_feature_importances(forest)
+        if profile_start is not None:
+            self.fit_profile_ = forest.fit_profile()
+            self.fit_profile_["python_validation_preparation_seconds"] = validation_seconds
+            self.fit_profile_["importance_seconds"] = time.perf_counter() - importance_start
+            self.fit_profile_["total_seconds"] = time.perf_counter() - profile_start
+        elif hasattr(self, "fit_profile_"):
+            del self.fit_profile_
         if self.oob_score:
             self.oob_decision_function_ = np.asarray(
                 forest.oob_predict_proba(), dtype=np.float64
@@ -729,6 +743,8 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         )
 
     def _resolve_max_bins(self):
+        if self.extra_trees and self.max_bins is not None:
+            raise ValueError("max_bins must be None when extra_trees=True; histogram binning is not supported in this mode")
         if self.max_bins is None:
             return None
         if (
@@ -768,7 +784,7 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
         method = (
             forest.permutation_importances
             if self._fit_importance_type == "permutation"
-            else forest.gain_importances
+            else (forest.tree_normalized_gain_importances if self.extra_trees else forest.gain_importances)
             if self._fit_importance_type == "gain"
             else forest.feature_importances
         )
@@ -823,10 +839,10 @@ class BankaiRandomForestClassifier(RandomForestClassifier):
 
     @staticmethod
     def _prepare_training_data(
-        X, encoded_y, sample_weight, return_order=False, defer_dense_sort=False
+        X, encoded_y, sample_weight, return_order=False, defer_dense_sort=False, preserve_weights=False
     ):
         source_rows = np.arange(X.shape[0], dtype=np.intp) if return_order else None
-        if sample_weight is not None and np.equal(
+        if not preserve_weights and sample_weight is not None and np.equal(
             sample_weight, np.floor(sample_weight)
         ).all():
             repeats = sample_weight.astype(np.intp, copy=False)

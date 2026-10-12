@@ -6,6 +6,9 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use std::cmp::Ordering;
 use xrf::{Forest, Walk};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Instant;
 
 #[derive(Clone)]
 struct ShapNode {
@@ -26,6 +29,7 @@ struct NativeForest {
     n_samples: usize,
     histogram_edges: Option<Vec<Vec<f64>>>,
     training_order: Vec<usize>,
+    fit_profile: HashMap<String, f64>,
 }
 
 #[pymethods]
@@ -39,8 +43,11 @@ impl NativeForest {
             n_samples: 0,
             histogram_edges: None,
             training_order: Vec::new(),
+            fit_profile: HashMap::new(),
         }
     }
+
+    fn fit_profile(&self) -> HashMap<String, f64> { self.fit_profile.clone() }
 
     fn is_fitted(&self) -> bool {
         self.forest.is_some()
@@ -81,6 +88,9 @@ impl NativeForest {
         extra_trees: bool,
         extra_seed: u64,
     ) -> PyResult<()> {
+        let enabled = std::env::var_os("BANKAI_PROFILE_FIT").is_some();
+        self.fit_profile.clear();
+        let fit_start = enabled.then(Instant::now);
         if n_estimators == 0 {
             return Err(PyValueError::new_err("n_estimators must be at least 1"));
         }
@@ -96,6 +106,12 @@ impl NativeForest {
                 "bin_sample_size must be a positive integer",
             ));
         }
+        if max_bins.is_some_and(|bins| !(2..=255).contains(&bins)) {
+            return Err(PyValueError::new_err("max_bins must be None or an integer in [2, 255]"));
+        }
+        if extra_trees && max_bins.is_some() {
+            return Err(PyValueError::new_err("max_bins must be None when extra_trees=True; histogram binning is not supported in this mode"));
+        }
 
         let raw_labels: Vec<usize> = y
             .as_array()
@@ -106,7 +122,10 @@ impl NativeForest {
                     .map_err(|_| PyValueError::new_err("y must contain non-negative labels"))
             })
             .collect::<PyResult<_>>()?;
+        let sort_start = enabled.then(Instant::now);
         let dense_order = canonical_dense_row_order(x, y.as_array())?;
+        if let Some(start) = sort_start { self.fit_profile.insert("canonical_sort_seconds".into(), start.elapsed().as_secs_f64()); }
+        let prepare_start = enabled.then(Instant::now);
         let direct_f32 = if max_bins.is_some() {
             x.extract::<PyReadonlyArray2<'_, f32>>().ok()
         } else {
@@ -258,6 +277,9 @@ impl NativeForest {
             }
         }
         .map_err(PyValueError::new_err)?;
+        let input = if extra_trees && x.extract::<PyReadonlyArray2<'_, f32>>().is_ok() {
+            input.with_float32_storage()
+        } else { input };
         let mut input = if balanced_subsample {
             input.with_balanced_subsample()
         } else {
@@ -287,7 +309,11 @@ impl NativeForest {
         } else {
             1
         };
+        if let Some(start) = prepare_start { self.fit_profile.insert("data_preparation_seconds".into(), start.elapsed().as_secs_f64()); }
+        let profile = enabled.then(|| Arc::new(dense::FitProfile::default()));
+        let tree_start = enabled.then(Instant::now);
         let input = input
+            .with_profiling(profile.clone())
             .with_extra_trees(extra_trees, extra_seed)
             .with_ccp_alpha(ccp_alpha)
             .with_histogram_threads(histogram_threads);
@@ -322,6 +348,9 @@ impl NativeForest {
                 max_samples,
             )
         });
+        if let Some(start) = tree_start { self.fit_profile.insert("tree_build_seconds".into(), start.elapsed().as_secs_f64()); }
+        if let Some(profile) = profile { self.fit_profile.extend(profile.snapshot()); }
+        if let Some(start) = fit_start { self.fit_profile.insert("native_fit_seconds".into(), start.elapsed().as_secs_f64()); }
         self.histogram_edges = input.bin_edges().map(|edges| edges.to_vec());
         self.training_order = row_order;
         self.n_classes = n_classes;
@@ -407,6 +436,26 @@ impl NativeForest {
             importances[feature] = importance;
         }
         Ok(importances)
+    }
+
+    fn tree_normalized_gain_importances(&self) -> PyResult<Vec<f64>> {
+        let forest = self.forest.as_ref().ok_or_else(|| PyRuntimeError::new_err("forest is not fitted"))?;
+        let mut result = vec![0.0; self.n_features];
+        for tree in forest.tree_refs() {
+            let mut gains = vec![0.0; self.n_features];
+            for node in &tree.nodes {
+                if let xrf::Node::Branch(feature, _, score, _, _, _) = node {
+                    gains[*feature] += score.abs();
+                }
+            }
+            let total: f64 = gains.iter().sum();
+            if total > 0.0 {
+                for (sum, gain) in result.iter_mut().zip(gains) { *sum += gain / total; }
+            }
+        }
+        let total: f64 = result.iter().sum();
+        if total > 0.0 { for gain in &mut result { *gain /= total; } }
+        Ok(result)
     }
 
     fn permutation_importances(&self) -> PyResult<Vec<f64>> {
@@ -1050,6 +1099,7 @@ mod tests {
             n_samples: input.rows(),
             histogram_edges: input.bin_edges().map(<[Vec<f64>]>::to_vec),
             training_order: Vec::new(),
+            fit_profile: HashMap::new(),
         };
 
         assert!(native.is_fitted());
