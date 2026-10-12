@@ -57,7 +57,7 @@ impl NativeForest {
         self.training_order.clone().into_pyarray(py)
     }
 
-    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1, max_bins=None, balanced_subsample=false, ccp_alpha=0.0, monotonic_cst=None, binning_strategy="exact_sort", bin_sample_size=200000, binning_seed=6, extra_trees=false, extra_seed=6))]
+    #[pyo3(signature = (x, y, n_estimators, max_features, random_state, sample_weight=None, min_leaf_weight=0.0, criterion="gini", max_depth=512, max_leaves=None, min_samples_split=2, min_samples_leaf=1, min_impurity_decrease=0.0, bootstrap=true, max_samples=None, oob=false, permutation_importance=false, n_jobs=1, max_bins=None, balanced_subsample=false, ccp_alpha=0.0, monotonic_cst=None, binning_strategy="exact_sort", bin_sample_size=200000, binning_seed=6, extra_trees=false, extra_seed=6, extra_trees_backend="exact"))]
     fn fit(
         &mut self,
         x: &Bound<'_, PyAny>,
@@ -87,6 +87,7 @@ impl NativeForest {
         binning_seed: u64,
         extra_trees: bool,
         extra_seed: u64,
+        extra_trees_backend: &str,
     ) -> PyResult<()> {
         let enabled = std::env::var_os("BANKAI_PROFILE_FIT").is_some();
         self.fit_profile.clear();
@@ -109,8 +110,19 @@ impl NativeForest {
         if max_bins.is_some_and(|bins| !(2..=255).contains(&bins)) {
             return Err(PyValueError::new_err("max_bins must be None or an integer in [2, 255]"));
         }
-        if extra_trees && max_bins.is_some() {
-            return Err(PyValueError::new_err("max_bins must be None when extra_trees=True; histogram binning is not supported in this mode"));
+        let binned_backend = match extra_trees_backend {
+            "exact" => false,
+            "binned" => true,
+            _ => return Err(PyValueError::new_err("extra_trees_backend must be 'exact' or 'binned'")),
+        };
+        if binned_backend && (!extra_trees || max_bins.is_none()) {
+            return Err(PyValueError::new_err("extra_trees_backend='binned' requires extra_trees=True and integer max_bins"));
+        }
+        if binned_backend && x.extract::<PyReadonlyArray2<'_, f32>>().is_err() && x.extract::<PyReadonlyArray2<'_, f64>>().is_err() {
+            return Err(PyValueError::new_err("extra_trees_backend='binned' supports dense float32/float64 input only"));
+        }
+        if extra_trees && max_bins.is_some() && !binned_backend {
+            return Err(PyValueError::new_err("max_bins must be None when extra_trees=True; use extra_trees_backend='binned' to enable experimental binning"));
         }
 
         let raw_labels: Vec<usize> = y
@@ -309,14 +321,15 @@ impl NativeForest {
         } else {
             1
         };
-        if let Some(start) = prepare_start { self.fit_profile.insert("data_preparation_seconds".into(), start.elapsed().as_secs_f64()); }
         let profile = enabled.then(|| Arc::new(dense::FitProfile::default()));
-        let tree_start = enabled.then(Instant::now);
         let input = input
             .with_profiling(profile.clone())
             .with_extra_trees(extra_trees, extra_seed)
             .with_ccp_alpha(ccp_alpha)
             .with_histogram_threads(histogram_threads);
+        let input = if binned_backend { input.with_binned_extra_trees(n_jobs) } else { input };
+        if let Some(start) = prepare_start { self.fit_profile.insert("data_preparation_seconds".into(), start.elapsed().as_secs_f64()); }
+        let tree_start = enabled.then(Instant::now);
 
         self.forest = Some(if tree_threads == 1 {
             Forest::new_with_settings(

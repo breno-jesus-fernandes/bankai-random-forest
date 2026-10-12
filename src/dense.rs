@@ -19,11 +19,13 @@ pub struct FitProfile {
     sample_visits: AtomicU64,
     rejected: AtomicU64,
     buffer_bytes: AtomicU64,
+    layout_ns: AtomicU64,
 }
 
 impl FitProfile {
     pub fn snapshot(&self) -> HashMap<String, f64> {
-        [("split_search_seconds", self.split_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9),
+        [("bin_layout_conversion_seconds", self.layout_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9),
+         ("split_search_seconds", self.split_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9),
          ("bootstrap_seconds", self.bootstrap_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9),
          ("partition_seconds", self.partition_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9),
          ("feature_visits", self.feature_visits.load(AtomicOrdering::Relaxed) as f64),
@@ -68,6 +70,7 @@ pub struct DenseInput {
     has_missing_values: bool,
     histogram_threads: usize,
     extra_trees: bool,
+    binned_column_major: bool,
     extra_seed: u64,
     profile: Option<Arc<FitProfile>>,
 }
@@ -385,6 +388,7 @@ impl DenseInput {
             has_missing_values,
             histogram_threads: 1,
             extra_trees: false,
+            binned_column_major: false,
             extra_seed: 6,
             profile: None,
         })
@@ -519,6 +523,7 @@ impl DenseInput {
             has_missing_values,
             histogram_threads: 1,
             extra_trees: false,
+            binned_column_major: false,
             extra_seed: 6,
             profile: None,
         })
@@ -571,6 +576,7 @@ impl DenseInput {
             has_missing_values,
             histogram_threads: 1,
             extra_trees: false,
+            binned_column_major: false,
             extra_seed: 6,
             profile: None,
         })
@@ -753,6 +759,7 @@ impl DenseInput {
             has_missing_values,
             histogram_threads: 1,
             extra_trees: false,
+            binned_column_major: false,
             extra_seed: 6,
             profile: None,
         })
@@ -797,6 +804,7 @@ impl DenseInput {
             has_missing_values,
             histogram_threads: 1,
             extra_trees: false,
+            binned_column_major: false,
             extra_seed: 6,
             profile: None,
         })
@@ -846,6 +854,32 @@ impl DenseInput {
     pub fn with_extra_trees(mut self, enabled: bool, seed: u64) -> Self {
         self.extra_trees = enabled;
         self.extra_seed = seed;
+        self
+    }
+
+    /// Dense binned Extra Trees only: keep RF histogram storage row-major.
+    pub fn with_binned_extra_trees(mut self, threads: usize) -> Self {
+        if self.extra_trees {
+            if let DenseValues::Binned(values) = &self.values {
+                let _timer = ProfileTimer(self.profile.as_ref().map(|p| (&p.layout_ns, Instant::now())));
+                let mut transposed = vec![0u8; self.rows * self.columns];
+                let columns_per_worker = self.columns.div_ceil(threads.max(1)).max(1);
+                let rows = self.rows; let columns = self.columns;
+                thread::scope(|scope| {
+                    for (block, dst) in transposed.chunks_mut(columns_per_worker * rows).enumerate() {
+                        let values = values.as_slice();
+                        scope.spawn(move || {
+                            for (local_column, column_dst) in dst.chunks_mut(rows).enumerate() {
+                                let column = block * columns_per_worker + local_column;
+                                for (row, slot) in column_dst.iter_mut().enumerate() { *slot = values[row * columns + column]; }
+                            }
+                        });
+                    }
+                });
+                self.values = DenseValues::Binned(Arc::new(transposed));
+                self.binned_column_major = true;
+            }
+        }
         self
     }
 
@@ -915,11 +949,16 @@ impl DenseInput {
             .expect("prediction input cannot be used for training")[row]
     }
 
+    #[inline]
+    fn bin_index(&self, row: usize, column: usize) -> usize {
+        if self.binned_column_major { column * self.rows + row } else { row * self.columns + column }
+    }
+
     fn value(&self, row: usize, column: usize) -> f64 {
         match &self.values {
             DenseValues::Exact(values) => values.at(row * self.columns + column),
             DenseValues::Binned(values) => {
-                let bin = values[row * self.columns + column];
+                let bin = values[self.bin_index(row, column)];
                 let missing_bin = self.bin_edges.as_ref().map_or(usize::MAX, |e| e[column].len() + 1);
                 if bin as usize == missing_bin { f64::NAN } else { bin as f64 }
             }
@@ -941,7 +980,7 @@ impl DenseInput {
         if !self.has_missing_values {
             return match &self.values {
                 DenseValues::Exact(values) => values.at(row * self.columns + column) > pivot,
-                DenseValues::Binned(values) => (values[row * self.columns + column] as f64) > pivot,
+                DenseValues::Binned(values) => (values[self.bin_index(row, column)] as f64) > pivot,
                 DenseValues::Sparse(values) => {
                     let value = values.get(row, column);
                     let value = self.bin_edges.as_ref().map_or(value, |edges| edges[column].partition_point(|edge| value > *edge) as f64);
@@ -955,7 +994,7 @@ impl DenseInput {
                 if value.is_nan() { missing_left } else { value > pivot }
             }
             DenseValues::Binned(values) => {
-                let bin = values[row * self.columns + column];
+                let bin = values[self.bin_index(row, column)];
                 let missing_bin = self.bin_edges.as_ref().map_or(usize::MAX, |e| e[column].len() + 1);
                 if bin as usize == missing_bin { missing_left } else { (bin as f64) > pivot }
             }
@@ -970,7 +1009,7 @@ impl DenseInput {
 
     fn bin_value(&self, row: usize, column: usize) -> usize {
         match &self.values {
-            DenseValues::Binned(values) => values[row * self.columns + column] as usize,
+            DenseValues::Binned(values) => values[self.bin_index(row, column)] as usize,
             DenseValues::Sparse(values) => {
                 let value = values.get(row, column);
                 if value.is_nan() { self.bin_edges.as_ref().unwrap()[column].len() + 1 }
@@ -1806,7 +1845,7 @@ fn best_split_exact(
             .zip(&target.labels)
             .map(|(&row, &label)| {
                 (
-                    values[row * input.columns + feature] as f64,
+                    values[input.bin_index(row, feature)] as f64,
                     label,
                     input.sample_weight(row),
                 )
@@ -1944,15 +1983,26 @@ fn best_random_split(
     rng: &mut RfRng,
     split_cache: &DenseSplitCache,
 ) -> Option<(f64, bool, f64)> {
+    if input.n_classes == 2 && matches!(input.values, DenseValues::Binned(_)) {
+        return best_random_split_binned_binary(input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng, split_cache);
+    }
     if input.n_classes == 2 && matches!(input.values, DenseValues::Exact(_)) {
         return best_random_split_binary(
             input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng, split_cache,
         );
     }
+    best_random_split_generic(input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng, split_cache)
+}
+
+fn best_random_split_generic(
+    input: &DenseInput, mask: &Mask, feature: usize, target: &DenseDecisionSlice,
+    monotonic_constraint: i8, lower_bound: f64, upper_bound: f64, rng: &mut RfRng,
+    split_cache: &DenseSplitCache,
+) -> Option<(f64, bool, f64)> {
     let value_at = |row: usize| match &input.values {
         DenseValues::Exact(values) => values.at(row * input.columns + feature),
         DenseValues::Binned(values) => {
-            let bin = values[row * input.columns + feature] as usize;
+            let bin = values[input.bin_index(row, feature)] as usize;
             let missing_bin = input
                 .bin_edges
                 .as_ref()
@@ -2106,6 +2156,90 @@ fn best_random_split_binary_buffered(
         }
     }
     if let Some(p) = &input.profile { p.sample_visits.fetch_add(mask.len() as u64, AtomicOrdering::Relaxed); }
+    let high_count = mask.len() - missing_count - low_count;
+    if low_count == 0 || high_count == 0 { return None; }
+    let total_weight = target.total_weight;
+    let parent_impurity = impurity(input.criterion, &target.class_weights, total_weight);
+    let mut best: Option<(f64, bool, f64)> = None;
+    for missing_to_low in [false, true] {
+        let left_count = low_count + usize::from(missing_to_low) * missing_count;
+        let right_count = high_count + usize::from(!missing_to_low) * missing_count;
+        let left_weight = low_weight + if missing_to_low { missing_weight } else { 0.0 };
+        let right_weight = total_weight - left_weight;
+        if left_count < input.min_samples_leaf || right_count < input.min_samples_leaf
+            || left_weight < input.min_leaf_weight || right_weight < input.min_leaf_weight
+            || left_weight <= 0.0 || right_weight <= 0.0 { continue; }
+        let left_classes = if missing_to_low {
+            [low_class_0 + missing_class_0, low_class_1 + missing_class_1]
+        } else { [low_class_0, low_class_1] };
+        let right_classes = [
+            target.class_weights[0] - left_classes[0],
+            target.class_weights[1] - left_classes[1],
+        ];
+        if monotonic_constraint != 0 {
+            let lp = left_classes[1] / left_weight;
+            let rp = right_classes[1] / right_weight;
+            if lp < lower_bound || lp > upper_bound || rp < lower_bound || rp > upper_bound
+                || (lp - rp) * monotonic_constraint as f64 > 0.0 { continue; }
+        }
+        let child_impurity = (left_weight / total_weight)
+            * impurity(input.criterion, &left_classes, left_weight)
+            + (right_weight / total_weight)
+                * impurity(input.criterion, &right_classes, right_weight);
+        let gain = parent_impurity - child_impurity;
+        if gain >= input.min_impurity_decrease && best.as_ref().is_none_or(|(_, _, g)| gain > *g) {
+            best = Some((threshold, !missing_to_low, gain));
+        }
+    }
+    if best.is_none() { if let Some(p) = &input.profile { p.rejected.fetch_add(1, AtomicOrdering::Relaxed); } }
+    best
+}
+
+/// Experimental one-pass statistics for a visited binned feature, never a global cache.
+fn best_random_split_binned_binary(
+    input: &DenseInput, mask: &Mask, feature: usize, target: &DenseDecisionSlice,
+    monotonic_constraint: i8, lower_bound: f64, upper_bound: f64, rng: &mut RfRng,
+    split_cache: &DenseSplitCache,
+) -> Option<(f64, bool, f64)> {
+    let DenseValues::Binned(values) = &input.values else { unreachable!() };
+    let missing_bin = input.bin_edges.as_ref().unwrap()[feature].len() + 1;
+    let mut counts = [0usize; 256];
+    let mut classes = [[0.0f64; 2]; 256];
+    let mut min = usize::MAX;
+    let mut max = 0usize;
+    let mut missing_count = 0usize;
+    let mut missing_weight = 0.0;
+    let mut missing_class_0 = 0.0;
+    let mut missing_class_1 = 0.0;
+    for (&row, &label) in mask.iter().zip(&target.labels) {
+        let bin = values[input.bin_index(row, feature)] as usize;
+        let weight = input.sample_weight(row);
+        if input.has_missing_values && bin == missing_bin {
+            missing_count += 1;
+            missing_weight += weight;
+            if label == 0 { missing_class_0 += weight; } else { missing_class_1 += weight; }
+        } else {
+            counts[bin] += 1;
+            classes[bin][label] += weight;
+            min = min.min(bin); max = max.max(bin);
+        }
+    }
+    if let Some(p) = &input.profile { p.sample_visits.fetch_add(mask.len() as u64, AtomicOrdering::Relaxed); }
+    if min >= max {
+        split_cache.mark_constant(feature);
+        if let Some(p) = &input.profile { p.rejected.fetch_add(1, AtomicOrdering::Relaxed); }
+        return None;
+    }
+    let unit = ((rng.get_u64() ^ input.extra_seed.wrapping_mul(0x9e37_79b9_7f4a_7c15)) >> 11) as f64
+        * (1.0 / ((1u64 << 53) as f64));
+    let threshold = min as f64 * (1.0 - unit) + max as f64 * unit;
+    let mut low_count = 0usize;
+    let mut low_class_0 = 0.0;
+    let mut low_class_1 = 0.0;
+    for bin in min..=threshold.floor() as usize {
+        low_count += counts[bin]; low_class_0 += classes[bin][0]; low_class_1 += classes[bin][1];
+    }
+    let low_weight = low_class_0 + low_class_1;
     let high_count = mask.len() - missing_count - low_count;
     if low_count == 0 || high_count == 0 { return None; }
     let total_weight = target.total_weight;
@@ -2651,8 +2785,8 @@ impl RfInput for DenseInput {
                     else { mask.iter().map(|&row| values.at(row * self.columns + feature) > *pivot).collect::<Vec<_>>().into_iter() }
                 }
                 DenseValues::Binned(values) => {
-                    if self.has_missing_values { mask.iter().map(|&row| { let bin = values[row * self.columns + feature]; let missing_bin = self.bin_edges.as_ref().map_or(usize::MAX, |e| e[feature].len() + 1); if bin as usize == missing_bin { missing_left } else { (bin as f64) > *pivot } }).collect::<Vec<_>>().into_iter() }
-                    else { mask.iter().map(|&row| (values[row * self.columns + feature] as f64) > *pivot).collect::<Vec<_>>().into_iter() }
+                    if self.has_missing_values { mask.iter().map(|&row| { let bin = values[self.bin_index(row, feature)]; let missing_bin = self.bin_edges.as_ref().map_or(usize::MAX, |e| e[feature].len() + 1); if bin as usize == missing_bin { missing_left } else { (bin as f64) > *pivot } }).collect::<Vec<_>>().into_iter() }
+                    else { mask.iter().map(|&row| (values[self.bin_index(row, feature)] as f64) > *pivot).collect::<Vec<_>>().into_iter() }
                 }
                 DenseValues::Sparse(_) => mask
                     .iter()
@@ -2947,6 +3081,30 @@ mod histogram_optimization_tests {
         assert_eq!(derived_right, direct_right);
         assert_eq!(derived_right.class_weights.as_ptr(), weights_ptr);
         assert_eq!(derived_right.sample_counts.as_ptr(), counts_ptr);
+    }
+
+    #[test]
+    fn binned_one_pass_matches_single_candidate_statistics() {
+        for criterion in [Criterion::Gini, Criterion::Entropy] {
+            for with_nan in [false, true] {
+                let rows = 512;
+                let values = (0..rows).map(|i| if with_nan && i % 17 == 0 { f64::NAN } else { (i % 97) as f64 }).collect();
+                let input = DenseInput::training(values, rows, 1, (0..rows).map(|i| i % 2).collect(),
+                    (0..rows).map(|i| 0.5 + (i % 9) as f64 / 10.0).collect(), 2, 0.0, criterion, 2, 3, 0.0, Some(63)).unwrap().with_extra_trees(true, 6);
+                let mask = Mask::new_all(rows);
+                let target = input.decision_slice(&mask);
+                for seed in 0..100 {
+                    let generic = input.clone();
+                    let optimized = input.clone();
+                    let a = best_random_split_generic(&generic, &mask, 0, &target, 0, 0.0, 1.0, &mut RfRng::from_seed(seed,1), &generic.split_cache(&mask));
+                    let b = best_random_split(&optimized, &mask, 0, &target, 0, 0.0, 1.0, &mut RfRng::from_seed(seed,1), &optimized.split_cache(&mask));
+                    match (a,b) {
+                        (Some((ta,_,ga)),Some((tb,_,gb))) => { assert_eq!(ta,tb); assert!((ga-gb).abs()<1e-12); },
+                        (None,None) => (), _ => panic!("candidate viability differs"),
+                    }
+                }
+            }
+        }
     }
 
     #[test]

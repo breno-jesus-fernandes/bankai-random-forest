@@ -112,6 +112,7 @@ model = BankaiRandomForestClassifier(
     bin_sample_size=200_000,
     binning_seed=6,
     extra_trees=False,
+    extra_trees_backend="exact",
     extra_seed=6,
 )
 ```
@@ -138,20 +139,67 @@ model = BankaiRandomForestClassifier(
 | `max_samples` | `None` | Number or fraction of rows sampled for each tree. Accepts an integer count or a fraction in `(0, 1]`; only valid with `bootstrap=True`. `None` samples the full training size. |
 | `monotonic_cst` | `None` | One constraint per input feature: `-1` decreasing, `0` unconstrained, or `1` increasing. Currently supported only for binary single-output classification. |
 | `importance_type` | `"gain"` | How `feature_importances_` is calculated: `"gain"`, `"split"`, `"permutation"`, or `"shap"` (mean absolute native TreeSHAP). Permutation requires `bootstrap=True`. SHAP supports `shap_mode="sampled"` (up to `shap_sample_size=1000` training rows), `"all"`, or `"explicit"`; explicit mode exposes `shap_importances(X)`. |
-| `max_bins` | `None` | `None` uses exact split search. An integer from 2 to 255 enables histogram split search for Random Forest. Must be `None` with `extra_trees=True`. |
+| `max_bins` | `None` | `None` uses exact split search. An integer from 2 to 255 enables histogram split search for Random Forest. Must be `None` with the default Extra Trees backend; required with the experimental `"binned"` backend. |
 | `binning_strategy` | `"exact_sort"` | How histogram cut points are found: `"exact_sort"`, `"sampled_sort"`, `"exact_select"`, or `"sampled_select"`. Applies only when `max_bins` is set. |
 | `bin_sample_size` | `200_000` | Positive maximum number of rows used per feature by sampled histogram strategies. Applies only when `max_bins` is set. |
 | `binning_seed` | `6` | Seed for row sampling in `"sampled_sort"` and `"sampled_select"`. Independent of `random_state`; the default preserves the historical sampled rows. |
-| `extra_trees` | `False` | Evaluate one continuous random threshold per sampled feature over its original observed range. Binning is bypassed. Classification only. |
+| `extra_trees` | `False` | Evaluate one random threshold per sampled feature. Original values are used by the default `"exact"` backend. Classification only. |
+| `extra_trees_backend` | `"exact"` | `"exact"` uses original values. Experimental `"binned"` requires `extra_trees=True`, integer `max_bins`, and dense input; uses column-major bins and one-pass binary split statistics. |
 | `extra_seed` | `6` | Seed offset for random threshold selection when `extra_trees=True`. Combine with `random_state` for repeatable forests. |
 
-`extra_trees=True` samples a continuous threshold uniformly between the node's original observed minimum and maximum for each feature considered. `max_bins` must be `None`; setting an integer with `extra_trees=True` raises `ValueError`. Features are sampled without replacement; constants are inherited by descendants, and search continues when needed to find a valid partition. Bootstrap uses effective sample weights as sampling probabilities and counts distinct sampled rows for leaf limits. Gain importance is normalized within each tree before aggregation. This option currently applies to classification. See the [campaign notes](docs/performance/extra-trees-campaign.md) for validation and profiling.
+`extra_trees=True` samples a continuous threshold uniformly between the node's original observed minimum and maximum for each feature considered. With the default `extra_trees_backend="exact"`, `max_bins` must be `None`; setting an integer raises `ValueError`. Opt into the experimental binned backend explicitly to use bins. Features are sampled without replacement; constants are inherited by descendants, and search continues when needed to find a valid partition. Bootstrap uses effective sample weights as sampling probabilities and counts distinct sampled rows for leaf limits. Gain importance is normalized within each tree before aggregation. This option currently applies to classification. See the [campaign notes](docs/performance/extra-trees-campaign.md) for validation and profiling.
 
 `binning_seed` only affects sampled binning strategies and does not change tree bootstrap or feature-sampling randomness. It lets repeated experiments vary the rows used to build histogram cut points independently of the forest's `random_state`.
 
 Call `fit(X, y, sample_weight=None)` to train. `sample_weight` accepts one finite, non-negative weight per row. The fitted estimator exposes scikit-learn-style methods including `predict`, `predict_proba`, and `predict_log_proba`, plus `classes_`, `feature_importances_`, `n_features_in_`, and `feature_names_in_` when the input has named columns.
 
 `predict_proba` returns one probability array for a single target and a list of arrays for multioutput targets. `monotonic_cst` is not supported for multioutput classification. `oob_score=True` computes accuracy; to use another metric, pass a callable with signature `metric(y_true, y_pred)`.
+
+### Experimental binned Extra Trees
+
+```python
+model = BankaiRandomForestClassifier(
+    extra_trees=True,
+    extra_trees_backend="binned",
+    max_bins=63,
+    bootstrap=True,
+    n_jobs=6,
+    random_state=42,
+)
+model.fit(X, y)
+```
+
+This backend stores dense bins by column and, for binary classification, accumulates
+per-feature bin statistics in one pass. It does not build the global histogram
+caches used by Random Forest. Sparse training input is rejected without densification.
+Prediction, OOB, gain importance, SHAP and pickle restoration retain the backend.
+Multiclass inputs use the generic random split scan on column-major bins.
+
+The default is `extra_trees_backend="exact"`, not `None`. It uses original values
+and requires `max_bins=None`. The example above explicitly enables column-major
+bins and uses the existing `exact_sort` preparation default on all training rows.
+To opt into sampled preparation, set `binning_strategy="sampled_select"` and
+`bin_sample_size=20_000`. Both preparation options include layout conversion in fit.
+
+Binning changes the distribution of random thresholds and can reduce ranking
+quality. Three paired local fraud repetitions with 500,000 rows, 500 features,
+100 trees, bootstrap enabled and six jobs produced these medians:
+
+| Extra Trees configuration | Fit seconds | Feature-ranking AP | Informative features in top 24 |
+| --- | ---: | ---: | ---: |
+| Original values, default backend | 24.14 | 0.6866 | 14 |
+| Column bins, full `exact_sort` | 11.82 | 0.6775 | 15 |
+| Column bins, full `exact_select` | 10.51 | 0.6633 | 14 |
+| Column bins, `sampled_select`, 20,000 rows | 8.77 | 0.6393 | 15 |
+
+These are screening results for one synthetic scenario, not a quality guarantee.
+AP here evaluates informative-feature ranking, not classification precision-recall.
+The standard `binning_strategy="exact_sort"` and `bin_sample_size=200_000` defaults
+are unchanged. The sample-size limit applies only to sampled strategies.
+
+The layout conversion is included in fit time and temporarily allocates another
+one-byte-per-cell matrix. Random Forest (`extra_trees=False`) retains row-major bins;
+`extra_trees_backend="binned"` is rejected for that mode.
 
 ## Regressor
 
