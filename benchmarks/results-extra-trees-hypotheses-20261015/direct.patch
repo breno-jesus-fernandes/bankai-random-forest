@@ -1,0 +1,109 @@
+--- a/src/dense.rs
++++ b/src/dense.rs
+@@ -424,0 +425,85 @@
++    #[allow(clippy::too_many_arguments)]
++    pub fn training_exact_f32_with_accessor<F>(
++        rows: usize, columns: usize, labels: Vec<usize>, sample_weights: Vec<f64>,
++        n_classes: usize, min_leaf_weight: f64, criterion: Criterion,
++        min_samples_split: usize, min_samples_leaf: usize, min_impurity_decrease: f64,
++        threads: usize, value_at: F,
++    ) -> Result<Self, String>
++    where F: Fn(usize, usize) -> f32 + Sync,
++    {
++        if rows == 0 || columns == 0 {
++            return Err("X must contain at least one row and feature".into());
++        }
++        let cells = rows.checked_mul(columns).ok_or("X shape is too large")?;
++        let mut values = vec![0.0f32; cells];
++        let workers = if cells >= HISTOGRAM_PARALLEL_MIN_CELLS { threads.max(1) } else { 1 };
++        let chunk_columns = columns.div_ceil(workers).max(1);
++        thread::scope(|scope| {
++            for (block, dst) in values.chunks_mut(chunk_columns * rows).enumerate() {
++                let value_at = &value_at;
++                scope.spawn(move || {
++                    for row_start in (0..rows).step_by(64) {
++                        for (offset, column_dst) in dst.chunks_mut(rows).enumerate() {
++                            for row in row_start..(row_start + 64).min(rows) {
++                                column_dst[row] = value_at(row, block * chunk_columns + offset);
++                            }
++                        }
++                    }
++                });
++            }
++        });
++        if threads == 0 {
++            return Err("histogram preprocessing requires at least one thread".into());
++        }
++        let has_missing_values = values.iter().any(|value| value.is_nan());
++        validate_matrix(&values, rows, columns)?;
++        if labels.len() != rows {
++            return Err("y must contain one label per row".to_string());
++        }
++        if sample_weights.len() != rows {
++            return Err("sample_weight must contain one value per row".to_string());
++        }
++        let total_weight = validate_sample_weights(&sample_weights)?;
++        if n_classes == 0 {
++            return Err("at least one class is required".to_string());
++        }
++        if !min_leaf_weight.is_finite() || min_leaf_weight < 0.0 {
++            return Err("min_leaf_weight must be finite and non-negative".to_string());
++        }
++        if min_samples_split < 2 || min_samples_leaf == 0 {
++            return Err("invalid minimum sample control".to_string());
++        }
++        if !min_impurity_decrease.is_finite() || min_impurity_decrease < 0.0 {
++            return Err("min_impurity_decrease must be finite and non-negative".to_string());
++        }
++        if labels.iter().any(|&label| label >= n_classes) {
++            return Err("labels must be encoded in 0..n_classes".to_string());
++        }
++
++        Ok(Self {
++            values: DenseValues::Exact(Arc::new(ExactValues::F32(values))),
++            labels: Some(Arc::new(labels)),
++            sample_weights: Some(Arc::new(sample_weights)),
++            rows,
++            columns,
++            n_classes,
++            min_leaf_weight,
++            criterion,
++            min_samples_split,
++            min_samples_leaf,
++            min_impurity_decrease,
++            total_weight,
++            histogram_bins: None,
++            bin_edges: None,
++            active_features: (0..columns).collect(),
++            balanced_subsample: false,
++            ccp_alpha: 0.0,
++            monotonic_constraints: None,
++            has_missing_values,
++            histogram_threads: 1,
++            extra_trees: false,
++            column_major: true,
++            extra_seed: 6,
++            profile: None,
++        })
++    }
+@@ -1295 +1380 @@
+-fn validate_matrix(values: &[f64], rows: usize, columns: usize) -> Result<(), String> {
++fn validate_matrix<T: Copy + Into<f64>>(values: &[T], rows: usize, columns: usize) -> Result<(), String> {
+@@ -1308 +1393 @@
+-    if values.iter().any(|value| value.is_infinite()) {
++    if values.iter().any(|&value| value.into().is_infinite()) {
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -141 +141 @@
+-        let direct_f32 = if max_bins.is_some() {
++        let direct_f32 = if max_bins.is_some() || extra_trees {
+@@ -205,0 +206,7 @@
++            if max_bins.is_none() {
++                DenseInput::training_exact_f32_with_accessor(
++                    rows, columns, labels, sample_weights, n_classes, min_leaf_weight,
++                    criterion, min_samples_split, min_samples_leaf, min_impurity_decrease,
++                    n_jobs.max(1), |row, feature| view[[row_order[row], feature]],
++                )
++            } else {
+@@ -223,0 +231 @@
++            }

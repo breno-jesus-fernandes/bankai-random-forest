@@ -1,0 +1,76 @@
+--- a/src/dense.rs
++++ b/src/dense.rs
+@@ -6,0 +7 @@
++    static EXTRA_FEATURE_VALUES_F32: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
+@@ -2145,5 +2146,18 @@
+-    EXTRA_FEATURE_VALUES.with(|workspace| {
+-        let mut workspace = workspace.borrow_mut();
+-        workspace.clear();
+-        best_random_split_binary_buffered(input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng, &mut workspace, split_cache)
+-    })
++    let DenseValues::Exact(values) = &input.values else { unreachable!() };
++    macro_rules! search {
++        ($values:expr, $workspace:ident) => {
++            $workspace.with(|workspace| {
++                let mut workspace = workspace.borrow_mut();
++                workspace.clear();
++                if input.has_missing_values {
++                    best_random_split_binary_buffered::<_, true>(input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng, $values, &mut workspace, split_cache)
++                } else {
++                    best_random_split_binary_buffered::<_, false>(input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng, $values, &mut workspace, split_cache)
++                }
++            })
++        };
++    }
++    match values.as_ref() {
++        ExactValues::F32(values) => search!(values, EXTRA_FEATURE_VALUES_F32),
++        ExactValues::F64(values) => search!(values, EXTRA_FEATURE_VALUES),
++    }
+@@ -2153 +2167 @@
+-fn best_random_split_binary_buffered(
++fn best_random_split_binary_buffered<T: Copy + Into<f64>, const MISSING: bool>(
+@@ -2156 +2170 @@
+-    workspace: &mut Vec<f64>,
++    values: &[T], workspace: &mut Vec<T>,
+@@ -2159 +2172,0 @@
+-    let DenseValues::Exact(values) = &input.values else { unreachable!() };
+@@ -2166,9 +2179,21 @@
+-    for (&row, &label) in mask.iter().zip(&target.labels) {
+-        let value = values.at(input.storage_index(row, feature));
+-        workspace.push(value);
+-        if value.is_nan() {
+-            let weight = input.sample_weight(row);
+-            missing_count += 1;
+-            missing_weight += weight;
+-            if label == 0 { missing_class_0 += weight; } else { missing_class_1 += weight; }
+-        } else {
++    workspace.reserve(mask.len());
++    if MISSING {
++        for (&row, &label) in mask.iter().zip(&target.labels) {
++            let stored = values[input.storage_index(row, feature)];
++            workspace.push(stored);
++            let value: f64 = stored.into();
++            if value.is_nan() {
++                let weight = input.sample_weight(row);
++                missing_count += 1;
++                missing_weight += weight;
++                if label == 0 { missing_class_0 += weight; } else { missing_class_1 += weight; }
++            } else {
++                min = min.min(value);
++                max = max.max(value);
++            }
++        }
++    } else {
++        for &row in mask.iter() {
++            let stored = values[input.storage_index(row, feature)];
++            workspace.push(stored);
++            let value: f64 = stored.into();
+@@ -2181 +2206 @@
+-        p.buffer_bytes.fetch_max((workspace.capacity() * 8) as u64, AtomicOrdering::Relaxed);
++        p.buffer_bytes.fetch_max((workspace.capacity() * std::mem::size_of::<T>()) as u64, AtomicOrdering::Relaxed);
+@@ -2196,2 +2221,3 @@
+-    for ((&row, &label), &value) in mask.iter().zip(&target.labels).zip(workspace.iter()) {
+-        if !value.is_nan() && value <= threshold {
++    for ((&row, &label), &stored) in mask.iter().zip(&target.labels).zip(workspace.iter()) {
++        let value: f64 = stored.into();
++        if (!MISSING || !value.is_nan()) && value <= threshold {

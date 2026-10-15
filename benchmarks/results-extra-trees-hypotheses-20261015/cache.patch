@@ -1,0 +1,23 @@
+--- a/src/dense.rs
++++ b/src/dense.rs
+@@ -1794,0 +1795 @@
++    exact_binary_weights: Option<Vec<f64>>,
+@@ -1803,0 +1805,2 @@
++        let mut exact_binary_weights = (input.extra_trees && input.n_classes == 2 && matches!(input.values, DenseValues::Exact(_)))
++            .then(|| Vec::with_capacity(mask.len()));
+@@ -1808,0 +1812 @@
++                if let Some(weights) = &mut exact_binary_weights { weights.push(weight); }
+@@ -1816,0 +1821 @@
++            exact_binary_weights,
+@@ -2263,0 +2269 @@
++    let weights = target.exact_binary_weights.as_ref().expect("exact binary node caches its weights");
+@@ -2266 +2272 @@
+-        for (&row, &label) in mask.iter().zip(&target.labels) {
++        for ((&row, &label), &weight) in mask.iter().zip(&target.labels).zip(weights) {
+@@ -2271 +2276,0 @@
+-                let weight = input.sample_weight(row);
+@@ -2306 +2311 @@
+-    for ((&row, &label), &stored) in mask.iter().zip(&target.labels).zip(workspace.iter()) {
++    for ((&weight, &label), &stored) in weights.iter().zip(&target.labels).zip(workspace.iter()) {
+@@ -2309 +2313,0 @@
+-            let weight = input.sample_weight(row);

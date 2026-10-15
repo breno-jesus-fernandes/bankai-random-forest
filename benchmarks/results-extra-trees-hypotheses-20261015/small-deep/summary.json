@@ -1,0 +1,12 @@
+[
+  {
+    "model": "bankai",
+    "baseline_fit_median": 0.016796667012386024,
+    "candidate_fit_median": 0.01614266648539342,
+    "median_paired_speedup": 1.0719858757737952,
+    "median_paired_cpu_speedup": 1.091202456490529,
+    "same_tree_structure": true,
+    "prediction_max_abs_delta": 0.0,
+    "importance_max_abs_delta": 6.938893903907228e-18
+  }
+]
