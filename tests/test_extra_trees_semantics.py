@@ -173,3 +173,37 @@ def test_loading_pre_backend_pickle_defaults_to_exact():
     restored.__setstate__(state)
     assert restored.get_params()['extra_trees_backend'] == 'exact'
     np.testing.assert_array_equal(restored.predict_proba([[0], [3]]), model.predict_proba([[0], [3]]))
+
+
+@pytest.mark.parametrize('bootstrap', [False, True])
+@pytest.mark.parametrize('layout', ['C', 'F', 'strided'])
+@pytest.mark.parametrize('missing', [False, True])
+def test_extra_trees_direct_float32_matches_float64_with_weights_and_multiclass(bootstrap, layout, missing):
+    rng = np.random.default_rng(173)
+    base = rng.normal(size=(280, 18)).astype(np.float32)
+    X = base[:, ::2] if layout == 'strided' else np.array(base[:, :9], order=layout)
+    X[:, -1] = 0
+    if missing:
+        X[::17, 2] = np.nan
+    y = np.digitize(X[:, 0] + X[:, 1], [-0.5, 0.5])
+    weights = rng.uniform(0.5, 2.0, len(y))
+    weights[::23] = 0
+    params = dict(n_estimators=11, extra_trees=True, max_bins=None,
+                  bootstrap=bootstrap, max_depth=6, min_samples_leaf=3,
+                  class_weight='balanced_subsample', n_jobs=2, random_state=71)
+    native = BankaiRandomForestClassifier(**params).fit(X, y, sample_weight=weights)
+    reference = BankaiRandomForestClassifier(**params).fit(X.astype(np.float64), y, sample_weight=weights)
+    np.testing.assert_array_equal(native.predict_proba(X), reference.predict_proba(X))
+    np.testing.assert_allclose(native.feature_importances_, reference.feature_importances_, rtol=1e-13, atol=1e-15)
+
+
+def test_extra_trees_preserves_float64_differences_below_float32_precision():
+    X = (1.0 + np.arange(64, dtype=np.float64) * 2.0**-40).reshape(-1, 1)
+    y = (np.arange(64) >= 32).astype(int)
+    params = dict(n_estimators=16, extra_trees=True, max_bins=None,
+                  bootstrap=False, max_features=1, n_jobs=2, random_state=19)
+    exact = BankaiRandomForestClassifier(**params).fit(X, y)
+    rounded = BankaiRandomForestClassifier(**params).fit(X.astype(np.float32), y)
+    np.testing.assert_array_equal(exact.predict(X), y)
+    assert exact.feature_importances_[0] > 0
+    assert rounded.feature_importances_[0] == 0

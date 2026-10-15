@@ -1,0 +1,102 @@
+[
+  {
+    "label": "baseline",
+    "pass_index": 0,
+    "experiment": "",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "numpy_version": "2.4.6",
+    "config": {
+      "rows": 100000,
+      "features": 500,
+      "trees": 64,
+      "jobs": 6,
+      "repeats": 3,
+      "scenario": "credit_default",
+      "no_bootstrap": false,
+      "include_binned": false,
+      "warmup": true,
+      "bankai_only": true,
+      "bins": 63,
+      "bin_sample_size": 20000,
+      "output": "/tmp/bankai-exact-hypotheses-20261015/cache-abba/0-baseline.json",
+      "compare": "None"
+    },
+    "extension": "/var/folders/j6/244tyq8d4p589m9jnhdnkjxr0000gn/T/bankai-ablation-01kqv9e2/baseline/bankai_random_forest/_core.abi3.so",
+    "binary_sha256": "e3309b74ce988e42bf278b8bc639af122876dc07d7c00392da15a0bd91cc0ae3"
+  },
+  {
+    "label": "candidate",
+    "pass_index": 0,
+    "experiment": "",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "numpy_version": "2.4.6",
+    "config": {
+      "rows": 100000,
+      "features": 500,
+      "trees": 64,
+      "jobs": 6,
+      "repeats": 3,
+      "scenario": "credit_default",
+      "no_bootstrap": false,
+      "include_binned": false,
+      "warmup": true,
+      "bankai_only": true,
+      "bins": 63,
+      "bin_sample_size": 20000,
+      "output": "/tmp/bankai-exact-hypotheses-20261015/cache-abba/0-candidate.json",
+      "compare": "None"
+    },
+    "extension": "/var/folders/j6/244tyq8d4p589m9jnhdnkjxr0000gn/T/bankai-ablation-01kqv9e2/candidate/bankai_random_forest/_core.abi3.so",
+    "binary_sha256": "85502994a94fa13082ccc1e1187e42ad35c0969852b4ae57e24861f962e87c01"
+  },
+  {
+    "label": "candidate",
+    "pass_index": 1,
+    "experiment": "",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "numpy_version": "2.4.6",
+    "config": {
+      "rows": 100000,
+      "features": 500,
+      "trees": 64,
+      "jobs": 6,
+      "repeats": 3,
+      "scenario": "credit_default",
+      "no_bootstrap": false,
+      "include_binned": false,
+      "warmup": true,
+      "bankai_only": true,
+      "bins": 63,
+      "bin_sample_size": 20000,
+      "output": "/tmp/bankai-exact-hypotheses-20261015/cache-abba/1-candidate.json",
+      "compare": "None"
+    },
+    "extension": "/var/folders/j6/244tyq8d4p589m9jnhdnkjxr0000gn/T/bankai-ablation-01kqv9e2/candidate/bankai_random_forest/_core.abi3.so",
+    "binary_sha256": "85502994a94fa13082ccc1e1187e42ad35c0969852b4ae57e24861f962e87c01"
+  },
+  {
+    "label": "baseline",
+    "pass_index": 1,
+    "experiment": "",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "numpy_version": "2.4.6",
+    "config": {
+      "rows": 100000,
+      "features": 500,
+      "trees": 64,
+      "jobs": 6,
+      "repeats": 3,
+      "scenario": "credit_default",
+      "no_bootstrap": false,
+      "include_binned": false,
+      "warmup": true,
+      "bankai_only": true,
+      "bins": 63,
+      "bin_sample_size": 20000,
+      "output": "/tmp/bankai-exact-hypotheses-20261015/cache-abba/1-baseline.json",
+      "compare": "None"
+    },
+    "extension": "/var/folders/j6/244tyq8d4p589m9jnhdnkjxr0000gn/T/bankai-ablation-01kqv9e2/baseline/bankai_random_forest/_core.abi3.so",
+    "binary_sha256": "e3309b74ce988e42bf278b8bc639af122876dc07d7c00392da15a0bd91cc0ae3"
+  }
+]

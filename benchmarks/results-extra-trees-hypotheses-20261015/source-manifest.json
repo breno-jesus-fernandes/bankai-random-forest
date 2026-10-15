@@ -1,0 +1,25 @@
+{
+  "final_source_sha256": {
+    "src/dense.rs": "be4f607bc188228c967bea6ff681bd52c3717f5d956bf52b868bbc0a37afe748",
+    "src/lib.rs": "8cda85c3057ede19905512f22441d37e78e30416618b23a0eeb37a870748770c",
+    "benchmarks/run_extra_trees_quick.py": "bd8df9b1c7a8df5e5f03806676d23716bf8dea035cfdc2a3ab506d0857fc8a5f",
+    "benchmarks/run_extra_trees_ablation.py": "63e5a17c5c08dba38dcfaf3d57a9029608ad3a8dd974aa11c4068382cb06c2d6"
+  },
+  "native_snapshots": {
+    "core-direct.so": "e3309b74ce988e42bf278b8bc639af122876dc07d7c00392da15a0bd91cc0ae3",
+    "core-refine-experiment.so": "2607640c8d4600b131a205c138e07c609a45299057acf9794513ac2925531311",
+    "core-cache.so": "85502994a94fa13082ccc1e1187e42ad35c0969852b4ae57e24861f962e87c01",
+    "core-before.so": "21676f302d56c9482418bcd3d5a0a91c77e1d91d8452a83cb40c7fe44f05c09e",
+    "core-typed.so": "a115319c7bda99f14f0d94563f42e91c12202cc8749de52b03cfa27ef0bd5144"
+  },
+  "final_wheel": {
+    "filename": "bankai_random_forest-0.1.0a15-cp311-abi3-macosx_11_0_arm64.whl",
+    "sha256": "b81b3e8c4eb7c796dd10ab5a9d2759870a7652a074c702a6a69331184659307e",
+    "version": "0.1.0a15",
+    "tests": {
+      "python": 269,
+      "rust_unit": 57,
+      "rust_cli": 5
+    }
+  }
+}

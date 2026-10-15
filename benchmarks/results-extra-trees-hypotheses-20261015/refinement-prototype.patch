@@ -1,0 +1,131 @@
+--- a/src/dense.rs
++++ b/src/dense.rs
+@@ -53,0 +54 @@
++    refinement_bins: Option<Arc<(Vec<u8>, Vec<Vec<f64>>, bool)>>,
+@@ -397,0 +399 @@
++            refinement_bins: None,
+@@ -483,0 +486 @@
++            refinement_bins: None,
+@@ -617,0 +621 @@
++            refinement_bins: None,
+@@ -670,0 +675 @@
++            refinement_bins: None,
+@@ -853,0 +859 @@
++            refinement_bins: None,
+@@ -898,0 +905 @@
++            refinement_bins: None,
+@@ -982,0 +990,9 @@
++        }
++        let experiment = std::env::var("BANKAI_EXTRA_EXPERIMENT").unwrap_or_default();
++        if enabled && matches!(&self.values, DenseValues::Exact(_)) && (experiment == "refine" || experiment == "snap") {
++            let (binned, edges, _) = histogramize_from_accessor(
++                self.rows, self.columns, 63, self.histogram_threads,
++                BinningStrategy::SampledSelect, 20000, 6, &|row, feature| self.value(row, feature),
++            ).expect("validated exact data can be binned");
++            let binned = transpose_exact(&binned, self.rows, self.columns, self.histogram_threads);
++            self.refinement_bins = Some(Arc::new((binned, edges, experiment == "snap")));
+@@ -2230,0 +2247,3 @@
++    if input.refinement_bins.is_some() {
++        return best_random_split_binary_refined(input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng, split_cache);
++    }
+@@ -2315,0 +2335,100 @@
++    let high_count = mask.len() - missing_count - low_count;
++    if low_count == 0 || high_count == 0 { return None; }
++    let total_weight = target.total_weight;
++    let parent_impurity = impurity(input.criterion, &target.class_weights, total_weight);
++    let mut best: Option<(f64, bool, f64)> = None;
++    for missing_to_low in [false, true] {
++        let left_count = low_count + usize::from(missing_to_low) * missing_count;
++        let right_count = high_count + usize::from(!missing_to_low) * missing_count;
++        let left_weight = low_weight + if missing_to_low { missing_weight } else { 0.0 };
++        let right_weight = total_weight - left_weight;
++        if left_count < input.min_samples_leaf || right_count < input.min_samples_leaf
++            || left_weight < input.min_leaf_weight || right_weight < input.min_leaf_weight
++            || left_weight <= 0.0 || right_weight <= 0.0 { continue; }
++        let left_classes = if missing_to_low {
++            [low_class_0 + missing_class_0, low_class_1 + missing_class_1]
++        } else { [low_class_0, low_class_1] };
++        let right_classes = [
++            target.class_weights[0] - left_classes[0],
++            target.class_weights[1] - left_classes[1],
++        ];
++        if monotonic_constraint != 0 {
++            let lp = left_classes[1] / left_weight;
++            let rp = right_classes[1] / right_weight;
++            if lp < lower_bound || lp > upper_bound || rp < lower_bound || rp > upper_bound
++                || (lp - rp) * monotonic_constraint as f64 > 0.0 { continue; }
++        }
++        let child_impurity = (left_weight / total_weight)
++            * impurity(input.criterion, &left_classes, left_weight)
++            + (right_weight / total_weight)
++                * impurity(input.criterion, &right_classes, right_weight);
++        let gain = parent_impurity - child_impurity;
++        if gain >= input.min_impurity_decrease && best.as_ref().is_none_or(|(_, _, g)| gain > *g) {
++            best = Some((threshold, !missing_to_low, gain));
++        }
++    }
++    if best.is_none() { if let Some(p) = &input.profile { p.rejected.fetch_add(1, AtomicOrdering::Relaxed); } }
++    best
++}
++
++
++#[allow(clippy::too_many_arguments)]
++fn best_random_split_binary_refined(
++    input: &DenseInput, mask: &Mask, feature: usize, target: &DenseDecisionSlice,
++    monotonic_constraint: i8, lower_bound: f64, upper_bound: f64, rng: &mut RfRng,
++    split_cache: &DenseSplitCache,
++) -> Option<(f64, bool, f64)> {
++    let (codes, edges, snap) = input.refinement_bins.as_ref().unwrap().as_ref();
++    let edges = &edges[feature];
++    let mut counts = [0usize; 256];
++    let mut weights = [0.0f64; 256];
++    let mut classes = [[0.0f64; 2]; 256];
++    let mut heads = [usize::MAX; 256];
++    // Each sample belongs to one linked list; only the boundary bin needs revisiting.
++    let mut next = Vec::with_capacity(mask.len());
++    let mut min = f64::INFINITY;
++    let mut max = f64::NEG_INFINITY;
++    let mut missing_count = 0usize;
++    let mut missing_weight = 0.0;
++    let mut missing_class_0 = 0.0;
++    let mut missing_class_1 = 0.0;
++    for (index, (&row, &label)) in mask.iter().zip(&target.labels).enumerate() {
++        let value = input.value(row, feature);
++        let weight = input.sample_weight(row);
++        let bin = codes[feature * input.rows + row] as usize;
++        next.push(heads[bin]); heads[bin] = index;
++        if value.is_nan() {
++            missing_count += 1;
++            missing_weight += weight;
++            if label == 0 { missing_class_0 += weight; } else { missing_class_1 += weight; }
++        } else {
++            min = min.min(value); max = max.max(value);
++            counts[bin] += 1; weights[bin] += weight; classes[bin][label] += weight;
++        }
++    }
++    if min >= max { split_cache.mark_constant(feature); return None; }
++    let unit = ((rng.get_u64() ^ input.extra_seed.wrapping_mul(0x9e37_79b9_7f4a_7c15)) >> 11) as f64
++        * (1.0 / ((1u64 << 53) as f64));
++    let mut threshold = min * (1.0 - unit) + max * unit;
++    let boundary = edges.partition_point(|edge| threshold > *edge);
++    let mut low_count = counts[..boundary].iter().sum::<usize>();
++    let mut low_weight = weights[..boundary].iter().sum::<f64>();
++    let mut low_class_0 = classes[..boundary].iter().map(|v| v[0]).sum::<f64>();
++    let mut low_class_1 = classes[..boundary].iter().map(|v| v[1]).sum::<f64>();
++    if *snap {
++        // Approximate experiment: snap the raw-value threshold down to a bin edge.
++        if boundary == 0 { return None; }
++        threshold = edges[boundary - 1];
++    } else {
++        let mut index = heads[boundary];
++        while index != usize::MAX {
++            let row = mask.iter().nth(index).copied().unwrap();
++            let label = target.labels[index];
++            if input.value(row, feature) <= threshold {
++                let weight = input.sample_weight(row);
++                low_count += 1; low_weight += weight;
++                if label == 0 { low_class_0 += weight; } else { low_class_1 += weight; }
++            }
++            index = next[index];
++        }
++    }

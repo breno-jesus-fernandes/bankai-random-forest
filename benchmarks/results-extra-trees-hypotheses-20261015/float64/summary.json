@@ -1,0 +1,22 @@
+[
+  {
+    "model": "bankai",
+    "baseline_fit_median": 0.23222297901520506,
+    "candidate_fit_median": 0.19958172951010056,
+    "median_paired_speedup": 1.129781267882408,
+    "median_paired_cpu_speedup": 1.0993790137449175,
+    "same_tree_structure": true,
+    "prediction_max_abs_delta": 0.0,
+    "importance_max_abs_delta": 5.551115123125783e-17
+  },
+  {
+    "model": "bankai_binned",
+    "baseline_fit_median": 0.12821720796637237,
+    "candidate_fit_median": 0.12011227098992094,
+    "median_paired_speedup": 1.071426271392842,
+    "median_paired_cpu_speedup": 1.0344033485160944,
+    "same_tree_structure": true,
+    "prediction_max_abs_delta": 0.0,
+    "importance_max_abs_delta": 1.1102230246251565e-16
+  }
+]

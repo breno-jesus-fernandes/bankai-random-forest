@@ -4,6 +4,7 @@ use std::cell::RefCell;
 thread_local! {
     // One contiguous feature workspace per tree worker; retained across nodes.
     static EXTRA_FEATURE_VALUES: RefCell<Vec<f64>> = const { RefCell::new(Vec::new()) };
+    static EXTRA_FEATURE_VALUES_F32: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
 }
 use std::sync::Arc;
 use std::thread;
@@ -70,7 +71,7 @@ pub struct DenseInput {
     has_missing_values: bool,
     histogram_threads: usize,
     extra_trees: bool,
-    binned_column_major: bool,
+    column_major: bool,
     extra_seed: u64,
     profile: Option<Arc<FitProfile>>,
 }
@@ -93,6 +94,33 @@ impl ExactValues {
     fn at(&self, index: usize) -> f64 {
         match self { Self::F64(values) => values[index], Self::F32(values) => f64::from(values[index]) }
     }
+}
+
+// Parallelize independent column blocks, sharing a single output allocation.
+fn transpose_exact<T: Copy + Default + Send + Sync>(values: &[T], rows: usize, columns: usize, threads: usize) -> Vec<T> {
+    transpose_exact_map(values, rows, columns, threads, |v| v)
+}
+
+fn transpose_exact_map<T: Copy + Sync, U: Copy + Default + Send, F: Fn(T) -> U + Copy + Send>(values: &[T], rows: usize, columns: usize, threads: usize, convert: F) -> Vec<U> {
+    let mut output = vec![U::default(); values.len()];
+    let columns_per_worker = columns.div_ceil(threads.max(1)).max(1);
+    thread::scope(|scope| {
+        for (block, dst) in output.chunks_mut(columns_per_worker * rows).enumerate() {
+            scope.spawn(move || {
+                // Revisit nearby columns while their source cache lines are hot.
+                for row_start in (0..rows).step_by(64) {
+                    let row_end = (row_start + 64).min(rows);
+                    for (local_column, column_dst) in dst.chunks_mut(rows).enumerate() {
+                        let column = block * columns_per_worker + local_column;
+                        for row in row_start..row_end {
+                            column_dst[row] = convert(values[row * columns + column]);
+                        }
+                    }
+                }
+            });
+        }
+    });
+    output
 }
 
 #[derive(Clone)]
@@ -388,12 +416,97 @@ impl DenseInput {
             has_missing_values,
             histogram_threads: 1,
             extra_trees: false,
-            binned_column_major: false,
+            column_major: false,
             extra_seed: 6,
             profile: None,
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn training_exact_f32_with_accessor<F>(
+        rows: usize, columns: usize, labels: Vec<usize>, sample_weights: Vec<f64>,
+        n_classes: usize, min_leaf_weight: f64, criterion: Criterion,
+        min_samples_split: usize, min_samples_leaf: usize, min_impurity_decrease: f64,
+        threads: usize, value_at: F,
+    ) -> Result<Self, String>
+    where F: Fn(usize, usize) -> f32 + Sync,
+    {
+        if rows == 0 || columns == 0 {
+            return Err("X must contain at least one row and feature".into());
+        }
+        let cells = rows.checked_mul(columns).ok_or("X shape is too large")?;
+        let mut values = vec![0.0f32; cells];
+        let workers = if cells >= HISTOGRAM_PARALLEL_MIN_CELLS { threads.max(1) } else { 1 };
+        let chunk_columns = columns.div_ceil(workers).max(1);
+        thread::scope(|scope| {
+            for (block, dst) in values.chunks_mut(chunk_columns * rows).enumerate() {
+                let value_at = &value_at;
+                scope.spawn(move || {
+                    for row_start in (0..rows).step_by(64) {
+                        for (offset, column_dst) in dst.chunks_mut(rows).enumerate() {
+                            for row in row_start..(row_start + 64).min(rows) {
+                                column_dst[row] = value_at(row, block * chunk_columns + offset);
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        if threads == 0 {
+            return Err("histogram preprocessing requires at least one thread".into());
+        }
+        let has_missing_values = values.iter().any(|value| value.is_nan());
+        validate_matrix(&values, rows, columns)?;
+        if labels.len() != rows {
+            return Err("y must contain one label per row".to_string());
+        }
+        if sample_weights.len() != rows {
+            return Err("sample_weight must contain one value per row".to_string());
+        }
+        let total_weight = validate_sample_weights(&sample_weights)?;
+        if n_classes == 0 {
+            return Err("at least one class is required".to_string());
+        }
+        if !min_leaf_weight.is_finite() || min_leaf_weight < 0.0 {
+            return Err("min_leaf_weight must be finite and non-negative".to_string());
+        }
+        if min_samples_split < 2 || min_samples_leaf == 0 {
+            return Err("invalid minimum sample control".to_string());
+        }
+        if !min_impurity_decrease.is_finite() || min_impurity_decrease < 0.0 {
+            return Err("min_impurity_decrease must be finite and non-negative".to_string());
+        }
+        if labels.iter().any(|&label| label >= n_classes) {
+            return Err("labels must be encoded in 0..n_classes".to_string());
+        }
+
+        Ok(Self {
+            values: DenseValues::Exact(Arc::new(ExactValues::F32(values))),
+            labels: Some(Arc::new(labels)),
+            sample_weights: Some(Arc::new(sample_weights)),
+            rows,
+            columns,
+            n_classes,
+            min_leaf_weight,
+            criterion,
+            min_samples_split,
+            min_samples_leaf,
+            min_impurity_decrease,
+            total_weight,
+            histogram_bins: None,
+            bin_edges: None,
+            active_features: (0..columns).collect(),
+            balanced_subsample: false,
+            ccp_alpha: 0.0,
+            monotonic_constraints: None,
+            has_missing_values,
+            histogram_threads: 1,
+            extra_trees: false,
+            column_major: true,
+            extra_seed: 6,
+            profile: None,
+        })
+    }
     #[allow(clippy::too_many_arguments)]
     pub fn training_binned_with_accessor<F>(
         rows: usize,
@@ -523,7 +636,7 @@ impl DenseInput {
             has_missing_values,
             histogram_threads: 1,
             extra_trees: false,
-            binned_column_major: false,
+            column_major: false,
             extra_seed: 6,
             profile: None,
         })
@@ -576,7 +689,7 @@ impl DenseInput {
             has_missing_values,
             histogram_threads: 1,
             extra_trees: false,
-            binned_column_major: false,
+            column_major: false,
             extra_seed: 6,
             profile: None,
         })
@@ -759,7 +872,7 @@ impl DenseInput {
             has_missing_values,
             histogram_threads: 1,
             extra_trees: false,
-            binned_column_major: false,
+            column_major: false,
             extra_seed: 6,
             profile: None,
         })
@@ -804,7 +917,7 @@ impl DenseInput {
             has_missing_values,
             histogram_threads: 1,
             extra_trees: false,
-            binned_column_major: false,
+            column_major: false,
             extra_seed: 6,
             profile: None,
         })
@@ -818,10 +931,12 @@ impl DenseInput {
         self.bin_edges.as_ref().map(|edges| edges.as_slice())
     }
 
-    pub fn with_float32_storage(mut self) -> Self {
+    pub fn with_float32_column_storage(mut self, threads: usize) -> Self {
         if let DenseValues::Exact(values) = &self.values {
             if let ExactValues::F64(values) = values.as_ref() {
-                self.values = DenseValues::Exact(Arc::new(ExactValues::F32(values.iter().map(|&v| v as f32).collect())));
+                let converted = transpose_exact_map(values, self.rows, self.columns, threads, |v| v as f32);
+                self.values = DenseValues::Exact(Arc::new(ExactValues::F32(converted)));
+                self.column_major = true;
             }
         }
         self
@@ -854,6 +969,18 @@ impl DenseInput {
     pub fn with_extra_trees(mut self, enabled: bool, seed: u64) -> Self {
         self.extra_trees = enabled;
         self.extra_seed = seed;
+        // Exact Extra Trees scan one feature at a time. Store its original values
+        // contiguously; no quantization or change to threshold sampling.
+        if enabled && !self.column_major {
+            if let DenseValues::Exact(values) = &self.values {
+                let transposed = match values.as_ref() {
+                    ExactValues::F32(v) => ExactValues::F32(transpose_exact(v, self.rows, self.columns, self.histogram_threads)),
+                    ExactValues::F64(v) => ExactValues::F64(transpose_exact(v, self.rows, self.columns, self.histogram_threads)),
+                };
+                self.values = DenseValues::Exact(Arc::new(transposed));
+                self.column_major = true;
+            }
+        }
         self
     }
 
@@ -877,7 +1004,7 @@ impl DenseInput {
                     }
                 });
                 self.values = DenseValues::Binned(Arc::new(transposed));
-                self.binned_column_major = true;
+                self.column_major = true;
             }
         }
         self
@@ -951,12 +1078,17 @@ impl DenseInput {
 
     #[inline]
     fn bin_index(&self, row: usize, column: usize) -> usize {
-        if self.binned_column_major { column * self.rows + row } else { row * self.columns + column }
+        if self.column_major { column * self.rows + row } else { row * self.columns + column }
+    }
+
+    #[inline]
+    fn storage_index(&self, row: usize, column: usize) -> usize {
+        if self.column_major { column * self.rows + row } else { row * self.columns + column }
     }
 
     fn value(&self, row: usize, column: usize) -> f64 {
         match &self.values {
-            DenseValues::Exact(values) => values.at(row * self.columns + column),
+            DenseValues::Exact(values) => values.at(self.storage_index(row, column)),
             DenseValues::Binned(values) => {
                 let bin = values[self.bin_index(row, column)];
                 let missing_bin = self.bin_edges.as_ref().map_or(usize::MAX, |e| e[column].len() + 1);
@@ -979,7 +1111,7 @@ impl DenseInput {
     fn routes_left(&self, row: usize, column: usize, pivot: f64, missing_left: bool) -> bool {
         if !self.has_missing_values {
             return match &self.values {
-                DenseValues::Exact(values) => values.at(row * self.columns + column) > pivot,
+                DenseValues::Exact(values) => values.at(self.storage_index(row, column)) > pivot,
                 DenseValues::Binned(values) => (values[self.bin_index(row, column)] as f64) > pivot,
                 DenseValues::Sparse(values) => {
                     let value = values.get(row, column);
@@ -990,7 +1122,7 @@ impl DenseInput {
         }
         match &self.values {
             DenseValues::Exact(values) => {
-                let value = values.at(row * self.columns + column);
+                let value = values.at(self.storage_index(row, column));
                 if value.is_nan() { missing_left } else { value > pivot }
             }
             DenseValues::Binned(values) => {
@@ -1245,7 +1377,7 @@ fn multi_select_positions(values: &mut [f64], targets: &[usize], offset: usize) 
     );
 }
 
-fn validate_matrix(values: &[f64], rows: usize, columns: usize) -> Result<(), String> {
+fn validate_matrix<T: Copy + Into<f64>>(values: &[T], rows: usize, columns: usize) -> Result<(), String> {
     if rows == 0 {
         return Err("X must contain at least one row".to_string());
     }
@@ -1258,7 +1390,7 @@ fn validate_matrix(values: &[f64], rows: usize, columns: usize) -> Result<(), St
     if values.len() != expected {
         return Err("X buffer length does not match its shape".to_string());
     }
-    if values.iter().any(|value| value.is_infinite()) {
+    if values.iter().any(|&value| value.into().is_infinite()) {
         return Err("X must not contain infinite values".to_string());
     }
 
@@ -1660,6 +1792,7 @@ impl VoteAggregator<DenseInput> for ClassVotes {
 
 pub struct DenseDecisionSlice {
     labels: Vec<usize>,
+    exact_binary_weights: Option<Vec<f64>>,
     class_weights: Vec<f64>,
     total_weight: f64,
     criterion: Criterion,
@@ -1669,11 +1802,14 @@ impl DenseDecisionSlice {
     fn new(input: &DenseInput, mask: &Mask) -> Self {
         let mut class_weights = vec![0.0; input.n_classes];
         let mut total_weight = 0.0;
+        let mut exact_binary_weights = (input.extra_trees && input.n_classes == 2 && matches!(input.values, DenseValues::Exact(_)))
+            .then(|| Vec::with_capacity(mask.len()));
         let labels = mask
             .iter()
             .map(|&row| {
                 let label = input.labels()[row];
                 let weight = input.sample_weight(row);
+                if let Some(weights) = &mut exact_binary_weights { weights.push(weight); }
                 class_weights[label] += weight;
                 total_weight += weight;
                 label
@@ -1682,6 +1818,7 @@ impl DenseDecisionSlice {
 
         Self {
             labels,
+            exact_binary_weights,
             class_weights,
             total_weight,
             criterion: input.criterion,
@@ -1834,7 +1971,7 @@ fn best_split_exact(
             .zip(&target.labels)
             .map(|(&row, &label)| {
                 (
-                    values.at(row * input.columns + feature),
+                    values.at(input.storage_index(row, feature)),
                     label,
                     input.sample_weight(row),
                 )
@@ -2000,7 +2137,7 @@ fn best_random_split_generic(
     split_cache: &DenseSplitCache,
 ) -> Option<(f64, bool, f64)> {
     let value_at = |row: usize| match &input.values {
-        DenseValues::Exact(values) => values.at(row * input.columns + feature),
+        DenseValues::Exact(values) => values.at(input.storage_index(row, feature)),
         DenseValues::Binned(values) => {
             let bin = values[input.bin_index(row, feature)] as usize;
             let missing_bin = input
@@ -2096,43 +2233,67 @@ fn best_random_split_binary(
     rng: &mut RfRng,
     split_cache: &DenseSplitCache,
 ) -> Option<(f64, bool, f64)> {
-    EXTRA_FEATURE_VALUES.with(|workspace| {
-        let mut workspace = workspace.borrow_mut();
-        workspace.clear();
-        best_random_split_binary_buffered(input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng, &mut workspace, split_cache)
-    })
+    let DenseValues::Exact(values) = &input.values else { unreachable!() };
+    macro_rules! search {
+        ($values:expr, $workspace:ident) => {
+            $workspace.with(|workspace| {
+                let mut workspace = workspace.borrow_mut();
+                workspace.clear();
+                if input.has_missing_values {
+                    best_random_split_binary_buffered::<_, true>(input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng, $values, &mut workspace, split_cache)
+                } else {
+                    best_random_split_binary_buffered::<_, false>(input, mask, feature, target, monotonic_constraint, lower_bound, upper_bound, rng, $values, &mut workspace, split_cache)
+                }
+            })
+        };
+    }
+    match values.as_ref() {
+        ExactValues::F32(values) => search!(values, EXTRA_FEATURE_VALUES_F32),
+        ExactValues::F64(values) => search!(values, EXTRA_FEATURE_VALUES),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn best_random_split_binary_buffered(
+fn best_random_split_binary_buffered<T: Copy + Into<f64>, const MISSING: bool>(
     input: &DenseInput, mask: &Mask, feature: usize, target: &DenseDecisionSlice,
     monotonic_constraint: i8, lower_bound: f64, upper_bound: f64, rng: &mut RfRng,
-    workspace: &mut Vec<f64>,
+    values: &[T], workspace: &mut Vec<T>,
     split_cache: &DenseSplitCache,
 ) -> Option<(f64, bool, f64)> {
-    let DenseValues::Exact(values) = &input.values else { unreachable!() };
     let mut min = f64::INFINITY;
     let mut max = f64::NEG_INFINITY;
     let mut missing_count = 0usize;
     let mut missing_weight = 0.0;
     let mut missing_class_0 = 0.0;
     let mut missing_class_1 = 0.0;
-    for (&row, &label) in mask.iter().zip(&target.labels) {
-        let value = values.at(row * input.columns + feature);
-        workspace.push(value);
-        if value.is_nan() {
-            let weight = input.sample_weight(row);
-            missing_count += 1;
-            missing_weight += weight;
-            if label == 0 { missing_class_0 += weight; } else { missing_class_1 += weight; }
-        } else {
+    let weights = target.exact_binary_weights.as_ref().expect("exact binary node caches its weights");
+    workspace.reserve(mask.len());
+    if MISSING {
+        for ((&row, &label), &weight) in mask.iter().zip(&target.labels).zip(weights) {
+            let stored = values[input.storage_index(row, feature)];
+            workspace.push(stored);
+            let value: f64 = stored.into();
+            if value.is_nan() {
+                missing_count += 1;
+                missing_weight += weight;
+                if label == 0 { missing_class_0 += weight; } else { missing_class_1 += weight; }
+            } else {
+                min = min.min(value);
+                max = max.max(value);
+            }
+        }
+    } else {
+        for &row in mask.iter() {
+            let stored = values[input.storage_index(row, feature)];
+            workspace.push(stored);
+            let value: f64 = stored.into();
             min = min.min(value);
             max = max.max(value);
         }
     }
     if let Some(p) = &input.profile {
         p.sample_visits.fetch_add(mask.len() as u64, AtomicOrdering::Relaxed);
-        p.buffer_bytes.fetch_max((workspace.capacity() * 8) as u64, AtomicOrdering::Relaxed);
+        p.buffer_bytes.fetch_max((workspace.capacity() * std::mem::size_of::<T>()) as u64, AtomicOrdering::Relaxed);
     }
     if min >= max {
         split_cache.mark_constant(feature);
@@ -2147,9 +2308,9 @@ fn best_random_split_binary_buffered(
     let mut low_weight = 0.0;
     let mut low_class_0 = 0.0;
     let mut low_class_1 = 0.0;
-    for ((&row, &label), &value) in mask.iter().zip(&target.labels).zip(workspace.iter()) {
-        if !value.is_nan() && value <= threshold {
-            let weight = input.sample_weight(row);
+    for ((&weight, &label), &stored) in weights.iter().zip(&target.labels).zip(workspace.iter()) {
+        let value: f64 = stored.into();
+        if (!MISSING || !value.is_nan()) && value <= threshold {
             low_count += 1;
             low_weight += weight;
             if label == 0 { low_class_0 += weight; } else { low_class_1 += weight; }
@@ -2781,8 +2942,8 @@ impl RfInput for DenseInput {
         let inner = if self.labels.is_none() {
             let values = match &self.values {
                 DenseValues::Exact(values) => {
-                    if self.has_missing_values { mask.iter().map(|&row| { let value = values.at(row * self.columns + feature); if value.is_nan() { missing_left } else { value > *pivot } }).collect::<Vec<_>>().into_iter() }
-                    else { mask.iter().map(|&row| values.at(row * self.columns + feature) > *pivot).collect::<Vec<_>>().into_iter() }
+                    if self.has_missing_values { mask.iter().map(|&row| { let value = values.at(self.storage_index(row, feature)); if value.is_nan() { missing_left } else { value > *pivot } }).collect::<Vec<_>>().into_iter() }
+                    else { mask.iter().map(|&row| values.at(self.storage_index(row, feature)) > *pivot).collect::<Vec<_>>().into_iter() }
                 }
                 DenseValues::Binned(values) => {
                     if self.has_missing_values { mask.iter().map(|&row| { let bin = values[self.bin_index(row, feature)]; let missing_bin = self.bin_edges.as_ref().map_or(usize::MAX, |e| e[feature].len() + 1); if bin as usize == missing_bin { missing_left } else { (bin as f64) > *pivot } }).collect::<Vec<_>>().into_iter() }
@@ -2814,6 +2975,30 @@ impl RfInput for DenseInput {
 #[cfg(test)]
 mod histogram_optimization_tests {
     use super::*;
+
+    #[test]
+    fn exact_column_layout_preserves_rectangular_values_and_nan_for_both_dtypes() {
+        for float32 in [false, true] {
+            let raw = vec![1.0, f64::NAN, 3.0, 4.0, 5.0, 6.0];
+            let input = DenseInput::training(raw.clone(), 2, 3, vec![0, 1],
+                vec![1.0; 2], 2, 0.0, Criterion::Gini, 2, 1, 0.0, None).unwrap();
+            let input = if float32 { input.with_float32_column_storage(2) } else { input };
+            let input = input.with_histogram_threads(2).with_extra_trees(true, 6);
+            assert!(input.column_major);
+            let shared = input.clone();
+            assert!(input.shares_feature_storage_with(&shared));
+            for row in 0..2 {
+                for col in 0..3 {
+                    let expected = raw[row * 3 + col];
+                    let actual = input.value_at(row, col);
+                    assert!(actual == expected || (actual.is_nan() && expected.is_nan()));
+                }
+            }
+            // Reapplying configuration must not transpose a second time.
+            let again = input.clone().with_extra_trees(true, 6);
+            assert!(input.shares_feature_storage_with(&again));
+        }
+    }
 
     fn binary_input(max_bins: Option<usize>) -> DenseInput {
         DenseInput::training(
@@ -3323,6 +3508,25 @@ mod histogram_optimization_tests {
             1,
         );
         assert_eq!(infinite_data.err().as_deref(), Some("X must not contain infinite values"));
+    }
+
+    #[test]
+    fn direct_exact_float32_accessor_preserves_values_and_validation() {
+        let raw = [0.0f32, -0.0, f32::from_bits(1), f32::NAN, 4.0, 9.0];
+        let build = |weights, infinite| DenseInput::training_exact_f32_with_accessor(
+            3, 2, vec![0, 1, 1], weights, 2, 0.0, Criterion::Gini, 2, 1, 0.0, 2,
+            |row, col| if infinite { f32::INFINITY } else { raw[row * 2 + col] },
+        );
+        let input = build(vec![1.0; 3], false).unwrap();
+        assert!(input.column_major && input.has_missing_values);
+        for row in 0..3 {
+            for col in 0..2 {
+                let expected = f64::from(raw[row * 2 + col]);
+                assert_eq!(input.value_at(row, col).to_bits(), expected.to_bits());
+            }
+        }
+        assert_eq!(build(vec![1.0; 3], true).err().as_deref(), Some("X must not contain infinite values"));
+        assert_eq!(build(vec![f64::MAX; 3], false).err().as_deref(), Some("sample_weight sum must be finite"));
     }
 
     #[test]

@@ -138,7 +138,7 @@ impl NativeForest {
         let dense_order = canonical_dense_row_order(x, y.as_array())?;
         if let Some(start) = sort_start { self.fit_profile.insert("canonical_sort_seconds".into(), start.elapsed().as_secs_f64()); }
         let prepare_start = enabled.then(Instant::now);
-        let direct_f32 = if max_bins.is_some() {
+        let direct_f32 = if max_bins.is_some() || extra_trees {
             x.extract::<PyReadonlyArray2<'_, f32>>().ok()
         } else {
             None
@@ -203,24 +203,32 @@ impl NativeForest {
         };
         let input = if let Some(array) = direct_f32 {
             let view = array.as_array();
-            DenseInput::training_binned_with_accessor_and_seed(
-                rows,
-                columns,
-                labels,
-                sample_weights,
-                n_classes,
-                min_leaf_weight,
-                criterion,
-                min_samples_split,
-                min_samples_leaf,
-                min_impurity_decrease,
-                max_bins.expect("direct f32 path requires histogram bins"),
-                n_jobs.max(1),
-                binning_strategy,
-                bin_sample_size,
-                binning_seed,
-                |row, feature| f64::from(view[[row_order[row], feature]]),
-            )
+            if max_bins.is_none() {
+                DenseInput::training_exact_f32_with_accessor(
+                    rows, columns, labels, sample_weights, n_classes, min_leaf_weight,
+                    criterion, min_samples_split, min_samples_leaf, min_impurity_decrease,
+                    n_jobs.max(1), |row, feature| view[[row_order[row], feature]],
+                )
+            } else {
+                DenseInput::training_binned_with_accessor_and_seed(
+                    rows,
+                    columns,
+                    labels,
+                    sample_weights,
+                    n_classes,
+                    min_leaf_weight,
+                    criterion,
+                    min_samples_split,
+                    min_samples_leaf,
+                    min_impurity_decrease,
+                    max_bins.expect("direct f32 path requires histogram bins"),
+                    n_jobs.max(1),
+                    binning_strategy,
+                    bin_sample_size,
+                    binning_seed,
+                    |row, feature| f64::from(view[[row_order[row], feature]]),
+                )
+            }
         } else if let Some(array) = direct_f64 {
             let view = array.as_array();
             DenseInput::training_binned_with_accessor_and_seed(
@@ -290,7 +298,7 @@ impl NativeForest {
         }
         .map_err(PyValueError::new_err)?;
         let input = if extra_trees && x.extract::<PyReadonlyArray2<'_, f32>>().is_ok() {
-            input.with_float32_storage()
+            input.with_float32_column_storage(n_jobs)
         } else { input };
         let mut input = if balanced_subsample {
             input.with_balanced_subsample()
@@ -324,6 +332,7 @@ impl NativeForest {
         let profile = enabled.then(|| Arc::new(dense::FitProfile::default()));
         let input = input
             .with_profiling(profile.clone())
+            .with_histogram_threads(n_jobs)
             .with_extra_trees(extra_trees, extra_seed)
             .with_ccp_alpha(ccp_alpha)
             .with_histogram_threads(histogram_threads);

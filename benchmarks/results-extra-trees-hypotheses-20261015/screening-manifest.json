@@ -1,0 +1,134 @@
+{
+  "before-bootstrap": {
+    "experiment": "",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "numpy_version": "2.4.6",
+    "config": {
+      "rows": 100000,
+      "features": 500,
+      "trees": 64,
+      "jobs": 6,
+      "repeats": 3,
+      "scenario": "credit_default",
+      "no_bootstrap": false,
+      "include_binned": true,
+      "bankai_only": false,
+      "bins": 63,
+      "bin_sample_size": 20000,
+      "output": "/tmp/bankai-exact-hypotheses-20261015/before-bootstrap.json",
+      "compare": "None"
+    },
+    "extension": "/Users/jesus/Documents/Code/bankai-random-forest-v2/python/bankai_random_forest/_core.abi3.so",
+    "binary_sha256": "21676f302d56c9482418bcd3d5a0a91c77e1d91d8452a83cb40c7fe44f05c09e"
+  },
+  "before-no-bootstrap": {
+    "experiment": "",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "numpy_version": "2.4.6",
+    "config": {
+      "rows": 100000,
+      "features": 500,
+      "trees": 64,
+      "jobs": 6,
+      "repeats": 3,
+      "scenario": "credit_default",
+      "no_bootstrap": true,
+      "include_binned": true,
+      "bankai_only": false,
+      "bins": 63,
+      "bin_sample_size": 20000,
+      "output": "/tmp/bankai-exact-hypotheses-20261015/before-no-bootstrap.json",
+      "compare": "None"
+    },
+    "extension": "/Users/jesus/Documents/Code/bankai-random-forest-v2/python/bankai_random_forest/_core.abi3.so",
+    "binary_sha256": "21676f302d56c9482418bcd3d5a0a91c77e1d91d8452a83cb40c7fe44f05c09e"
+  },
+  "typed-bootstrap": {
+    "experiment": "",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "numpy_version": "2.4.6",
+    "config": {
+      "rows": 100000,
+      "features": 500,
+      "trees": 64,
+      "jobs": 6,
+      "repeats": 3,
+      "scenario": "credit_default",
+      "no_bootstrap": false,
+      "include_binned": true,
+      "bankai_only": false,
+      "bins": 63,
+      "bin_sample_size": 20000,
+      "output": "/tmp/bankai-exact-hypotheses-20261015/typed-bootstrap.json",
+      "compare": "/tmp/bankai-exact-hypotheses-20261015/before-bootstrap.json"
+    },
+    "extension": "/Users/jesus/Documents/Code/bankai-random-forest-v2/python/bankai_random_forest/_core.abi3.so",
+    "binary_sha256": "a115319c7bda99f14f0d94563f42e91c12202cc8749de52b03cfa27ef0bd5144"
+  },
+  "direct-bootstrap": {
+    "experiment": "",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "numpy_version": "2.4.6",
+    "config": {
+      "rows": 100000,
+      "features": 500,
+      "trees": 64,
+      "jobs": 6,
+      "repeats": 3,
+      "scenario": "credit_default",
+      "no_bootstrap": false,
+      "include_binned": true,
+      "bankai_only": false,
+      "bins": 63,
+      "bin_sample_size": 20000,
+      "output": "/tmp/bankai-exact-hypotheses-20261015/direct-bootstrap.json",
+      "compare": "/tmp/bankai-exact-hypotheses-20261015/before-bootstrap.json"
+    },
+    "extension": "/Users/jesus/Documents/Code/bankai-random-forest-v2/python/bankai_random_forest/_core.abi3.so",
+    "binary_sha256": "e3309b74ce988e42bf278b8bc639af122876dc07d7c00392da15a0bd91cc0ae3"
+  },
+  "refine-bootstrap": {
+    "experiment": "refine",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "numpy_version": "2.4.6",
+    "config": {
+      "rows": 100000,
+      "features": 500,
+      "trees": 64,
+      "jobs": 6,
+      "repeats": 3,
+      "scenario": "credit_default",
+      "no_bootstrap": false,
+      "include_binned": false,
+      "bankai_only": true,
+      "bins": 63,
+      "bin_sample_size": 20000,
+      "output": "/tmp/bankai-exact-hypotheses-20261015/refine-bootstrap.json",
+      "compare": "None"
+    },
+    "extension": "/Users/jesus/Documents/Code/bankai-random-forest-v2/python/bankai_random_forest/_core.abi3.so",
+    "binary_sha256": "2607640c8d4600b131a205c138e07c609a45299057acf9794513ac2925531311"
+  },
+  "snap-bootstrap": {
+    "experiment": "snap",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "numpy_version": "2.4.6",
+    "config": {
+      "rows": 100000,
+      "features": 500,
+      "trees": 64,
+      "jobs": 6,
+      "repeats": 3,
+      "scenario": "credit_default",
+      "no_bootstrap": false,
+      "include_binned": false,
+      "bankai_only": true,
+      "bins": 63,
+      "bin_sample_size": 20000,
+      "output": "/tmp/bankai-exact-hypotheses-20261015/snap-bootstrap.json",
+      "compare": "None"
+    },
+    "extension": "/Users/jesus/Documents/Code/bankai-random-forest-v2/python/bankai_random_forest/_core.abi3.so",
+    "binary_sha256": "2607640c8d4600b131a205c138e07c609a45299057acf9794513ac2925531311"
+  }
+}
