@@ -1,5 +1,10 @@
 # 🔥 Bankai Random Forest
 
+Alpha 16 prepares an opt-in [virtual exact-column backend](docs/virtual-exact-columns.md)
+for Bankai Boruta. Ordinary classifier fits retain their current storage;
+AMD runtime/RSS acceptance is pending. See [unreleased changes](CHANGELOG.md).
+
+
 [![PyPI Latest Release](https://img.shields.io/pypi/v/bankai-random-forest.svg)](https://pypi.org/project/bankai-random-forest/)
 [![Package Status](https://img.shields.io/pypi/status/bankai-random-forest.svg)](https://pypi.org/project/bankai-random-forest/)
 [![Python versions](https://img.shields.io/pypi/pyversions/bankai-random-forest.svg)](https://pypi.org/project/bankai-random-forest/)

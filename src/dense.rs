@@ -87,12 +87,105 @@ enum DenseValues {
 enum ExactValues {
     F64(Vec<f64>),
     F32(Vec<f32>),
+    Virtual(ExactVirtualColumns),
 }
 
 impl ExactValues {
     #[inline]
     fn at(&self, index: usize) -> f64 {
-        match self { Self::F64(values) => values[index], Self::F32(values) => f64::from(values[index]) }
+        match self { Self::F64(values) => values[index], Self::F32(values) => f64::from(values[index]), Self::Virtual(values) => f64::from(values.at(index)) }
+    }
+}
+
+/// Immutable original-precision columns shared by every round and tree.
+/// Sorting uses `value_at`; training reproduces the a15 float32 conversion.
+#[derive(Clone)]
+pub struct ExactColumnBank {
+    values: Arc<ExactValues>,
+    rows: usize,
+    columns: usize,
+}
+
+impl ExactColumnBank {
+    pub fn from_f32(values: Vec<f32>, rows: usize, columns: usize) -> Result<Self, String> {
+        Self::new(ExactValues::F32(values), rows, columns)
+    }
+    pub fn from_f64(values: Vec<f64>, rows: usize, columns: usize) -> Result<Self, String> {
+        Self::new(ExactValues::F64(values), rows, columns)
+    }
+    fn new(values: ExactValues, rows: usize, columns: usize) -> Result<Self, String> {
+        let len = match &values { ExactValues::F32(v) => v.len(), ExactValues::F64(v) => v.len(), _ => unreachable!() };
+        if rows == 0 || columns == 0 || rows.checked_mul(columns) != Some(len) {
+            return Err("invalid exact column bank shape".into());
+        }
+        if (0..len).any(|i| !values.at(i).is_finite() || !(values.at(i) as f32).is_finite()) {
+            return Err("exact column bank requires finite float32-representable values".into());
+        }
+        Ok(Self { values: Arc::new(values), rows, columns })
+    }
+    pub fn rows(&self) -> usize { self.rows }
+    pub fn columns(&self) -> usize { self.columns }
+    pub fn bytes(&self) -> usize {
+        self.rows * self.columns * match self.values.as_ref() { ExactValues::F64(_) => 8, _ => 4 }
+    }
+    pub fn value_at(&self, row: usize, column: usize) -> f64 {
+        self.values.at(column * self.rows + row)
+    }
+}
+
+/// Explicit row maps. Compact indices support exactly 2^32 rows on 64-bit hosts.
+#[derive(Clone)]
+pub enum ExactRowIndices { U32(Vec<u32>), Usize(Vec<usize>) }
+impl ExactRowIndices {
+    pub fn len(&self) -> usize { match self { Self::U32(v) => v.len(), Self::Usize(v) => v.len() } }
+    pub fn is_empty(&self) -> bool { self.len() == 0 }
+    pub fn at(&self, i: usize) -> usize { match self { Self::U32(v) => v[i] as usize, Self::Usize(v) => v[i] } }
+    pub fn bytes(&self) -> usize { match self { Self::U32(v) => v.len() * 4, Self::Usize(v) => v.len() * std::mem::size_of::<usize>() } }
+    pub fn allocated_bytes(&self) -> usize { match self { Self::U32(v) => v.capacity() * 4, Self::Usize(v) => v.capacity() * std::mem::size_of::<usize>() } }
+}
+
+#[derive(Clone)]
+pub struct ExactVirtualColumns {
+    bank: ExactColumnBank,
+    columns: Vec<usize>,
+    real_columns: usize,
+    order: Arc<Vec<usize>>,
+    permutations: Arc<ExactRowIndices>,
+}
+impl ExactVirtualColumns {
+    pub fn new(bank: ExactColumnBank, active: Vec<usize>, sources: Vec<usize>,
+        order: Arc<Vec<usize>>, permutations: Arc<ExactRowIndices>) -> Result<Self, String> {
+        let rows = bank.rows;
+        if active.is_empty() || sources.is_empty() || order.len() != rows
+            || rows.checked_mul(sources.len()) != Some(permutations.len())
+            || active.iter().chain(&sources).any(|&c| c >= bank.columns)
+            || order.iter().any(|&r| r >= rows)
+            || (0..permutations.len()).any(|i| permutations.at(i) >= rows) {
+            return Err("invalid virtual exact maps".into());
+        }
+        let mut seen = vec![false; rows];
+        for &r in order.iter() { if std::mem::replace(&mut seen[r], true) { return Err("invalid row order".into()); } }
+        for offset in (0..permutations.len()).step_by(rows) {
+            seen.fill(false);
+            for i in offset..offset + rows {
+                if std::mem::replace(&mut seen[permutations.at(i)], true) { return Err("invalid shadow permutation".into()); }
+            }
+        }
+        let real_columns = active.len();
+        let columns = active.into_iter().chain(sources).collect();
+        Ok(Self { bank, columns, real_columns, order, permutations })
+    }
+    #[inline]
+    fn at(&self, index: usize) -> f32 {
+        self.value_at(index % self.bank.rows, index / self.bank.rows)
+    }
+    #[inline]
+    fn value_at(&self, row: usize, column: usize) -> f32 {
+        let row = self.order[row];
+        let row = if column < self.real_columns { row } else {
+            self.permutations.at((column - self.real_columns) * self.bank.rows + row)
+        };
+        self.bank.value_at(row, self.columns[column]) as f32
     }
 }
 
@@ -196,6 +289,12 @@ impl DenseSplitCache {
 }
 
 enum DenseSplitIter<'a> {
+    VirtualF32Real {
+        column: &'a [f32], order: &'a [usize], rows: std::slice::Iter<'a, usize>, pivot: f64,
+    },
+    VirtualF32Shadow {
+        column: &'a [f32], order: &'a [usize], permutation: &'a [u32], rows: std::slice::Iter<'a, usize>, pivot: f64,
+    },
     Lazy {
         input: &'a DenseInput,
         rows: std::slice::Iter<'a, usize>,
@@ -219,6 +318,8 @@ impl Iterator for DenseSplitIter<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
+            Self::VirtualF32Real { column, order, rows, pivot } => rows.next().map(|&r| f64::from(column[order[r]]) > *pivot),
+            Self::VirtualF32Shadow { column, order, permutation, rows, pivot } => rows.next().map(|&r| f64::from(column[permutation[order[r]] as usize]) > *pivot),
             Self::Lazy {
                 input,
                 rows,
@@ -457,6 +558,17 @@ impl DenseInput {
         }
         let has_missing_values = values.iter().any(|value| value.is_nan());
         validate_matrix(&values, rows, columns)?;
+        Self::training_exact_storage(ExactValues::F32(values), rows, columns, labels, sample_weights,
+            n_classes, min_leaf_weight, criterion, min_samples_split, min_samples_leaf,
+            min_impurity_decrease, has_missing_values)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn training_exact_storage(values: ExactValues, rows: usize, columns: usize,
+        labels: Vec<usize>, sample_weights: Vec<f64>, n_classes: usize,
+        min_leaf_weight: f64, criterion: Criterion, min_samples_split: usize,
+        min_samples_leaf: usize, min_impurity_decrease: f64, has_missing_values: bool,
+    ) -> Result<Self, String> {
         if labels.len() != rows {
             return Err("y must contain one label per row".to_string());
         }
@@ -481,7 +593,7 @@ impl DenseInput {
         }
 
         Ok(Self {
-            values: DenseValues::Exact(Arc::new(ExactValues::F32(values))),
+            values: DenseValues::Exact(Arc::new(values)),
             labels: Some(Arc::new(labels)),
             sample_weights: Some(Arc::new(sample_weights)),
             rows,
@@ -507,6 +619,20 @@ impl DenseInput {
             profile: None,
         })
     }
+    /// Private integration storage: no real/shadow augmented matrix is allocated.
+    #[allow(clippy::too_many_arguments)]
+    pub fn training_exact_virtual(
+        values: ExactVirtualColumns, labels: Vec<usize>, n_classes: usize,
+        min_leaf_weight: f64, criterion: Criterion, min_samples_split: usize,
+        min_samples_leaf: usize, min_impurity_decrease: f64,
+    ) -> Result<Self, String> {
+        let rows = values.bank.rows;
+        let columns = values.columns.len();
+        Self::training_exact_storage(ExactValues::Virtual(values), rows, columns,
+            labels, vec![1.; rows], n_classes, min_leaf_weight, criterion,
+            min_samples_split, min_samples_leaf, min_impurity_decrease, false)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn training_binned_with_accessor<F>(
         rows: usize,
@@ -976,6 +1102,7 @@ impl DenseInput {
                 let transposed = match values.as_ref() {
                     ExactValues::F32(v) => ExactValues::F32(transpose_exact(v, self.rows, self.columns, self.histogram_threads)),
                     ExactValues::F64(v) => ExactValues::F64(transpose_exact(v, self.rows, self.columns, self.histogram_threads)),
+                    ExactValues::Virtual(v) => ExactValues::Virtual(v.clone()),
                 };
                 self.values = DenseValues::Exact(Arc::new(transposed));
                 self.column_major = true;
@@ -1086,9 +1213,17 @@ impl DenseInput {
         if self.column_major { column * self.rows + row } else { row * self.columns + column }
     }
 
+    #[inline]
+    fn exact_value(&self, values: &ExactValues, row: usize, column: usize) -> f64 {
+        match values {
+            ExactValues::Virtual(v) => f64::from(v.value_at(row, column)),
+            _ => values.at(self.storage_index(row, column)),
+        }
+    }
+
     fn value(&self, row: usize, column: usize) -> f64 {
         match &self.values {
-            DenseValues::Exact(values) => values.at(self.storage_index(row, column)),
+            DenseValues::Exact(values) => self.exact_value(values, row, column),
             DenseValues::Binned(values) => {
                 let bin = values[self.bin_index(row, column)];
                 let missing_bin = self.bin_edges.as_ref().map_or(usize::MAX, |e| e[column].len() + 1);
@@ -1111,7 +1246,7 @@ impl DenseInput {
     fn routes_left(&self, row: usize, column: usize, pivot: f64, missing_left: bool) -> bool {
         if !self.has_missing_values {
             return match &self.values {
-                DenseValues::Exact(values) => values.at(self.storage_index(row, column)) > pivot,
+                DenseValues::Exact(values) => self.exact_value(values, row, column) > pivot,
                 DenseValues::Binned(values) => (values[self.bin_index(row, column)] as f64) > pivot,
                 DenseValues::Sparse(values) => {
                     let value = values.get(row, column);
@@ -1122,7 +1257,7 @@ impl DenseInput {
         }
         match &self.values {
             DenseValues::Exact(values) => {
-                let value = values.at(self.storage_index(row, column));
+                let value = self.exact_value(values, row, column);
                 if value.is_nan() { missing_left } else { value > pivot }
             }
             DenseValues::Binned(values) => {
@@ -1971,7 +2106,7 @@ fn best_split_exact(
             .zip(&target.labels)
             .map(|(&row, &label)| {
                 (
-                    values.at(input.storage_index(row, feature)),
+                    input.exact_value(values, row, feature),
                     label,
                     input.sample_weight(row),
                 )
@@ -2137,7 +2272,7 @@ fn best_random_split_generic(
     split_cache: &DenseSplitCache,
 ) -> Option<(f64, bool, f64)> {
     let value_at = |row: usize| match &input.values {
-        DenseValues::Exact(values) => values.at(input.storage_index(row, feature)),
+        DenseValues::Exact(values) => input.exact_value(values, row, feature),
         DenseValues::Binned(values) => {
             let bin = values[input.bin_index(row, feature)] as usize;
             let missing_bin = input
@@ -2248,8 +2383,40 @@ fn best_random_split_binary(
         };
     }
     match values.as_ref() {
-        ExactValues::F32(values) => search!(values, EXTRA_FEATURE_VALUES_F32),
-        ExactValues::F64(values) => search!(values, EXTRA_FEATURE_VALUES),
+        ExactValues::F32(values) => search!(|row| values[input.storage_index(row, feature)], EXTRA_FEATURE_VALUES_F32),
+        ExactValues::F64(values) => search!(|row| values[input.storage_index(row, feature)], EXTRA_FEATURE_VALUES),
+        ExactValues::Virtual(values) => {
+            // Resolve dtype, source column and permutation width once per feature,
+            // so the sample gather only follows typed slices.
+            let rows = values.bank.rows;
+            let order = values.order.as_slice();
+            let source = values.columns[feature];
+            macro_rules! gather {
+                ($bank:expr) => {{
+                    let column = &$bank[source * rows..(source + 1) * rows];
+                    if feature < values.real_columns {
+                        search!(|row| column[order[row]] as f32, EXTRA_FEATURE_VALUES_F32)
+                    } else {
+                        let offset = (feature - values.real_columns) * rows;
+                        match values.permutations.as_ref() {
+                            ExactRowIndices::U32(p) => {
+                                let permutation = &p[offset..offset + rows];
+                                search!(|row| column[permutation[order[row]] as usize] as f32, EXTRA_FEATURE_VALUES_F32)
+                            },
+                            ExactRowIndices::Usize(p) => {
+                                let permutation = &p[offset..offset + rows];
+                                search!(|row| column[permutation[order[row]]] as f32, EXTRA_FEATURE_VALUES_F32)
+                            },
+                        }
+                    }
+                }};
+            }
+            match values.bank.values.as_ref() {
+                ExactValues::F32(bank) => gather!(bank),
+                ExactValues::F64(bank) => gather!(bank),
+                ExactValues::Virtual(_) => unreachable!("bank cannot contain virtual storage"),
+            }
+        },
     }
 }
 
@@ -2257,7 +2424,7 @@ fn best_random_split_binary(
 fn best_random_split_binary_buffered<T: Copy + Into<f64>, const MISSING: bool>(
     input: &DenseInput, mask: &Mask, feature: usize, target: &DenseDecisionSlice,
     monotonic_constraint: i8, lower_bound: f64, upper_bound: f64, rng: &mut RfRng,
-    values: &[T], workspace: &mut Vec<T>,
+    values: impl Fn(usize) -> T, workspace: &mut Vec<T>,
     split_cache: &DenseSplitCache,
 ) -> Option<(f64, bool, f64)> {
     let mut min = f64::INFINITY;
@@ -2270,7 +2437,7 @@ fn best_random_split_binary_buffered<T: Copy + Into<f64>, const MISSING: bool>(
     workspace.reserve(mask.len());
     if MISSING {
         for ((&row, &label), &weight) in mask.iter().zip(&target.labels).zip(weights) {
-            let stored = values[input.storage_index(row, feature)];
+            let stored = values(row);
             workspace.push(stored);
             let value: f64 = stored.into();
             if value.is_nan() {
@@ -2284,7 +2451,7 @@ fn best_random_split_binary_buffered<T: Copy + Into<f64>, const MISSING: bool>(
         }
     } else {
         for &row in mask.iter() {
-            let stored = values[input.storage_index(row, feature)];
+            let stored = values(row);
             workspace.push(stored);
             let value: f64 = stored.into();
             min = min.min(value);
@@ -2939,7 +3106,28 @@ impl RfInput for DenseInput {
         missing_left: bool,
     ) -> impl Iterator<Item = bool> + 'a {
         let timer = ProfileTimer(self.profile.as_ref().map(|p| (&p.partition_ns, Instant::now())));
-        let inner = if self.labels.is_none() {
+        let virtual_f32 = match &self.values {
+            DenseValues::Exact(values) => match values.as_ref() {
+                ExactValues::Virtual(v) => match v.bank.values.as_ref() {
+                    ExactValues::F32(bank) => Some((v, bank)),
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        };
+        let inner = if let Some((v, bank)) = virtual_f32 {
+            let source = v.columns[feature];
+            let column = &bank[source * self.rows..(source + 1) * self.rows];
+            if feature < v.real_columns {
+                DenseSplitIter::VirtualF32Real { column, order: &v.order, rows: mask.iter(), pivot: *pivot }
+            } else if let ExactRowIndices::U32(p) = v.permutations.as_ref() {
+                let offset = (feature - v.real_columns) * self.rows;
+                DenseSplitIter::VirtualF32Shadow { column, order: &v.order, permutation: &p[offset..offset+self.rows], rows: mask.iter(), pivot: *pivot }
+            } else {
+                DenseSplitIter::Lazy { input: self, rows: mask.iter(), feature, pivot: *pivot }
+            }
+        } else if self.labels.is_none() {
             let values = match &self.values {
                 DenseValues::Exact(values) => {
                     if self.has_missing_values { mask.iter().map(|&row| { let value = values.at(self.storage_index(row, feature)); if value.is_nan() { missing_left } else { value > *pivot } }).collect::<Vec<_>>().into_iter() }
@@ -3678,6 +3866,65 @@ mod histogram_optimization_tests {
                 .unwrap()
                 .1;
             assert!((serial_value - parallel_value).abs() < 1e-12);
+        }
+    }
+}
+
+#[cfg(test)]
+mod virtual_exact_tests {
+    use super::*;
+    use xrf::Forest;
+
+    #[test]
+    fn virtual_matches_materialized_trees_binary_and_multiclass() {
+        let rows = 96;
+        for bank in [
+            ExactColumnBank::from_f64((0..rows * 3).map(|i| (i % 19) as f64 / 7.).collect(), rows, 3).unwrap(),
+            ExactColumnBank::from_f32((0..rows * 3).map(|i| (i % 19) as f32 / 7.).collect(), rows, 3).unwrap(),
+        ] {
+            check_tree_parity(bank);
+        }
+    }
+
+    fn check_tree_parity(bank: ExactColumnBank) {
+        let rows = bank.rows();
+        for classes in [2, 3] {
+            for bootstrap in [false, true] {
+                for criterion in [Criterion::Gini, Criterion::Entropy] {
+                    let order = Arc::new((0..rows).rev().collect::<Vec<_>>());
+                    let permutations = Arc::new(ExactRowIndices::U32((0..rows).map(|r| ((r + 7) % rows) as u32).collect()));
+                    let virtuals = ExactVirtualColumns::new(bank.clone(), vec![0, 2], vec![1], order, permutations).unwrap();
+                    let labels = (0..rows).map(|r| r % classes).collect::<Vec<_>>();
+                    let materialized = DenseInput::training_exact_f32_with_accessor(rows, 3, labels.clone(), vec![1.; rows], classes, 0., criterion, 2, 1, 0., 2, |r,c| virtuals.at(c * rows + r)).unwrap().with_extra_trees(true, 6);
+                    let indirect = DenseInput::training_exact_virtual(virtuals, labels, classes, 0., criterion, 2, 1, 0.).unwrap().with_extra_trees(true, 6);
+                    let train = |input: &DenseInput| Forest::new_parallel_with_settings(input, 7, 2, true, false, false, 42, 2, 5, usize::MAX, bootstrap, None);
+                    let a = train(&materialized);
+                    let b = train(&indirect);
+                    // XRF concatenates worker chunks in completion order. Compare
+                    // the exact tree multiset, including leaf votes and covers.
+                    let signatures = |forest: &Forest<DenseInput>| {
+                        let mut trees = forest.tree_refs().map(|tree| {
+                            tree.nodes.iter().map(|node| match node {
+                                xrf::Node::Branch(f,t,g,l,r,m) => format!("B:{f}:{:x}:{:x}:{l}:{r}:{m}", t.to_bits(), g.to_bits()),
+                                xrf::Node::Leaf(v,c) => format!("L:{v}:{c}"),
+                            }).collect::<Vec<_>>().join(";")
+                        }).collect::<Vec<_>>();
+                        trees.sort(); trees
+                    };
+                    assert_eq!(signatures(&a), signatures(&b));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_banks_and_maps() {
+        assert!(ExactColumnBank::from_f64(vec![f64::MAX], 1, 1).is_err());
+        assert!(ExactColumnBank::from_f32(vec![f32::NAN], 1, 1).is_err());
+        assert!(ExactColumnBank::from_f32(vec![], usize::MAX, 2).is_err());
+        let bank = ExactColumnBank::from_f32(vec![0.; 4], 4, 1).unwrap();
+        for (order, permutation) in [(vec![0,1,2,3], vec![0,0,2,3]), (vec![0,0,2,3], vec![0,1,2,3]), (vec![0,1,2,3], vec![0,1,2,4])] {
+            assert!(ExactVirtualColumns::new(bank.clone(), vec![0], vec![0], Arc::new(order), Arc::new(ExactRowIndices::U32(permutation))).is_err());
         }
     }
 }

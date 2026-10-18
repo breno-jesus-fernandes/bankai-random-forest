@@ -8,6 +8,11 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish reviewed artifacts to PyPI (explicit release authorization required)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -15,7 +20,7 @@ permissions:
 jobs:
   release_gate:
     name: Check current package release on master
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master'
     runs-on: ubuntu-24.04
     outputs:
       changed: ${{ steps.version.outputs.changed }}
@@ -274,7 +279,7 @@ jobs:
   attest:
     name: Attest release artifacts
     needs: distributions
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -294,7 +299,7 @@ jobs:
   publish:
     name: Publish release to PyPI
     needs: [release_gate, distributions, attest]
-    if: needs.release_gate.outputs.changed == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && needs.release_gate.outputs.changed == 'true'
     concurrency:
       group: publish-${{ needs.release_gate.outputs.version }}
       cancel-in-progress: false
@@ -320,7 +325,7 @@ jobs:
   github_release:
     name: Create GitHub release
     needs: [release_gate, publish]
-    if: needs.release_gate.outputs.changed == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && needs.release_gate.outputs.changed == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
