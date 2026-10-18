@@ -21,9 +21,11 @@ use usize. Checked shape multiplication rejects overflow. No enormous allocation
 is required to test overflow rejection.
 
 This saves the full real-plus-shadow f32 matrix, but retains the input snapshot,
-row order and explicit permutations. Boruta currently copies NumPy permutations
-into a reusable owned Rust buffer each round for safe ownership. That live copy
-and its cumulative copy volume must be included in memory interpretation.
+row order and explicit permutations. Boruta's standard MT19937/u32 experiment shuffles directly into the session-owned
+explicit permutation buffer with identical RandomState state transitions.
+Custom-RNG/int64 fallbacks copy NumPy permutations into a reusable owned Rust
+buffer each round. Include fallback live copies and cumulative copy volume in
+memory interpretation.
 `FitProfile` measures the visited binary feature buffer capacity per worker;
 it does not measure total forest, masks, allocator overhead or total process RSS.
 Use external RSS and Linux VmHWM for acceptance.
