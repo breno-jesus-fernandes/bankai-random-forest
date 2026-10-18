@@ -289,6 +289,12 @@ impl DenseSplitCache {
 }
 
 enum DenseSplitIter<'a> {
+    VirtualF32Real {
+        column: &'a [f32], order: &'a [usize], rows: std::slice::Iter<'a, usize>, pivot: f64,
+    },
+    VirtualF32Shadow {
+        column: &'a [f32], order: &'a [usize], permutation: &'a [u32], rows: std::slice::Iter<'a, usize>, pivot: f64,
+    },
     Lazy {
         input: &'a DenseInput,
         rows: std::slice::Iter<'a, usize>,
@@ -312,6 +318,8 @@ impl Iterator for DenseSplitIter<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
+            Self::VirtualF32Real { column, order, rows, pivot } => rows.next().map(|&r| f64::from(column[order[r]]) > *pivot),
+            Self::VirtualF32Shadow { column, order, permutation, rows, pivot } => rows.next().map(|&r| f64::from(column[permutation[order[r]] as usize]) > *pivot),
             Self::Lazy {
                 input,
                 rows,
@@ -2377,7 +2385,38 @@ fn best_random_split_binary(
     match values.as_ref() {
         ExactValues::F32(values) => search!(|row| values[input.storage_index(row, feature)], EXTRA_FEATURE_VALUES_F32),
         ExactValues::F64(values) => search!(|row| values[input.storage_index(row, feature)], EXTRA_FEATURE_VALUES),
-        ExactValues::Virtual(values) => search!(|row| values.value_at(row, feature), EXTRA_FEATURE_VALUES_F32),
+        ExactValues::Virtual(values) => {
+            // Resolve dtype, source column and permutation width once per feature,
+            // so the sample gather only follows typed slices.
+            let rows = values.bank.rows;
+            let order = values.order.as_slice();
+            let source = values.columns[feature];
+            macro_rules! gather {
+                ($bank:expr) => {{
+                    let column = &$bank[source * rows..(source + 1) * rows];
+                    if feature < values.real_columns {
+                        search!(|row| column[order[row]] as f32, EXTRA_FEATURE_VALUES_F32)
+                    } else {
+                        let offset = (feature - values.real_columns) * rows;
+                        match values.permutations.as_ref() {
+                            ExactRowIndices::U32(p) => {
+                                let permutation = &p[offset..offset + rows];
+                                search!(|row| column[permutation[order[row]] as usize] as f32, EXTRA_FEATURE_VALUES_F32)
+                            },
+                            ExactRowIndices::Usize(p) => {
+                                let permutation = &p[offset..offset + rows];
+                                search!(|row| column[permutation[order[row]]] as f32, EXTRA_FEATURE_VALUES_F32)
+                            },
+                        }
+                    }
+                }};
+            }
+            match values.bank.values.as_ref() {
+                ExactValues::F32(bank) => gather!(bank),
+                ExactValues::F64(bank) => gather!(bank),
+                ExactValues::Virtual(_) => unreachable!("bank cannot contain virtual storage"),
+            }
+        },
     }
 }
 
@@ -3067,7 +3106,28 @@ impl RfInput for DenseInput {
         missing_left: bool,
     ) -> impl Iterator<Item = bool> + 'a {
         let timer = ProfileTimer(self.profile.as_ref().map(|p| (&p.partition_ns, Instant::now())));
-        let inner = if self.labels.is_none() {
+        let virtual_f32 = match &self.values {
+            DenseValues::Exact(values) => match values.as_ref() {
+                ExactValues::Virtual(v) => match v.bank.values.as_ref() {
+                    ExactValues::F32(bank) => Some((v, bank)),
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        };
+        let inner = if let Some((v, bank)) = virtual_f32 {
+            let source = v.columns[feature];
+            let column = &bank[source * self.rows..(source + 1) * self.rows];
+            if feature < v.real_columns {
+                DenseSplitIter::VirtualF32Real { column, order: &v.order, rows: mask.iter(), pivot: *pivot }
+            } else if let ExactRowIndices::U32(p) = v.permutations.as_ref() {
+                let offset = (feature - v.real_columns) * self.rows;
+                DenseSplitIter::VirtualF32Shadow { column, order: &v.order, permutation: &p[offset..offset+self.rows], rows: mask.iter(), pivot: *pivot }
+            } else {
+                DenseSplitIter::Lazy { input: self, rows: mask.iter(), feature, pivot: *pivot }
+            }
+        } else if self.labels.is_none() {
             let values = match &self.values {
                 DenseValues::Exact(values) => {
                     if self.has_missing_values { mask.iter().map(|&row| { let value = values.at(self.storage_index(row, feature)); if value.is_nan() { missing_left } else { value > *pivot } }).collect::<Vec<_>>().into_iter() }
@@ -3818,7 +3878,16 @@ mod virtual_exact_tests {
     #[test]
     fn virtual_matches_materialized_trees_binary_and_multiclass() {
         let rows = 96;
-        let bank = ExactColumnBank::from_f64((0..rows * 3).map(|i| (i % 19) as f64 / 7.).collect(), rows, 3).unwrap();
+        for bank in [
+            ExactColumnBank::from_f64((0..rows * 3).map(|i| (i % 19) as f64 / 7.).collect(), rows, 3).unwrap(),
+            ExactColumnBank::from_f32((0..rows * 3).map(|i| (i % 19) as f32 / 7.).collect(), rows, 3).unwrap(),
+        ] {
+            check_tree_parity(bank);
+        }
+    }
+
+    fn check_tree_parity(bank: ExactColumnBank) {
+        let rows = bank.rows();
         for classes in [2, 3] {
             for bootstrap in [false, true] {
                 for criterion in [Criterion::Gini, Criterion::Entropy] {
