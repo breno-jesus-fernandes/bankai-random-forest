@@ -8,6 +8,9 @@
   pin this for binary and multiclass targets, with and without bootstrap and
   with serial and parallel histograms. This lets Bankai Boruta's binned shadow
   session train ordinary binned Random Forests as well as Extra Trees.
+- Publish to PyPI when a PR is merged into `master` and its version is not on
+  PyPI yet; the GitHub release follows from the same run. A manual dispatch
+  with `publish=true` remains available to retry.
 
 ## 0.1.0a17
 
