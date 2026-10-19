@@ -45,13 +45,13 @@ measurements; local macOS results cannot establish AMD performance.
 
 ## Release preparation
 
-Publish alpha 16 before Boruta a7. Review tests, wheels and the source distribution
-before an authorized manual workflow dispatch (`publish=true`) on `master`.
-Pushes and PRs build artifacts without uploading to PyPI. Example after approval:
+Publish alpha 16 before Boruta a7. Merging a reviewed PR into `master` publishes
+its version to PyPI when that version is not on PyPI yet, then creates the
+GitHub release from the same artifacts. PRs build artifacts without uploading.
+A manual dispatch can retry a failed publication:
 
 ```sh
 gh workflow run ci.yml --ref master -f publish=true
 ```
 
-This command is documentation, not an executed publication. No tag or PyPI
-release is created by opening the PR.
+Opening a PR creates no tag or PyPI release.

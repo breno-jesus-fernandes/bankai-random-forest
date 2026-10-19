@@ -1,6 +1,18 @@
 # Changelog
 
-## 0.1.0a17 (unreleased)
+## 0.1.0a18
+
+- Build Random Forest histograms from column-major binned codes, as made by
+  `DenseInput::bin_columns`. Each bin still accumulates its rows in mask order,
+  so histograms and trees are bit-identical to the row-major layout; Rust tests
+  pin this for binary and multiclass targets, with and without bootstrap and
+  with serial and parallel histograms. This lets Bankai Boruta's binned shadow
+  session train ordinary binned Random Forests as well as Extra Trees.
+- Publish to PyPI when a PR is merged into `master` and its version is not on
+  PyPI yet; the GitHub release follows from the same run. A manual dispatch
+  with `publish=true` remains available to retry.
+
+## 0.1.0a17
 
 - Count the classes on each side of a random Extra Trees threshold without
   data-dependent branches. Exact binary split search is about 1.9x faster on
