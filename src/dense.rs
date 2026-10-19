@@ -1924,6 +1924,19 @@ fn accumulate_dense_histograms<const CLASSES: usize>(
         return;
     }
     let labels = input.labels();
+    if input.column_major {
+        // Each bin still receives its rows in mask order, so sums match the
+        // row-major layout bit for bit.
+        for (feature, &start) in histogram.bin_offsets[..input.columns].iter().enumerate() {
+            let column = &values[feature * input.rows..(feature + 1) * input.rows];
+            for &row in mask.iter() {
+                let index = start + column[row] as usize;
+                histogram.class_weights[index * classes + labels[row]] += input.sample_weight(row);
+                histogram.sample_counts[index] += 1;
+            }
+        }
+        return;
+    }
     for &row in mask.iter() {
         let label = labels[row];
         let weight = input.sample_weight(row);
@@ -1950,6 +1963,8 @@ fn accumulate_dense_histograms_parallel<const CLASSES: usize>(
     let labels = input.labels();
     let n_classes = input.n_classes;
     let columns = input.columns;
+    let rows = input.rows;
+    let column_major = input.column_major;
     let mut class_weights = histogram.class_weights.as_mut_slice();
     let mut sample_counts = histogram.sample_counts.as_mut_slice();
 
@@ -1968,6 +1983,18 @@ fn accumulate_dense_histograms_parallel<const CLASSES: usize>(
             let input_weights = input.sample_weights.as_deref();
 
             scope.spawn(move || {
+                if column_major {
+                    for (local, &feature_start) in feature_offsets.iter().enumerate() {
+                        let feature = start_feature + local;
+                        let column = &values[feature * rows..(feature + 1) * rows];
+                        for &row in mask.iter() {
+                            let local_bin = feature_start - start_bin + column[row] as usize;
+                            worker_weights[local_bin * n_classes + labels[row]] += input_weights.map_or(1.0, |weights| weights[row]);
+                            worker_counts[local_bin] += 1;
+                        }
+                    }
+                    return;
+                }
                 for &row in mask.iter() {
                     let label = labels[row];
                     let weight = input_weights.map_or(1.0, |weights| weights[row]);
@@ -4118,6 +4145,40 @@ mod virtual_exact_tests {
         }
         let mut bad = codes.clone(); bad[0] = 200;
         assert!(DenseInput::training_binned_columns(rows, bad, edges, vec![0; rows], 2, 0., Criterion::Gini, 2, 1, 0., 15).is_err());
+    }
+
+    #[test]
+    fn binned_random_forest_on_column_codes_matches_row_major() {
+        let rows = 2000;
+        let value = |r: usize, c: usize| (((r * (c + 3) * 7) % 97) as f64 / 5.).sin() + c as f64;
+        let (codes, edges) = DenseInput::bin_columns(rows, 20, 31, 2, BinningStrategy::ExactSort, 100_000, 6, value).unwrap();
+        for classes in [2, 3] {
+            let labels = (0..rows).map(|r| ((r * 7 / 5) + (value(r, 1) > 1.2) as usize) % classes).collect::<Vec<_>>();
+            for threads in [1, 4] {
+                let reference = DenseInput::training_binned_with_accessor_and_seed(rows, 20, labels.clone(), vec![1.; rows], classes, 0., Criterion::Gini, 2, 1, 0., 31, 2, BinningStrategy::ExactSort, 100_000, 6, value)
+                    .unwrap().with_histogram_threads(threads);
+                let direct = DenseInput::training_binned_columns(rows, codes.clone(), edges.clone(), labels.clone(), classes, 0., Criterion::Gini, 2, 1, 0., 31)
+                    .unwrap().with_histogram_threads(threads);
+                assert!(!reference.column_major && direct.column_major);
+                let mask = Mask::from_vec((0..rows).step_by(3).chain([5, 5, 8]).collect());
+                assert_eq!(build_histograms(&reference, &mask), build_histograms(&direct, &mask));
+                for bootstrap in [false, true] {
+                    let train = |input: &DenseInput| Forest::new_parallel_with_settings(input, 7, 5, true, false, false, 42, 2, 6, usize::MAX, bootstrap, None);
+                    let signatures = |forest: &Forest<DenseInput>| {
+                        let mut trees = forest.tree_refs().map(|tree| {
+                            tree.nodes.iter().map(|node| match node {
+                                xrf::Node::Branch(f,t,g,l,r,m) => format!("B:{f}:{:x}:{:x}:{l}:{r}:{m}", t.to_bits(), g.to_bits()),
+                                xrf::Node::Leaf(v,c) => format!("L:{v}:{c}"),
+                            }).collect::<Vec<_>>().join(";")
+                        }).collect::<Vec<_>>();
+                        trees.sort(); trees
+                    };
+                    let expected = signatures(&train(&reference));
+                    assert!(expected.iter().all(|tree| tree.contains("B:")));
+                    assert_eq!(expected, signatures(&train(&direct)));
+                }
+            }
+        }
     }
 
     #[test]
