@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0a19
+
+- Update the README for the current release: drop the outdated status banner,
+  describe binned Extra Trees as a regular backend and mention Bankai Boruta.
+  Links are absolute so they also work on PyPI.
+- Add project URLs (homepage, repository, issues, changelog) to the package
+  metadata, so PyPI links to the GitHub repository.
+
 ## 0.1.0a18
 
 - Build Random Forest histograms from column-major binned codes, as made by

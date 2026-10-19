@@ -1,16 +1,11 @@
 # 🔥 Bankai Random Forest
 
-Alpha 16 prepares an opt-in [virtual exact-column backend](docs/virtual-exact-columns.md)
-for Bankai Boruta. Ordinary classifier fits retain their current storage;
-AMD runtime/RSS acceptance is pending. See [unreleased changes](CHANGELOG.md).
-
-
 [![PyPI Latest Release](https://img.shields.io/pypi/v/bankai-random-forest.svg)](https://pypi.org/project/bankai-random-forest/)
 [![Package Status](https://img.shields.io/pypi/status/bankai-random-forest.svg)](https://pypi.org/project/bankai-random-forest/)
 [![Python versions](https://img.shields.io/pypi/pyversions/bankai-random-forest.svg)](https://pypi.org/project/bankai-random-forest/)
 [![uv managed](https://img.shields.io/badge/uv-managed-blue)](https://docs.astral.sh/uv/)
 [![Downloads](https://static.pepy.tech/badge/bankai-random-forest)](https://pepy.tech/project/bankai-random-forest)
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](COPYING)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](https://github.com/breno-jesus-fernandes/bankai-random-forest/blob/master/COPYING)
 [![CI](https://github.com/breno-jesus-fernandes/bankai-random-forest/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/breno-jesus-fernandes/bankai-random-forest/actions/workflows/ci.yml)
 [![Dependency security](https://github.com/breno-jesus-fernandes/bankai-random-forest/actions/workflows/security.yml/badge.svg?branch=master)](https://github.com/breno-jesus-fernandes/bankai-random-forest/actions/workflows/security.yml)
 [![Coverage](https://codecov.io/gh/breno-jesus-fernandes/bankai-random-forest/branch/master/graph/badge.svg)](https://codecov.io/gh/breno-jesus-fernandes/bankai-random-forest)
@@ -18,8 +13,14 @@ AMD runtime/RSS acceptance is pending. See [unreleased changes](CHANGELOG.md).
 [![PyPI deployment](https://img.shields.io/github/deployments/breno-jesus-fernandes/bankai-random-forest/pypi?label=PyPI%20deployment)](https://github.com/breno-jesus-fernandes/bankai-random-forest/deployments)
 [![GitHub stars](https://img.shields.io/github/stars/breno-jesus-fernandes/bankai-random-forest.svg?style=social)](https://github.com/breno-jesus-fernandes/bankai-random-forest)
 
-BankaiRF is a high-performance Random Forest engine powered by a native Rust core. By leveraging LightGBM-style histograms for continuous feature pre-processing, it delivers fast and efficient training while maintaining full compatibility with the familiar scikit-learn estimator API. The Rust core is based on a maintained fork of [XRF](https://gitlab.com/mbq/xrf/), the engine
-behind [FRU](https://www.sciencedirect.com/science/article/pii/S2352711026004097).
+BankaiRF is a Random Forest and Extra Trees classifier with a native Rust core
+and the scikit-learn estimator API. Split search runs on exact values or on
+LightGBM-style histograms, and trees train in parallel. The Rust core is based
+on a maintained fork of [XRF](https://gitlab.com/mbq/xrf/), the engine behind
+[FRU](https://www.sciencedirect.com/science/article/pii/S2352711026004097).
+It is also the forest engine of
+[Bankai Boruta](https://github.com/breno-jesus-fernandes/bankai-boruta), which
+runs Boruta feature selection rounds natively on all four backends.
 
 ⚠️ BankaiRF is currently in Alpha. APIs and serialized models are subject to change.
 
@@ -144,15 +145,15 @@ model = BankaiRandomForestClassifier(
 | `max_samples` | `None` | Number or fraction of rows sampled for each tree. Accepts an integer count or a fraction in `(0, 1]`; only valid with `bootstrap=True`. `None` samples the full training size. |
 | `monotonic_cst` | `None` | One constraint per input feature: `-1` decreasing, `0` unconstrained, or `1` increasing. Currently supported only for binary single-output classification. |
 | `importance_type` | `"gain"` | How `feature_importances_` is calculated: `"gain"`, `"split"`, `"permutation"`, or `"shap"` (mean absolute native TreeSHAP). Permutation requires `bootstrap=True`. SHAP supports `shap_mode="sampled"` (up to `shap_sample_size=1000` training rows), `"all"`, or `"explicit"`; explicit mode exposes `shap_importances(X)`. |
-| `max_bins` | `None` | `None` uses exact split search. An integer from 2 to 255 enables histogram split search for Random Forest. Must be `None` with the default Extra Trees backend; required with the experimental `"binned"` backend. |
+| `max_bins` | `None` | `None` uses exact split search. An integer from 2 to 255 enables histogram split search for Random Forest. Must be `None` with the default Extra Trees backend; required with the `"binned"` backend. |
 | `binning_strategy` | `"exact_sort"` | How histogram cut points are found: `"exact_sort"`, `"sampled_sort"`, `"exact_select"`, or `"sampled_select"`. Applies only when `max_bins` is set. |
 | `bin_sample_size` | `200_000` | Positive maximum number of rows used per feature by sampled histogram strategies. Applies only when `max_bins` is set. |
 | `binning_seed` | `6` | Seed for row sampling in `"sampled_sort"` and `"sampled_select"`. Independent of `random_state`; the default preserves the historical sampled rows. |
 | `extra_trees` | `False` | Evaluate one random threshold per sampled feature. Original values are used by the default `"exact"` backend. Classification only. |
-| `extra_trees_backend` | `"exact"` | `"exact"` uses original values. Experimental `"binned"` requires `extra_trees=True`, integer `max_bins`, and dense input; uses column-major bins and one-pass binary split statistics. |
+| `extra_trees_backend` | `"exact"` | `"exact"` uses original values. `"binned"` requires `extra_trees=True`, integer `max_bins`, and dense input; uses column-major bins and one-pass binary split statistics. |
 | `extra_seed` | `6` | Seed offset for random threshold selection when `extra_trees=True`. Combine with `random_state` for repeatable forests. |
 
-`extra_trees=True` samples a continuous threshold uniformly between the node's original observed minimum and maximum for each feature considered. With the default `extra_trees_backend="exact"`, `max_bins` must be `None`; setting an integer raises `ValueError`. Opt into the experimental binned backend explicitly to use bins. Features are sampled without replacement; constants are inherited by descendants, and search continues when needed to find a valid partition. Bootstrap uses effective sample weights as sampling probabilities and counts distinct sampled rows for leaf limits. Gain importance is normalized within each tree before aggregation. This option currently applies to classification. See the [campaign notes](docs/performance/extra-trees-campaign.md) for validation and profiling.
+`extra_trees=True` samples a continuous threshold uniformly between the node's original observed minimum and maximum for each feature considered. With the default `extra_trees_backend="exact"`, `max_bins` must be `None`; setting an integer raises `ValueError`. Set `extra_trees_backend="binned"` to use bins. Features are sampled without replacement; constants are inherited by descendants, and search continues when needed to find a valid partition. Bootstrap uses effective sample weights as sampling probabilities and counts distinct sampled rows for leaf limits. Gain importance is normalized within each tree before aggregation. This option currently applies to classification. See the [campaign notes](https://github.com/breno-jesus-fernandes/bankai-random-forest/blob/master/docs/performance/extra-trees-campaign.md) for validation and profiling.
 
 `binning_seed` only affects sampled binning strategies and does not change tree bootstrap or feature-sampling randomness. It lets repeated experiments vary the rows used to build histogram cut points independently of the forest's `random_state`.
 
@@ -160,7 +161,7 @@ Call `fit(X, y, sample_weight=None)` to train. `sample_weight` accepts one finit
 
 `predict_proba` returns one probability array for a single target and a list of arrays for multioutput targets. `monotonic_cst` is not supported for multioutput classification. `oob_score=True` computes accuracy; to use another metric, pass a callable with signature `metric(y_true, y_pred)`.
 
-### Experimental binned Extra Trees
+### Binned Extra Trees
 
 ```python
 model = BankaiRandomForestClassifier(
@@ -180,9 +181,9 @@ caches used by Random Forest. Sparse training input is rejected without densific
 Prediction, OOB, gain importance, SHAP and pickle restoration retain the backend.
 Multiclass inputs use the generic random split scan on column-major bins.
 
-The default is `extra_trees_backend="exact"`, not `None`. It uses original values
-and requires `max_bins=None`. The example above explicitly enables column-major
-bins and uses the existing `exact_sort` preparation default on all training rows.
+The default is `extra_trees_backend="exact"`, which uses original values and
+requires `max_bins=None`. The example above enables column-major bins and uses
+the `exact_sort` preparation default on all training rows.
 To opt into sampled preparation, set `binning_strategy="sampled_select"` and
 `bin_sample_size=20_000`. Both preparation options include layout conversion in fit.
 
@@ -199,8 +200,7 @@ quality. Three paired local fraud repetitions with 500,000 rows, 500 features,
 
 These are screening results for one synthetic scenario, not a quality guarantee.
 AP here evaluates informative-feature ranking, not classification precision-recall.
-The standard `binning_strategy="exact_sort"` and `bin_sample_size=200_000` defaults
-are unchanged. The sample-size limit applies only to sampled strategies.
+The sample-size limit applies only to sampled strategies.
 
 The layout conversion is included in fit time and temporarily allocates another
 one-byte-per-cell matrix. Random Forest (`extra_trees=False`) retains row-major bins;
@@ -239,11 +239,11 @@ uv run cargo test --workspace --locked
 
 Benchmark scripts use an additional dependency group. Install it when needed with `uv sync --locked --group benchmark`. All commands use the versions recorded in `uv.lock` and `Cargo.lock`.
 
-Contributors are expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
-See the [contribution guide](CONTRIBUTING.md) for the fork and pull request workflow,
+Contributors are expected to follow the [Code of Conduct](https://github.com/breno-jesus-fernandes/bankai-random-forest/blob/master/CODE_OF_CONDUCT.md).
+See the [contribution guide](https://github.com/breno-jesus-fernandes/bankai-random-forest/blob/master/CONTRIBUTING.md) for the fork and pull request workflow,
 local checks, and maintainer review expectations.
 
 ## License
 
-Bankai is licensed under [GPL-3.0-or-later](COPYING). The maintained XRF fork
-is also GPL-3.0-or-later; see [`NOTICE`](NOTICE) for upstream attribution.
+Bankai is licensed under [GPL-3.0-or-later](https://github.com/breno-jesus-fernandes/bankai-random-forest/blob/master/COPYING). The maintained XRF fork
+is also GPL-3.0-or-later; see [`NOTICE`](https://github.com/breno-jesus-fernandes/bankai-random-forest/blob/master/NOTICE) for upstream attribution.
