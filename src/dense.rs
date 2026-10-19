@@ -88,12 +88,13 @@ enum ExactValues {
     F64(Vec<f64>),
     F32(Vec<f32>),
     Virtual(ExactVirtualColumns),
+    Columns(ExactColumnTable),
 }
 
 impl ExactValues {
     #[inline]
     fn at(&self, index: usize) -> f64 {
-        match self { Self::F64(values) => values[index], Self::F32(values) => f64::from(values[index]), Self::Virtual(values) => f64::from(values.at(index)) }
+        match self { Self::F64(values) => values[index], Self::F32(values) => f64::from(values[index]), Self::Virtual(values) => f64::from(values.at(index)), Self::Columns(values) => f64::from(values.at(index)) }
     }
 }
 
@@ -187,6 +188,40 @@ impl ExactVirtualColumns {
         };
         self.bank.value_at(row, self.columns[column]) as f32
     }
+}
+
+/// Float32 columns already in training-row order: real columns from a bank
+/// shared by every round, shadows from a per-round buffer. Each feature is one
+/// contiguous slice, so training reads it without row or permutation maps.
+#[derive(Clone)]
+pub struct ExactColumnTable {
+    rows: usize,
+    real: Arc<Vec<f32>>,
+    shadows: Arc<Vec<f32>>,
+    offsets: Vec<(bool, usize)>,
+}
+impl ExactColumnTable {
+    /// `active` indexes real bank columns; shadow `j` is buffer column `j`.
+    pub fn new(rows: usize, real: Arc<Vec<f32>>, shadows: Arc<Vec<f32>>, active: &[usize], shadow_count: usize) -> Result<Self, String> {
+        if rows == 0 || active.is_empty() || shadow_count == 0
+            || real.len() % rows != 0 || shadows.len() < rows.checked_mul(shadow_count).ok_or("shadow buffer is too large")?
+            || active.iter().any(|&c| c >= real.len() / rows) {
+            return Err("invalid exact column table".into());
+        }
+        let offsets = active.iter().map(|&c| (false, c * rows))
+            .chain((0..shadow_count).map(|j| (true, j * rows))).collect();
+        Ok(Self { rows, real, shadows, offsets })
+    }
+    #[inline]
+    fn column(&self, feature: usize) -> &[f32] {
+        let (shadow, offset) = self.offsets[feature];
+        let values = if shadow { &self.shadows } else { &self.real };
+        &values[offset..offset + self.rows]
+    }
+    #[inline]
+    fn value_at(&self, row: usize, column: usize) -> f32 { self.column(column)[row] }
+    #[inline]
+    fn at(&self, index: usize) -> f32 { self.value_at(index % self.rows, index / self.rows) }
 }
 
 // Parallelize independent column blocks, sharing a single output allocation.
@@ -289,6 +324,9 @@ impl DenseSplitCache {
 }
 
 enum DenseSplitIter<'a> {
+    F32Column {
+        column: &'a [f32], rows: std::slice::Iter<'a, usize>, pivot: f64,
+    },
     VirtualF32Real {
         column: &'a [f32], order: &'a [usize], rows: std::slice::Iter<'a, usize>, pivot: f64,
     },
@@ -318,6 +356,7 @@ impl Iterator for DenseSplitIter<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
+            Self::F32Column { column, rows, pivot } => rows.next().map(|&r| f64::from(column[r]) > *pivot),
             Self::VirtualF32Real { column, order, rows, pivot } => rows.next().map(|&r| f64::from(column[order[r]]) > *pivot),
             Self::VirtualF32Shadow { column, order, permutation, rows, pivot } => rows.next().map(|&r| f64::from(column[permutation[order[r]] as usize]) > *pivot),
             Self::Lazy {
@@ -618,6 +657,20 @@ impl DenseInput {
             extra_seed: 6,
             profile: None,
         })
+    }
+    /// Private integration storage over borrowed column slices; rows are
+    /// already in training order and every sample weight is one.
+    #[allow(clippy::too_many_arguments)]
+    pub fn training_exact_columns(
+        values: ExactColumnTable, labels: Vec<usize>, n_classes: usize,
+        min_leaf_weight: f64, criterion: Criterion, min_samples_split: usize,
+        min_samples_leaf: usize, min_impurity_decrease: f64,
+    ) -> Result<Self, String> {
+        let rows = values.rows;
+        let columns = values.offsets.len();
+        Self::training_exact_storage(ExactValues::Columns(values), rows, columns,
+            labels, vec![1.; rows], n_classes, min_leaf_weight, criterion,
+            min_samples_split, min_samples_leaf, min_impurity_decrease, false)
     }
     /// Private integration storage: no real/shadow augmented matrix is allocated.
     #[allow(clippy::too_many_arguments)]
@@ -1103,6 +1156,7 @@ impl DenseInput {
                     ExactValues::F32(v) => ExactValues::F32(transpose_exact(v, self.rows, self.columns, self.histogram_threads)),
                     ExactValues::F64(v) => ExactValues::F64(transpose_exact(v, self.rows, self.columns, self.histogram_threads)),
                     ExactValues::Virtual(v) => ExactValues::Virtual(v.clone()),
+                    ExactValues::Columns(v) => ExactValues::Columns(v.clone()),
                 };
                 self.values = DenseValues::Exact(Arc::new(transposed));
                 self.column_major = true;
@@ -1217,6 +1271,7 @@ impl DenseInput {
     fn exact_value(&self, values: &ExactValues, row: usize, column: usize) -> f64 {
         match values {
             ExactValues::Virtual(v) => f64::from(v.value_at(row, column)),
+            ExactValues::Columns(v) => f64::from(v.value_at(row, column)),
             _ => values.at(self.storage_index(row, column)),
         }
     }
@@ -2385,6 +2440,10 @@ fn best_random_split_binary(
     match values.as_ref() {
         ExactValues::F32(values) => search!(|row| values[input.storage_index(row, feature)], EXTRA_FEATURE_VALUES_F32),
         ExactValues::F64(values) => search!(|row| values[input.storage_index(row, feature)], EXTRA_FEATURE_VALUES),
+        ExactValues::Columns(values) => {
+            let column = values.column(feature);
+            search!(|row| column[row], EXTRA_FEATURE_VALUES_F32)
+        },
         ExactValues::Virtual(values) => {
             // Resolve dtype, source column and permutation width once per feature,
             // so the sample gather only follows typed slices.
@@ -2414,7 +2473,7 @@ fn best_random_split_binary(
             match values.bank.values.as_ref() {
                 ExactValues::F32(bank) => gather!(bank),
                 ExactValues::F64(bank) => gather!(bank),
-                ExactValues::Virtual(_) => unreachable!("bank cannot contain virtual storage"),
+                ExactValues::Virtual(_) | ExactValues::Columns(_) => unreachable!("bank cannot contain virtual storage"),
             }
         },
     }
@@ -2475,12 +2534,27 @@ fn best_random_split_binary_buffered<T: Copy + Into<f64>, const MISSING: bool>(
     let mut low_weight = 0.0;
     let mut low_class_0 = 0.0;
     let mut low_class_1 = 0.0;
-    for ((&weight, &label), &stored) in weights.iter().zip(&target.labels).zip(workspace.iter()) {
-        let value: f64 = stored.into();
-        if (!MISSING || !value.is_nan()) && value <= threshold {
-            low_count += 1;
-            low_weight += weight;
-            if label == 0 { low_class_0 += weight; } else { low_class_1 += weight; }
+    if MISSING {
+        for ((&weight, &label), &stored) in weights.iter().zip(&target.labels).zip(workspace.iter()) {
+            let value: f64 = stored.into();
+            if !value.is_nan() && value <= threshold {
+                low_count += 1;
+                low_weight += weight;
+                if label == 0 { low_class_0 += weight; } else { low_class_1 += weight; }
+            }
+        }
+    } else {
+        // A uniform random threshold makes both comparisons unpredictable, so
+        // select instead of branching. Adding 0.0 leaves every accumulator
+        // bit-identical to the branching sums, in the same order.
+        for ((&weight, &label), &stored) in weights.iter().zip(&target.labels).zip(workspace.iter()) {
+            let value: f64 = stored.into();
+            let low = value <= threshold;
+            let low_weight_here = if low { weight } else { 0.0 };
+            low_count += usize::from(low);
+            low_weight += low_weight_here;
+            low_class_0 += if label == 0 { low_weight_here } else { 0.0 };
+            low_class_1 += if label == 0 { 0.0 } else { low_weight_here };
         }
     }
     if let Some(p) = &input.profile { p.sample_visits.fetch_add(mask.len() as u64, AtomicOrdering::Relaxed); }
@@ -3116,7 +3190,13 @@ impl RfInput for DenseInput {
             },
             _ => None,
         };
-        let inner = if let Some((v, bank)) = virtual_f32 {
+        let columns = match &self.values {
+            DenseValues::Exact(values) => match values.as_ref() { ExactValues::Columns(v) => Some(v), _ => None },
+            _ => None,
+        };
+        let inner = if let Some(v) = columns {
+            DenseSplitIter::F32Column { column: v.column(feature), rows: mask.iter(), pivot: *pivot }
+        } else if let Some((v, bank)) = virtual_f32 {
             let source = v.columns[feature];
             let column = &bank[source * self.rows..(source + 1) * self.rows];
             if feature < v.real_columns {
@@ -3915,6 +3995,34 @@ mod virtual_exact_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn column_table_matches_materialized_trees() {
+        let rows = 96;
+        let real = Arc::new((0..rows * 3).map(|i| ((i * 7) % 23) as f32 / 5.).collect::<Vec<_>>());
+        let shadows = Arc::new((0..rows * 2).map(|i| ((i * 11) % 17) as f32 / 3.).collect::<Vec<_>>());
+        for classes in [2, 3] {
+            for bootstrap in [false, true] {
+                let table = ExactColumnTable::new(rows, real.clone(), shadows.clone(), &[2, 0], 2).unwrap();
+                let labels = (0..rows).map(|r| (r * 5 / 3) % classes).collect::<Vec<_>>();
+                let materialized = DenseInput::training_exact_f32_with_accessor(rows, 4, labels.clone(), vec![1.; rows], classes, 0., Criterion::Gini, 2, 1, 0., 2, |r, c| table.value_at(r, c)).unwrap().with_extra_trees(true, 6);
+                let direct = DenseInput::training_exact_columns(table, labels, classes, 0., Criterion::Gini, 2, 1, 0.).unwrap().with_extra_trees(true, 6);
+                let train = |input: &DenseInput| Forest::new_parallel_with_settings(input, 7, 2, true, false, false, 42, 2, 5, usize::MAX, bootstrap, None);
+                let signatures = |forest: &Forest<DenseInput>| {
+                    let mut trees = forest.tree_refs().map(|tree| {
+                        tree.nodes.iter().map(|node| match node {
+                            xrf::Node::Branch(f,t,g,l,r,m) => format!("B:{f}:{:x}:{:x}:{l}:{r}:{m}", t.to_bits(), g.to_bits()),
+                            xrf::Node::Leaf(v,c) => format!("L:{v}:{c}"),
+                        }).collect::<Vec<_>>().join(";")
+                    }).collect::<Vec<_>>();
+                    trees.sort(); trees
+                };
+                assert_eq!(signatures(&train(&materialized)), signatures(&train(&direct)));
+            }
+        }
+        assert!(ExactColumnTable::new(rows, real.clone(), shadows.clone(), &[3], 1).is_err());
+        assert!(ExactColumnTable::new(rows, real, shadows, &[0], 3).is_err());
     }
 
     #[test]

@@ -207,3 +207,41 @@ def test_extra_trees_preserves_float64_differences_below_float32_precision():
     np.testing.assert_array_equal(exact.predict(X), y)
     assert exact.feature_importances_[0] > 0
     assert rounded.feature_importances_[0] == 0
+
+
+def _mdi_from_exported_trees(model, X, y):
+    """Recompute scikit-learn's mean decrease in impurity from exported trees."""
+    def gini(rows):
+        counts = np.bincount(y[rows], minlength=2)
+        return 1.0 - ((counts / len(rows)) ** 2).sum()
+
+    total = np.zeros(X.shape[1])
+    for left, right, feature, threshold, cover, _, _ in model._forest.shap_tree_arrays():
+        gains = np.zeros(X.shape[1])
+        stack = [(0, np.arange(len(X)))]
+        while stack:
+            node, rows = stack.pop()
+            assert cover[node] == len(rows)
+            if left[node] < 0:
+                continue
+            goes_left = X[rows, feature[node]] <= threshold[node]
+            l_rows, r_rows = rows[goes_left], rows[~goes_left]
+            gains[feature[node]] += (len(rows) * gini(rows) - len(l_rows) * gini(l_rows)
+                                     - len(r_rows) * gini(r_rows))
+            stack += [(left[node], l_rows), (right[node], r_rows)]
+        if gains.sum() > 0:
+            total += gains / gains.sum()
+    return total / total.sum()
+
+
+@pytest.mark.parametrize('jobs', [1, 4])
+def test_extra_trees_gain_importance_is_mean_decrease_in_impurity(jobs):
+    rng = np.random.default_rng(7)
+    X = rng.normal(size=(600, 6)).astype(np.float32)
+    y = ((X[:, 0] > 0) ^ (X[:, 1] > 1.5)).astype(int)
+    model = BankaiRandomForestClassifier(
+        n_estimators=12, extra_trees=True, max_bins=None, max_depth=5,
+        bootstrap=False, random_state=3, n_jobs=jobs,
+    ).fit(X, y)
+    expected = _mdi_from_exported_trees(model, X.astype(np.float64), y)
+    np.testing.assert_allclose(model.feature_importances_, expected, rtol=1e-9, atol=1e-12)
