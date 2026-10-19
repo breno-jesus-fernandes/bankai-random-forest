@@ -658,6 +658,74 @@ impl DenseInput {
             profile: None,
         })
     }
+    /// Bin every column once: column-major codes plus per-column edges, the
+    /// same codes and edges `training_binned_with_accessor_and_seed` builds.
+    #[allow(clippy::too_many_arguments)]
+    pub fn bin_columns<F>(
+        rows: usize, columns: usize, max_bins: usize, threads: usize, strategy: BinningStrategy,
+        sample_size: usize, binning_seed: u64, value_at: F,
+    ) -> Result<(Vec<u8>, Vec<Vec<f64>>), String>
+    where F: Fn(usize, usize) -> f64 + Sync,
+    {
+        if threads == 0 || rows == 0 || columns == 0 || !(2..=255).contains(&max_bins) || sample_size == 0 {
+            return Err("invalid binning settings".into());
+        }
+        let (binned, edges, has_missing_values) = histogramize_from_accessor(
+            rows, columns, max_bins, threads, strategy, sample_size, binning_seed, &value_at)?;
+        if has_missing_values {
+            return Err("column binning requires finite values".into());
+        }
+        Ok((transpose_exact(&binned, rows, columns, threads), edges))
+    }
+
+    /// Binned training input from column-major codes made by `bin_columns`
+    /// (columns may repeat or be permuted); every sample weight is one.
+    #[allow(clippy::too_many_arguments)]
+    pub fn training_binned_columns(
+        rows: usize, codes: Vec<u8>, edges: Vec<Vec<f64>>, labels: Vec<usize>, n_classes: usize,
+        min_leaf_weight: f64, criterion: Criterion, min_samples_split: usize,
+        min_samples_leaf: usize, min_impurity_decrease: f64, max_bins: usize,
+    ) -> Result<Self, String> {
+        let columns = edges.len();
+        if rows == 0 || columns == 0 || rows.checked_mul(columns) != Some(codes.len()) || labels.len() != rows
+            || !(2..=255).contains(&max_bins) || edges.iter().any(|e| e.len() >= max_bins)
+            || n_classes == 0 || labels.iter().any(|&l| l >= n_classes)
+            || !min_leaf_weight.is_finite() || min_leaf_weight < 0.0
+            || min_samples_split < 2 || min_samples_leaf == 0
+            || !min_impurity_decrease.is_finite() || min_impurity_decrease < 0.0
+            || codes.chunks(rows).zip(&edges).any(|(column, e)| column.iter().any(|&c| c as usize > e.len())) {
+            return Err("invalid binned column codes".into());
+        }
+        let active_features = edges.iter().enumerate()
+            .filter_map(|(feature, e)| (!e.is_empty()).then_some(feature)).collect();
+        Ok(Self {
+            values: DenseValues::Binned(Arc::new(codes)),
+            labels: Some(Arc::new(labels)),
+            sample_weights: Some(Arc::new(vec![1.; rows])),
+            rows,
+            columns,
+            n_classes,
+            min_leaf_weight,
+            criterion,
+            min_samples_split,
+            min_samples_leaf,
+            min_impurity_decrease,
+            total_weight: rows as f64,
+            histogram_bins: Some(max_bins),
+            bin_edges: Some(Arc::new(edges)),
+            active_features,
+            balanced_subsample: false,
+            ccp_alpha: 0.0,
+            monotonic_constraints: None,
+            has_missing_values: false,
+            histogram_threads: 1,
+            extra_trees: false,
+            column_major: true,
+            extra_seed: 6,
+            profile: None,
+        })
+    }
+
     /// Private integration storage over borrowed column slices; rows are
     /// already in training order and every sample weight is one.
     #[allow(clippy::too_many_arguments)]
@@ -4023,6 +4091,33 @@ mod virtual_exact_tests {
         }
         assert!(ExactColumnTable::new(rows, real.clone(), shadows.clone(), &[3], 1).is_err());
         assert!(ExactColumnTable::new(rows, real, shadows, &[0], 3).is_err());
+    }
+
+    #[test]
+    fn binned_columns_match_per_fit_binning() {
+        let rows = 120;
+        let value = |r: usize, c: usize| (((r * (c + 3) * 7) % 41) as f64 / 3.).sin();
+        let (codes, edges) = DenseInput::bin_columns(rows, 3, 15, 2, BinningStrategy::ExactSort, 1000, 6, value).unwrap();
+        for bootstrap in [false, true] {
+            let labels = (0..rows).map(|r| (r * 7 / 5) % 2).collect::<Vec<_>>();
+            let reference = DenseInput::training_binned_with_accessor_and_seed(rows, 3, labels.clone(), vec![1.; rows], 2, 0., Criterion::Gini, 2, 1, 0., 15, 2, BinningStrategy::ExactSort, 1000, 6, value)
+                .unwrap().with_extra_trees(true, 6).with_float32_column_storage(2).with_histogram_threads(1).with_binned_extra_trees(2);
+            let direct = DenseInput::training_binned_columns(rows, codes.clone(), edges.clone(), labels, 2, 0., Criterion::Gini, 2, 1, 0., 15)
+                .unwrap().with_extra_trees(true, 6).with_histogram_threads(1);
+            let train = |input: &DenseInput| Forest::new_parallel_with_settings(input, 7, 2, true, false, false, 42, 2, 5, usize::MAX, bootstrap, None);
+            let signatures = |forest: &Forest<DenseInput>| {
+                let mut trees = forest.tree_refs().map(|tree| {
+                    tree.nodes.iter().map(|node| match node {
+                        xrf::Node::Branch(f,t,g,l,r,m) => format!("B:{f}:{:x}:{:x}:{l}:{r}:{m}", t.to_bits(), g.to_bits()),
+                        xrf::Node::Leaf(v,c) => format!("L:{v}:{c}"),
+                    }).collect::<Vec<_>>().join(";")
+                }).collect::<Vec<_>>();
+                trees.sort(); trees
+            };
+            assert_eq!(signatures(&train(&reference)), signatures(&train(&direct)));
+        }
+        let mut bad = codes.clone(); bad[0] = 200;
+        assert!(DenseInput::training_binned_columns(rows, bad, edges, vec![0; rows], 2, 0., Criterion::Gini, 2, 1, 0., 15).is_err());
     }
 
     #[test]

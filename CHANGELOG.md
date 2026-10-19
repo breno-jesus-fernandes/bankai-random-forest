@@ -9,6 +9,10 @@
   row order, read as contiguous slices with no row or permutation maps. Bankai
   Boruta's default exact session trains on it without materializing an
   augmented matrix. Rust tests pin exact tree parity with materialized input.
+- Add `DenseInput::bin_columns` and `DenseInput::training_binned_columns`:
+  bin real columns once and train on column-major codes whose columns may
+  repeat or be permuted (Bankai Boruta's binned shadow session). Rust tests pin
+  tree parity with per-fit binning.
 - Test that exact Extra Trees `gain` importances equal scikit-learn's mean
   decrease in impurity recomputed from the exported trees.
 
