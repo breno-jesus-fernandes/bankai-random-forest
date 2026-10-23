@@ -449,7 +449,8 @@ impl<I: RfInput> Tree<I> {
                 let (best_score, (feature, pivot, missing_left)) = best;
                 let (goes_left, right_rows) = scratch;
                 goes_left.clear();
-                goes_left.extend(input.split_iter(mask, feature, &pivot, missing_left));
+                goes_left.reserve(mask.len());
+                input.split_iter(mask, feature, &pivot, missing_left).for_each(|left| goes_left.push(left));
                 right_rows.clear();
                 let mut lefts = 0;
                 for index in 0..mask.len() {

@@ -362,6 +362,10 @@ struct ProfiledSplitIter<'a> {
 impl Iterator for ProfiledSplitIter<'_> {
     type Item = bool;
     fn next(&mut self) -> Option<bool> { self.inner.next() }
+    fn fold<B, F: FnMut(B, bool) -> B>(self, init: B, f: F) -> B {
+        let Self { inner, _timer } = self;
+        inner.fold(init, f)
+    }
 }
 
 impl Iterator for DenseSplitIter<'_> {
@@ -379,6 +383,18 @@ impl Iterator for DenseSplitIter<'_> {
                 pivot,
             } => rows.next().map(|&row| input.value(row, *feature) > *pivot),
             Self::Buffered(values) => values.next(),
+        }
+    }
+
+    // Resolve the storage once for a whole pass instead of once per row.
+    fn fold<B, F: FnMut(B, bool) -> B>(self, init: B, f: F) -> B {
+        match self {
+            Self::F32Column { column, rows, pivot } => rows.map(|&r| f64::from(column[r]) > pivot).fold(init, f),
+            Self::VirtualF32Real { column, order, rows, pivot } => rows.map(|&r| f64::from(column[order[r]]) > pivot).fold(init, f),
+            Self::VirtualF32Shadow { column, order, permutation, rows, pivot } =>
+                rows.map(|&r| f64::from(column[permutation[order[r]] as usize]) > pivot).fold(init, f),
+            Self::Lazy { input, rows, feature, pivot } => rows.map(|&row| input.value(row, feature) > pivot).fold(init, f),
+            Self::Buffered(values) => values.fold(init, f),
         }
     }
 }
