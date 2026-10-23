@@ -27,22 +27,22 @@ impl RfInput for DataFrame {
     fn feature_sampler(&self) -> Self::FeatureSampler {
         FYSampler::new(self)
     }
-    fn split_cache(&self, _: &Mask) -> Self::SplitCache {}
+    fn split_cache(&self, _: &[usize]) -> Self::SplitCache {}
     fn split_cache_children(
         &self,
         _: Self::SplitCache,
-        _: &Mask,
-        _: &Mask,
-        _: &Mask,
+        _: &[usize],
+        _: &[usize],
+        _: &[usize],
     ) -> (Self::SplitCache, Self::SplitCache) {
         ((), ())
     }
-    fn decision_slice(&self, mask: &Mask) -> Self::DecisionSlice {
+    fn decision_slice(&self, mask: &[usize]) -> Self::DecisionSlice {
         DecisionSlice::new(self, mask)
     }
     fn new_split(
         &self,
-        on: &Mask,
+        on: &[usize],
         using: Self::FeatureId,
         y: &Self::DecisionSlice,
         _: &Self::SplitCache,
@@ -53,7 +53,7 @@ impl RfInput for DataFrame {
     }
     fn split_iter<'a>(
         &'a self,
-        on: &'a Mask,
+        on: &'a [usize],
         using: Self::FeatureId,
         by: &'a Self::Pivot,
         _missing_left: bool,
@@ -70,7 +70,7 @@ impl DataFrame {
         assert!(x[0].len() == y.len());
         DataFrame { x, y, n_cat }
     }
-    pub fn subset_objects(&self, mask: &Mask) -> Self {
+    pub fn subset_objects(&self, mask: &[usize]) -> Self {
         let xn = self
             .x
             .iter()
@@ -95,7 +95,7 @@ pub struct DecisionSlice {
 }
 
 impl DecisionSlice {
-    fn new(input: &DataFrame, mask: &Mask) -> Self {
+    fn new(input: &DataFrame, mask: &[usize]) -> Self {
         let n_cat = input.n_cat;
         let mut summary = Votes::new(n_cat);
         let values = mask
@@ -162,7 +162,7 @@ impl VoteAggregator<DataFrame> for Votes {
     }
 }
 
-fn scan(x: &[f64], ys: &DecisionSlice, mask: &Mask) -> Option<(f64, f64)> {
+fn scan(x: &[f64], ys: &DecisionSlice, mask: &[usize]) -> Option<(f64, f64)> {
     let mut bound: Vec<(f64, usize)> = mask
         .iter()
         .zip(ys.values.iter())
@@ -211,7 +211,7 @@ pub struct DaAggregator {
 }
 
 impl AccuracyDecreaseAggregator<DataFrame> for DaAggregator {
-    fn new(input: &DataFrame, on: &Mask, n: usize) -> Self {
+    fn new(input: &DataFrame, on: &[usize], n: usize) -> Self {
         Self {
             direct: vec![None; n],
             drops: HashMap::new(),
@@ -219,7 +219,7 @@ impl AccuracyDecreaseAggregator<DataFrame> for DaAggregator {
             true_decision: input.y.clone(),
         }
     }
-    fn ingest(&mut self, permuted: Option<usize>, mask: &Mask, vote: &usize) {
+    fn ingest(&mut self, permuted: Option<usize>, mask: &[usize], vote: &usize) {
         if let Some(permuted) = permuted {
             let diff: isize = mask
                 .iter()
