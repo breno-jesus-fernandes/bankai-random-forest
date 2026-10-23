@@ -2143,10 +2143,22 @@ impl VoteAggregator<DenseInput> for ClassVotes {
     }
 }
 
-/// Integral binary node: per-row weights and the positive-class share.
-struct BinaryCounts {
-    weights: Vec<u32>,
-    positive: Vec<u32>,
+/// Integral binary node: per-row `weight << 1 | label`.
+struct BinaryCounts(Vec<u32>);
+
+impl BinaryCounts {
+    /// Low-side (rows, weight, positive weight) of `is_low` over the node's rows.
+    #[inline]
+    fn low_side(&self, is_low: impl Iterator<Item = bool>) -> (usize, u64, u64) {
+        let (mut rows, mut low, mut ones) = (0usize, 0u64, 0u64);
+        for (&packed, is_low) in self.0.iter().zip(is_low) {
+            let weight = u64::from(packed >> 1);
+            rows += usize::from(is_low);
+            low += if is_low { weight } else { 0 };
+            ones += if is_low && packed & 1 == 1 { weight } else { 0 };
+        }
+        (rows, low, ones)
+    }
 }
 
 pub struct DenseDecisionSlice {
@@ -2160,8 +2172,10 @@ pub struct DenseDecisionSlice {
 
 impl DenseDecisionSlice {
     fn new(input: &DenseInput, mask: &[usize]) -> Self {
+        // Packing a label bit needs every weight below 2^31; whole counts are at
+        // most the total weight.
         if input.integral_weights && input.extra_trees && input.n_classes == 2 && !input.has_missing_values
-            && matches!(input.values, DenseValues::Exact(_)) {
+            && input.total_weight < (1u64 << 31) as f64 && matches!(input.values, DenseValues::Exact(_)) {
             return Self::new_binary_counts(input, mask);
         }
         let mut class_weights = vec![0.0; input.n_classes];
@@ -2194,21 +2208,19 @@ impl DenseDecisionSlice {
     /// weights equal the row-order f64 sums of the general constructor.
     fn new_binary_counts(input: &DenseInput, mask: &[usize]) -> Self {
         let labels = input.labels();
-        let mut weights = Vec::with_capacity(mask.len());
-        let mut positive = Vec::with_capacity(mask.len());
+        let mut packed = Vec::with_capacity(mask.len());
         let (mut total, mut ones) = (0u64, 0u64);
         for &row in mask.iter() {
             let weight = input.sample_weight(row) as u32;
-            let share = if labels[row] == 0 { 0 } else { weight };
-            weights.push(weight);
-            positive.push(share);
+            let label = u32::from(labels[row] != 0);
+            packed.push(weight << 1 | label);
             total += u64::from(weight);
-            ones += u64::from(share);
+            ones += u64::from(weight * label);
         }
         Self {
             labels: Vec::new(),
             exact_binary_weights: None,
-            binary_counts: Some(BinaryCounts { weights, positive }),
+            binary_counts: Some(BinaryCounts(packed)),
             class_weights: vec![(total - ones) as f64, ones as f64],
             total_weight: total as f64,
             criterion: input.criterion,
@@ -2712,13 +2724,7 @@ fn best_random_split_binary_counts_f32(
     let threshold = min * (1.0 - unit) + max * unit;
     let rounded = threshold as f32;
     let below = if f64::from(rounded) > threshold { rounded.next_down() } else { rounded };
-    let (mut low_count, mut low, mut ones) = (0usize, 0u64, 0u64);
-    for ((&weight, &share), &value) in counts.weights.iter().zip(&counts.positive).zip(workspace.iter()) {
-        let is_low = value <= below;
-        low_count += usize::from(is_low);
-        low += if is_low { u64::from(weight) } else { 0 };
-        ones += if is_low { u64::from(share) } else { 0 };
-    }
+    let (low_count, low, ones) = counts.low_side(workspace.iter().map(|&value| value <= below));
     binary_split_gain(input, target, mask.len(), threshold, (low_count, low as f64, (low - ones) as f64, ones as f64),
         (0, 0.0, 0.0, 0.0), monotonic_constraint, lower_bound, upper_bound)
 }
@@ -2781,14 +2787,8 @@ fn best_random_split_binary_buffered<T: Copy + Into<f64>, const MISSING: bool>(
     if let (false, Some(counts)) = (MISSING, &target.binary_counts) {
         // Integer sums of whole-count weights are exact, so they equal the f64
         // row-order sums below bit for bit once converted.
-        let (mut low, mut ones) = (0u64, 0u64);
-        for ((&weight, &share), &stored) in counts.weights.iter().zip(&counts.positive).zip(workspace.iter()) {
-            let value: f64 = stored.into();
-            let is_low = value <= threshold;
-            low_count += usize::from(is_low);
-            low += if is_low { u64::from(weight) } else { 0 };
-            ones += if is_low { u64::from(share) } else { 0 };
-        }
+        let (rows, low, ones) = counts.low_side(workspace.iter().map(|&stored| Into::<f64>::into(stored) <= threshold));
+        low_count = rows;
         low_weight = low as f64;
         low_class_0 = (low - ones) as f64;
         low_class_1 = ones as f64;
