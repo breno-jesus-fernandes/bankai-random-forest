@@ -106,7 +106,7 @@ impl<I: RfInput> Forest<I> {
         let mut feature_sampler = input.feature_sampler();
         for tree_id in 0..num_trees {
             let mut rng = RfRng::from_seed(seed, 1 + tree_id as u64);
-            let specialized = if bootstrap { input.bootstrap_input(sample_size.unwrap_or(input.observation_count()), &mut rng) } else { None };
+            let specialized = if bootstrap { input.bootstrap_input(sample_size.unwrap_or(input.observation_count()), importance.is_some() || oob_votes.is_some(), &mut rng) } else { None };
             let (bag, oob, specialized) = if let Some((bag, oob, tree)) = specialized {
                 (bag, oob, Some(tree))
             } else if bootstrap {
@@ -247,7 +247,7 @@ impl<I: RfInput> Forest<I> {
                         let e = tree_idx.fetch_add(1, Ordering::SeqCst);
                         if e < num_trees {
                             let mut rng = RfRng::from_seed(seed, 1 + e as u64);
-                            let specialized = if bootstrap { input.bootstrap_input(sample_size.unwrap_or(input.observation_count()), &mut rng) } else { None };
+                            let specialized = if bootstrap { input.bootstrap_input(sample_size.unwrap_or(input.observation_count()), importance.is_some() || oob_votes.is_some(), &mut rng) } else { None };
             let (bag, oob, specialized) = if let Some((bag, oob, tree)) = specialized {
                 (bag, oob, Some(tree))
             } else if bootstrap {

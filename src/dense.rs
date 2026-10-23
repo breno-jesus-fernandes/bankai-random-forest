@@ -77,6 +77,8 @@ pub struct DenseInput {
     /// Every training weight is a whole bootstrap count (no balanced or user
     /// scaling), so weight sums are exact integers in any order.
     integral_weights: bool,
+    /// Whole bootstrap counts standing in for `sample_weights` (4 bytes a row).
+    count_weights: Option<Arc<Vec<u32>>>,
 }
 
 #[derive(Clone)]
@@ -380,14 +382,33 @@ pub enum Criterion {
 }
 
 impl DenseInput {
-    /// Bag, out-of-bag rows and the tree view weighted by bootstrap draw counts.
-    fn bootstrap_from_counts(&self, size: usize, count: impl Fn(usize) -> usize) -> (Mask, Mask, Self) {
+    /// Bag, out-of-bag rows (when kept) and the tree view weighted by bootstrap
+    /// draw counts.
+    fn bootstrap_masks(&self, keep_oob: bool, count: impl Fn(usize) -> usize) -> (Mask, Mask) {
         let in_bag = (0..self.rows).filter(|&row| count(row) > 0).count();
         let mut bag = Vec::with_capacity(in_bag);
-        let mut oob = Vec::with_capacity(self.rows - in_bag);
+        let mut oob = Vec::with_capacity(if keep_oob { self.rows - in_bag } else { 0 });
         for row in 0..self.rows {
-            if count(row) > 0 { bag.push(row) } else { oob.push(row) }
+            if count(row) > 0 { bag.push(row) } else if keep_oob { oob.push(row) }
         }
+        (Mask::from_vec(bag), Mask::from_vec(oob))
+    }
+
+    /// Unbalanced bootstrap with u32 counts: the counts are the tree weights.
+    fn bootstrap_from_u32_counts(&self, keep_oob: bool, counts: Vec<u32>) -> (Mask, Mask, Self) {
+        let (bag, oob) = self.bootstrap_masks(keep_oob, |row| counts[row] as usize);
+        // Whole counts sum exactly, matching the f64 sum of the same weights.
+        let total_weight = counts.iter().map(|&n| u64::from(n)).sum::<u64>() as f64;
+        let tree = Self {
+            sample_weights: None, count_weights: Some(Arc::new(counts)), integral_weights: true, total_weight,
+            min_leaf_weight: self.min_leaf_weight / self.total_weight * total_weight,
+            ..self.clone()
+        };
+        (bag, oob, tree)
+    }
+
+    fn bootstrap_from_counts(&self, size: usize, keep_oob: bool, count: impl Fn(usize) -> usize) -> (Mask, Mask, Self) {
+        let (bag, oob) = self.bootstrap_masks(keep_oob, &count);
         let mut tree_weights: Vec<f64> = (0..self.rows).map(|row| count(row) as f64).collect();
         if self.balanced_subsample {
             let mut classes = vec![0usize; self.n_classes];
@@ -402,10 +423,10 @@ impl DenseInput {
         let tree = Self {
             sample_weights: Some(Arc::new(tree_weights)), total_weight,
             min_leaf_weight: self.min_leaf_weight / self.total_weight * total_weight,
-            integral_weights: !self.balanced_subsample && (0..self.rows).all(|row| count(row) <= u32::MAX as usize),
+            integral_weights: !self.balanced_subsample,
             balanced_subsample: false, ..self.clone()
         };
-        (Mask::from_vec(bag), Mask::from_vec(oob), tree)
+        (bag, oob, tree)
     }
 
     pub fn training(
@@ -591,6 +612,7 @@ impl DenseInput {
             extra_seed: 6,
             profile: None,
             integral_weights: false,
+            count_weights: None,
         })
     }
 
@@ -689,6 +711,7 @@ impl DenseInput {
             extra_seed: 6,
             profile: None,
             integral_weights: false,
+            count_weights: None,
         })
     }
     /// Bin every column once: column-major codes plus per-column edges, the
@@ -757,6 +780,7 @@ impl DenseInput {
             extra_seed: 6,
             profile: None,
             integral_weights: false,
+            count_weights: None,
         })
     }
 
@@ -921,6 +945,7 @@ impl DenseInput {
             extra_seed: 6,
             profile: None,
             integral_weights: false,
+            count_weights: None,
         })
     }
 
@@ -975,6 +1000,7 @@ impl DenseInput {
             extra_seed: 6,
             profile: None,
             integral_weights: false,
+            count_weights: None,
         })
     }
 
@@ -1159,6 +1185,7 @@ impl DenseInput {
             extra_seed: 6,
             profile: None,
             integral_weights: false,
+            count_weights: None,
         })
     }
 
@@ -1205,6 +1232,7 @@ impl DenseInput {
             extra_seed: 6,
             profile: None,
             integral_weights: false,
+            count_weights: None,
         })
     }
 
@@ -1358,6 +1386,7 @@ impl DenseInput {
     }
 
     fn sample_weight(&self, row: usize) -> f64 {
+        if let Some(counts) = &self.count_weights { return f64::from(counts[row]); }
         self.sample_weights
             .as_deref()
             .expect("prediction input cannot be used for training")[row]
@@ -2018,6 +2047,7 @@ fn accumulate_dense_histograms_parallel<const CLASSES: usize>(
             let (worker_counts, remaining_counts) = sample_counts.split_at_mut(end_bin - start_bin);
             sample_counts = remaining_counts;
             let feature_offsets = &offsets[start_feature..end_feature];
+            debug_assert!(input.count_weights.is_none(), "count-weighted views are Extra Trees only");
             let input_weights = input.sample_weights.as_deref();
 
             scope.spawn(move || {
@@ -3214,7 +3244,7 @@ impl RfInput for DenseInput {
             .then(|| self.balanced_tree_view(bag))
     }
 
-    fn bootstrap_input(&self, size: usize, rng: &mut RfRng) -> Option<(Mask, Mask, Self)> {
+    fn bootstrap_input(&self, size: usize, keep_oob: bool, rng: &mut RfRng) -> Option<(Mask, Mask, Self)> {
         if !self.extra_trees { return None; }
         let _timer = ProfileTimer(self.profile.as_ref().map(|p| (&p.bootstrap_ns, Instant::now())));
         let weights = self.sample_weights.as_ref()?;
@@ -3228,7 +3258,10 @@ impl RfInput for DenseInput {
             for _ in 0..size {
                 counts[((draw(rng) * sum) as usize).min(self.rows - 1)] += 1;
             }
-            return Some(self.bootstrap_from_counts(size, |row| counts[row] as usize));
+            if !self.balanced_subsample {
+                return Some(self.bootstrap_from_u32_counts(keep_oob, counts));
+            }
+            return Some(self.bootstrap_from_counts(size, keep_oob, |row| counts[row] as usize));
         }
         let mut cumulative = Vec::with_capacity(self.rows);
         let mut sum = 0.0;
@@ -3239,7 +3272,7 @@ impl RfInput for DenseInput {
             let row = cumulative.partition_point(|&value| value <= unit * sum).min(self.rows - 1);
             counts[row] += 1;
         }
-        Some(self.bootstrap_from_counts(size, |row| counts[row]))
+        Some(self.bootstrap_from_counts(size, keep_oob, |row| counts[row]))
     }
 
     fn known_constant(&self, feature: usize, cache: &DenseSplitCache) -> bool { self.extra_trees && cache.constant(feature) }

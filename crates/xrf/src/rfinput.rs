@@ -36,7 +36,8 @@ pub trait RfInput: Sized {
         None
     }
     /// Optional bootstrap implementation with input-specific sampling weights.
-    fn bootstrap_input(&self, _size: usize, _rng: &mut RfRng) -> Option<(Mask, Mask, Self)> {
+    /// The out-of-bag mask may be left empty when `keep_oob` is false.
+    fn bootstrap_input(&self, _size: usize, _keep_oob: bool, _rng: &mut RfRng) -> Option<(Mask, Mask, Self)> {
         None
     }
     /// Number of features; not actually used by xrf, but usually useful for implementers.
