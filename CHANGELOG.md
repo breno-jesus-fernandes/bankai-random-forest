@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.0a20
+
+Extra Trees fits are faster and use less memory; trees, importances and
+predictions are bit-identical to alpha 19.
+
+- Grow depth-first trees on one row buffer per tree, split in place with the
+  same row order as before, and free each node's targets before its children
+  build theirs. Per-thread memory no longer grows with tree depth (all
+  backends).
+- Draw unit-weight Extra Trees bootstraps without a cumulative-sum search, keep
+  the draw counts as u32 tree weights, and skip out-of-bag masks when neither
+  OOB votes nor permutation importance need them.
+- Exact binary Extra Trees without missing values: sum whole-count weights as
+  integers, pack each row's count and label in one u32, and search f32 columns
+  with f32 comparisons against the largest f32 not above the f64 threshold.
+- `RfInput` methods take row slices instead of `&Mask`.
+- On CIC-IDS2017 (1.75M x 78, 16 threads, AMD) Bankai Boruta's exact Extra
+  Trees fit is about 2.5x faster and its peak memory above the data drops from
+  about 5.0 GiB to 2.1 GiB.
+
 ## 0.1.0a19
 
 - Update the README for the current release: drop the outdated status banner,
