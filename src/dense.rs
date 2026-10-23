@@ -377,6 +377,33 @@ pub enum Criterion {
 }
 
 impl DenseInput {
+    /// Bag, out-of-bag rows and the tree view weighted by bootstrap draw counts.
+    fn bootstrap_from_counts(&self, size: usize, count: impl Fn(usize) -> usize) -> (Mask, Mask, Self) {
+        let in_bag = (0..self.rows).filter(|&row| count(row) > 0).count();
+        let mut bag = Vec::with_capacity(in_bag);
+        let mut oob = Vec::with_capacity(self.rows - in_bag);
+        for row in 0..self.rows {
+            if count(row) > 0 { bag.push(row) } else { oob.push(row) }
+        }
+        let mut tree_weights: Vec<f64> = (0..self.rows).map(|row| count(row) as f64).collect();
+        if self.balanced_subsample {
+            let mut classes = vec![0usize; self.n_classes];
+            for row in 0..self.rows { classes[self.labels()[row]] += count(row); }
+            let present = classes.iter().filter(|&&n| n > 0).count();
+            for row in 0..self.rows {
+                let n = classes[self.labels()[row]];
+                if n > 0 { tree_weights[row] *= size as f64 / (present * n) as f64; }
+            }
+        }
+        let total_weight = tree_weights.iter().sum();
+        let tree = Self {
+            sample_weights: Some(Arc::new(tree_weights)), total_weight,
+            min_leaf_weight: self.min_leaf_weight / self.total_weight * total_weight,
+            balanced_subsample: false, ..self.clone()
+        };
+        (Mask::from_vec(bag), Mask::from_vec(oob), tree)
+    }
+
     pub fn training(
         values: Vec<f64>,
         rows: usize,
@@ -3127,34 +3154,28 @@ impl RfInput for DenseInput {
         if !self.extra_trees { return None; }
         let _timer = ProfileTimer(self.profile.as_ref().map(|p| (&p.bootstrap_ns, Instant::now())));
         let weights = self.sample_weights.as_ref()?;
+        let draw = |rng: &mut RfRng| (rng.get_u64() >> 11) as f64 / (1u64 << 53) as f64;
+        if size <= u32::MAX as usize && weights.iter().all(|&weight| weight == 1.0) {
+            // Unit weights make the cumulative sums the exact integers 1..=rows,
+            // so the binary search below is floor(unit * rows): the same rows
+            // without the cumulative vector or a cache-missing search per draw.
+            let sum = self.rows as f64;
+            let mut counts = vec![0u32; self.rows];
+            for _ in 0..size {
+                counts[((draw(rng) * sum) as usize).min(self.rows - 1)] += 1;
+            }
+            return Some(self.bootstrap_from_counts(size, |row| counts[row] as usize));
+        }
         let mut cumulative = Vec::with_capacity(self.rows);
         let mut sum = 0.0;
         for &weight in weights.iter() { sum += weight; cumulative.push(sum); }
         let mut counts = vec![0usize; self.rows];
         for _ in 0..size {
-            let unit = (rng.get_u64() >> 11) as f64 / (1u64 << 53) as f64;
+            let unit = draw(rng);
             let row = cumulative.partition_point(|&value| value <= unit * sum).min(self.rows - 1);
             counts[row] += 1;
         }
-        let bag = Mask::from_vec((0..self.rows).filter(|&row| counts[row] > 0).collect());
-        let oob = Mask::from_vec((0..self.rows).filter(|&row| counts[row] == 0).collect());
-        let mut tree_weights: Vec<f64> = counts.iter().map(|&n| n as f64).collect();
-        if self.balanced_subsample {
-            let mut classes = vec![0usize; self.n_classes];
-            for row in 0..self.rows { classes[self.labels()[row]] += counts[row]; }
-            let present = classes.iter().filter(|&&n| n > 0).count();
-            for row in 0..self.rows {
-                let n = classes[self.labels()[row]];
-                if n > 0 { tree_weights[row] *= size as f64 / (present * n) as f64; }
-            }
-        }
-        let total_weight = tree_weights.iter().sum();
-        let tree = Self {
-            sample_weights: Some(Arc::new(tree_weights)), total_weight,
-            min_leaf_weight: self.min_leaf_weight / self.total_weight * total_weight,
-            balanced_subsample: false, ..self.clone()
-        };
-        Some((bag, oob, tree))
+        Some(self.bootstrap_from_counts(size, |row| counts[row]))
     }
 
     fn known_constant(&self, feature: usize, cache: &DenseSplitCache) -> bool { self.extra_trees && cache.constant(feature) }
