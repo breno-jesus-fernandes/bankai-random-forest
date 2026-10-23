@@ -2642,6 +2642,11 @@ fn best_random_split_binary(
         ExactValues::F64(values) => search!(|row| values[input.storage_index(row, feature)], EXTRA_FEATURE_VALUES),
         ExactValues::Columns(values) => {
             let column = values.column(feature);
+            if let (false, Some(counts)) = (input.has_missing_values, &target.binary_counts) {
+                return EXTRA_FEATURE_VALUES_F32.with(|workspace| best_random_split_binary_counts_f32(
+                    input, mask, feature, target, counts, monotonic_constraint, lower_bound, upper_bound,
+                    rng, column, &mut workspace.borrow_mut(), split_cache));
+            }
             search!(|row| column[row], EXTRA_FEATURE_VALUES_F32)
         },
         ExactValues::Virtual(values) => {
@@ -2677,6 +2682,45 @@ fn best_random_split_binary(
             }
         },
     }
+}
+
+/// `best_random_split_binary_buffered` for f32 columns without missing values
+/// and whole-count weights, with the same decisions. f32 to f64 is exact and
+/// monotonic, so the f32 range converts to the f64 range, and `value <= threshold`
+/// holds exactly when `value <= below`, the largest f32 not above the threshold.
+#[allow(clippy::too_many_arguments)]
+fn best_random_split_binary_counts_f32(
+    input: &DenseInput, mask: &[usize], feature: usize, target: &DenseDecisionSlice, counts: &BinaryCounts,
+    monotonic_constraint: i8, lower_bound: f64, upper_bound: f64, rng: &mut RfRng,
+    column: &[f32], workspace: &mut Vec<f32>, split_cache: &DenseSplitCache,
+) -> Option<(f64, bool, f64)> {
+    workspace.clear();
+    workspace.extend(mask.iter().map(|&row| column[row]));
+    let (min, max) = workspace.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), &value| (min.min(value), max.max(value)));
+    if let Some(p) = &input.profile {
+        p.sample_visits.fetch_add(mask.len() as u64, AtomicOrdering::Relaxed);
+        p.buffer_bytes.fetch_max((workspace.capacity() * std::mem::size_of::<f32>()) as u64, AtomicOrdering::Relaxed);
+    }
+    let (min, max) = (f64::from(min), f64::from(max));
+    if min >= max {
+        split_cache.mark_constant(feature);
+        if let Some(p) = &input.profile { p.rejected.fetch_add(1, AtomicOrdering::Relaxed); }
+        return None;
+    }
+    let unit = ((rng.get_u64() ^ input.extra_seed.wrapping_mul(0x9e37_79b9_7f4a_7c15)) >> 11) as f64
+        * (1.0 / ((1u64 << 53) as f64));
+    let threshold = min * (1.0 - unit) + max * unit;
+    let rounded = threshold as f32;
+    let below = if f64::from(rounded) > threshold { rounded.next_down() } else { rounded };
+    let (mut low_count, mut low, mut ones) = (0usize, 0u64, 0u64);
+    for ((&weight, &share), &value) in counts.weights.iter().zip(&counts.positive).zip(workspace.iter()) {
+        let is_low = value <= below;
+        low_count += usize::from(is_low);
+        low += if is_low { u64::from(weight) } else { 0 };
+        ones += if is_low { u64::from(share) } else { 0 };
+    }
+    binary_split_gain(input, target, mask.len(), threshold, (low_count, low as f64, (low - ones) as f64, ones as f64),
+        (0, 0.0, 0.0, 0.0), monotonic_constraint, lower_bound, upper_bound)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2773,8 +2817,21 @@ fn best_random_split_binary_buffered<T: Copy + Into<f64>, const MISSING: bool>(
             low_class_1 += if label == 0 { 0.0 } else { low_weight_here };
         }
     }
-    if let Some(p) = &input.profile { p.sample_visits.fetch_add(mask.len() as u64, AtomicOrdering::Relaxed); }
-    let high_count = mask.len() - missing_count - low_count;
+    binary_split_gain(input, target, mask.len(), threshold, (low_count, low_weight, low_class_0, low_class_1),
+        (missing_count, missing_weight, missing_class_0, missing_class_1), monotonic_constraint, lower_bound, upper_bound)
+}
+
+/// Best side for the missing rows of a binary threshold split and its gain,
+/// from the low side's (count, weight, class 0, class 1) and the missing rows'.
+#[allow(clippy::too_many_arguments)]
+fn binary_split_gain(
+    input: &DenseInput, target: &DenseDecisionSlice, rows: usize, threshold: f64,
+    (low_count, low_weight, low_class_0, low_class_1): (usize, f64, f64, f64),
+    (missing_count, missing_weight, missing_class_0, missing_class_1): (usize, f64, f64, f64),
+    monotonic_constraint: i8, lower_bound: f64, upper_bound: f64,
+) -> Option<(f64, bool, f64)> {
+    if let Some(p) = &input.profile { p.sample_visits.fetch_add(rows as u64, AtomicOrdering::Relaxed); }
+    let high_count = rows - missing_count - low_count;
     if low_count == 0 || high_count == 0 { return None; }
     let total_weight = target.total_weight;
     let parent_impurity = impurity(input.criterion, &target.class_weights, total_weight);
