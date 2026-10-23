@@ -87,21 +87,29 @@ impl<I: RfInput> Tree<I> {
                 .saturating_sub(1)
                 .min(8191),
         );
+        // Nodes own contiguous ranges of one working copy of the bag, split in
+        // place with the same row order a split into new masks would give.
+        let mut rows = mask_cache.provide();
+        rows.as_mut_vec().extend_from_slice(bag);
+        let mut right = mask_cache.provide();
+        let mut goes_left = Vec::new();
         let root = Self::new_rec(
             &mut nodes,
             input,
-            bag,
+            rows.as_mut_vec(),
             tries,
             feature_sampler,
             max_depth,
             max_leaves,
             &mut leaf_count,
-            mask_cache,
+            (&mut goes_left, right.as_mut_vec()),
             split_cache,
             rng,
             0.0,
             1.0,
         );
+        mask_cache.release(right);
+        mask_cache.release(rows);
         Self { nodes, root }
     }
 
@@ -391,28 +399,25 @@ impl<I: RfInput> Tree<I> {
     fn new_rec(
         nodes: &mut Vec<Node<I>>,
         input: &I,
-        mask: &Mask,
+        mask: &mut [usize],
         tries: usize,
         feature_sampler: &mut I::FeatureSampler,
         depth_left: usize,
         max_leaves: usize,
         leaf_count: &mut usize,
-        mask_cache: &mut MaskCache,
+        scratch: (&mut Vec<bool>, &mut Vec<usize>),
         split_cache: I::SplitCache,
         rng: &mut RfRng,
         lower_bound: f64,
         upper_bound: f64,
     ) -> usize {
         let y = input.decision_slice(mask);
-        let node = if depth_left == 0
+        let best = if depth_left == 0
             || y.is_pure()
             || !input.can_split(mask)
             || *leaf_count >= max_leaves
         {
-            Node::Leaf(
-                y.condense_with_bounds(rng, lower_bound, upper_bound),
-                mask.len(),
-            )
+            None
         } else {
             feature_sampler.reload();
             let mut fair_best: FairBest<_, f64> = FairBest::new();
@@ -429,92 +434,104 @@ impl<I: RfInput> Tree<I> {
                 if !input.known_constant(feature, &split_cache) { nonconstant += 1; }
             }
             fair_best.consume()
-                .map(|best| {
-                    *leaf_count += 1;
-                    let (best_score, (feature, pivot, missing_left)) = best;
-                    let mut left = mask_cache.provide();
-                    let mut right = mask_cache.provide();
-                    mask.split_into(
-                        input.split_iter(mask, feature, &pivot, missing_left),
-                        &mut left,
-                        &mut right,
-                    );
-                    let (left_split_cache, right_split_cache) =
-                        input.split_cache_children(split_cache, mask, &left, &right);
-                    let constraint = input.monotonic_constraint(feature);
-                    let (left_bounds, right_bounds) = if constraint == 0 {
-                        ((lower_bound, upper_bound), (lower_bound, upper_bound))
+        };
+        // Without a split the node is a leaf of its targets. With one, the targets
+        // are freed before the children build theirs, so a deep node's ancestors hold
+        // no row buffers of their own.
+        let node = match best {
+            None => Node::Leaf(
+                y.condense_with_bounds(rng, lower_bound, upper_bound),
+                mask.len(),
+            ),
+            Some(best) => {
+                drop(y);
+                *leaf_count += 1;
+                let (best_score, (feature, pivot, missing_left)) = best;
+                let (goes_left, right_rows) = scratch;
+                goes_left.clear();
+                goes_left.extend(input.split_iter(mask, feature, &pivot, missing_left));
+                right_rows.clear();
+                let mut lefts = 0;
+                for index in 0..mask.len() {
+                    let row = mask[index];
+                    if goes_left[index] {
+                        mask[lefts] = row;
+                        lefts += 1;
                     } else {
-                        let left_probability = input
-                            .decision_slice(&left)
-                            .positive_probability()
-                            .unwrap_or(lower_bound);
-                        let right_probability = input
-                            .decision_slice(&right)
-                            .positive_probability()
-                            .unwrap_or(upper_bound);
-                        let middle = (left_probability + right_probability) / 2.0;
-                        if constraint > 0 {
-                            // XRF routes values above the pivot to the left child.
-                            ((middle, upper_bound), (lower_bound, middle))
-                        } else {
-                            ((lower_bound, middle), (middle, upper_bound))
-                        }
-                    };
-                    let stored_score = if missing_left {
-                        -best_score.abs()
+                        right_rows.push(row);
+                    }
+                }
+                mask[lefts..].copy_from_slice(right_rows);
+                let cover = mask.len();
+                let (left, right) = mask.split_at(lefts);
+                let (left_split_cache, right_split_cache) =
+                    input.split_cache_children(split_cache, mask, left, right);
+                let constraint = input.monotonic_constraint(feature);
+                let (left_bounds, right_bounds) = if constraint == 0 {
+                    ((lower_bound, upper_bound), (lower_bound, upper_bound))
+                } else {
+                    let left_probability = input
+                        .decision_slice(&left)
+                        .positive_probability()
+                        .unwrap_or(lower_bound);
+                    let right_probability = input
+                        .decision_slice(&right)
+                        .positive_probability()
+                        .unwrap_or(upper_bound);
+                    let middle = (left_probability + right_probability) / 2.0;
+                    if constraint > 0 {
+                        // XRF routes values above the pivot to the left child.
+                        ((middle, upper_bound), (lower_bound, middle))
                     } else {
-                        best_score.abs()
-                    };
-                    let left_index = Self::new_rec(
-                        nodes,
-                        input,
-                        &left,
-                        tries,
-                        feature_sampler,
-                        depth_left - 1,
-                        max_leaves,
-                        leaf_count,
-                        mask_cache,
-                        left_split_cache,
-                        rng,
-                        left_bounds.0,
-                        left_bounds.1,
-                    );
-                    let right_index = Self::new_rec(
-                        nodes,
-                        input,
-                        &right,
-                        tries,
-                        feature_sampler,
-                        depth_left - 1,
-                        max_leaves,
-                        leaf_count,
-                        mask_cache,
-                        right_split_cache,
-                        rng,
-                        right_bounds.0,
-                        right_bounds.1,
-                    );
-                    let branch = Node::Branch(
-                        feature,
-                        pivot,
-                        stored_score,
-                        mask.len(),
-                        left_index,
-                        right_index,
-                    );
-                    mask_cache.release(left);
-                    mask_cache.release(right);
-                    branch
-                })
-                //No split mean a third way to make a leaf
-                .unwrap_or_else(|| {
-                    Node::Leaf(
-                        y.condense_with_bounds(rng, lower_bound, upper_bound),
-                        mask.len(),
-                    )
-                })
+                        ((lower_bound, middle), (middle, upper_bound))
+                    }
+                };
+                let stored_score = if missing_left {
+                    -best_score.abs()
+                } else {
+                    best_score.abs()
+                };
+                let (left, right) = mask.split_at_mut(lefts);
+                let left_index = Self::new_rec(
+                    nodes,
+                    input,
+                    left,
+                    tries,
+                    feature_sampler,
+                    depth_left - 1,
+                    max_leaves,
+                    leaf_count,
+                    (&mut *goes_left, &mut *right_rows),
+                    left_split_cache,
+                    rng,
+                    left_bounds.0,
+                    left_bounds.1,
+                );
+                let right_index = Self::new_rec(
+                    nodes,
+                    input,
+                    right,
+                    tries,
+                    feature_sampler,
+                    depth_left - 1,
+                    max_leaves,
+                    leaf_count,
+                    (&mut *goes_left, &mut *right_rows),
+                    right_split_cache,
+                    rng,
+                    right_bounds.0,
+                    right_bounds.1,
+                );
+                let branch = Node::Branch(
+                    feature,
+                    pivot,
+                    stored_score,
+                    cover,
+                    left_index,
+                    right_index,
+                );
+                branch
+            }
         };
         let index = nodes.len();
         nodes.push(node);

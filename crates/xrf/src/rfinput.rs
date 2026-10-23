@@ -32,7 +32,7 @@ pub trait RfInput: Sized {
     }
     /// Optional input view with tree-specific weights for the supplied bag.
     /// Implementations can share immutable feature storage with the original.
-    fn tree_input(&self, _bag: &Mask) -> Option<Self> {
+    fn tree_input(&self, _bag: &[usize]) -> Option<Self> {
         None
     }
     /// Optional bootstrap implementation with input-specific sampling weights.
@@ -47,29 +47,29 @@ pub trait RfInput: Sized {
         visited < tries
     }
     /// Constructor of the DecisionSlice object for elements in the mask.
-    fn decision_slice(&self, mask: &Mask) -> Self::DecisionSlice;
+    fn decision_slice(&self, mask: &[usize]) -> Self::DecisionSlice;
     /// Whether this node has enough observations to attempt a split.
-    fn can_split(&self, _: &Mask) -> bool {
+    fn can_split(&self, _: &[usize]) -> bool {
         true
     }
     /// Constructor of FeatureSampler.
     fn feature_sampler(&self) -> Self::FeatureSampler;
     /// Build split-search state for a node.
-    fn split_cache(&self, on: &Mask) -> Self::SplitCache;
+    fn split_cache(&self, on: &[usize]) -> Self::SplitCache;
     /// Derive child state after a node is split. Implementations can reuse the
     /// parent state to avoid rebuilding statistics for both child nodes. Ownership
     /// is transferred so the parent's storage can become the larger child's cache.
     fn split_cache_children(
         &self,
         parent_cache: Self::SplitCache,
-        parent: &Mask,
-        left: &Mask,
-        right: &Mask,
+        parent: &[usize],
+        left: &[usize],
+        right: &[usize],
     ) -> (Self::SplitCache, Self::SplitCache);
     /// Constructor of a split, which is (usually optimal) pivot using certain feature that splits observations in a possibly most uniform subsets.
     fn new_split(
         &self,
-        on: &Mask,
+        on: &[usize],
         using: Self::FeatureId,
         y: &Self::DecisionSlice,
         split_cache: &Self::SplitCache,
@@ -80,7 +80,7 @@ pub trait RfInput: Sized {
     /// by node weight / root weight) for growth with a leaf budget.
     fn new_split_with_bounds(
         &self,
-        on: &Mask,
+        on: &[usize],
         using: Self::FeatureId,
         y: &Self::DecisionSlice,
         split_cache: &Self::SplitCache,
@@ -97,7 +97,7 @@ pub trait RfInput: Sized {
     /// Application of pivot to a given subset of the data; returns of iterator that sends observations left (for true) or right (for false).
     fn split_iter<'a>(
         &'a self,
-        on: &'a Mask,
+        on: &'a [usize],
         using: Self::FeatureId,
         by: &'a Self::Pivot,
         missing_left: bool,
@@ -152,8 +152,8 @@ pub trait VoteAggregator<I: RfInput> {
 }
 
 pub trait AccuracyDecreaseAggregator<I: RfInput> {
-    fn new(input: &I, on: &Mask, n: usize) -> Self;
-    fn ingest(&mut self, permuted: Option<I::FeatureId>, mask: &Mask, vote: &I::Vote);
+    fn new(input: &I, on: &[usize], n: usize) -> Self;
+    fn ingest(&mut self, permuted: Option<I::FeatureId>, mask: &[usize], vote: &I::Vote);
     fn mda_iter(&self) -> impl Iterator<Item = (I::FeatureId, f64)>;
     fn get_direct_vote(&self, e: usize) -> I::Vote;
 }

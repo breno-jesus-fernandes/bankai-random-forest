@@ -97,6 +97,10 @@ impl Mask {
         let oob = hits;
         (Mask(bag), Mask(oob))
     }
+    /// The index vector, for callers that partition rows in place.
+    pub(crate) fn as_mut_vec(&mut self) -> &mut Vec<usize> {
+        &mut self.0
+    }
     /// Constructor simply converting an index vector
     #[inline]
     pub fn from_vec(x: Vec<usize>) -> Self {

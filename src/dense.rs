@@ -1340,7 +1340,7 @@ impl DenseInput {
         }
     }
 
-    fn balanced_tree_view(&self, bag: &Mask) -> Self {
+    fn balanced_tree_view(&self, bag: &[usize]) -> Self {
         let labels = self.labels();
         let mut class_counts = vec![0usize; self.n_classes];
         for &row in bag.iter() {
@@ -1941,7 +1941,7 @@ where
     (binned, has_missing_values, has_infinite_values)
 }
 
-fn build_histograms(input: &DenseInput, mask: &Mask) -> HistogramCache {
+fn build_histograms(input: &DenseInput, mask: &[usize]) -> HistogramCache {
     let edges = input.bin_edges.as_ref().expect("histogram cache requires fitted bin edges");
     let mut bin_offsets = Vec::with_capacity(edges.len() + 1);
     bin_offsets.push(0);
@@ -1978,7 +1978,7 @@ fn build_histograms(input: &DenseInput, mask: &Mask) -> HistogramCache {
 }
 
 fn accumulate_dense_histograms<const CLASSES: usize>(
-    input: &DenseInput, mask: &Mask, values: &[u8], histogram: &mut HistogramCache,
+    input: &DenseInput, mask: &[usize], values: &[u8], histogram: &mut HistogramCache,
 ) {
     let classes = if CLASSES == 0 { input.n_classes } else { CLASSES };
     let workers = input.histogram_threads.min(input.columns);
@@ -2019,7 +2019,7 @@ fn accumulate_dense_histograms<const CLASSES: usize>(
 
 fn accumulate_dense_histograms_parallel<const CLASSES: usize>(
     input: &DenseInput,
-    mask: &Mask,
+    mask: &[usize],
     values: &[u8],
     histogram: &mut HistogramCache,
     classes: usize,
@@ -2159,7 +2159,7 @@ pub struct DenseDecisionSlice {
 }
 
 impl DenseDecisionSlice {
-    fn new(input: &DenseInput, mask: &Mask) -> Self {
+    fn new(input: &DenseInput, mask: &[usize]) -> Self {
         if input.integral_weights && input.extra_trees && input.n_classes == 2 && !input.has_missing_values
             && matches!(input.values, DenseValues::Exact(_)) {
             return Self::new_binary_counts(input, mask);
@@ -2192,7 +2192,7 @@ impl DenseDecisionSlice {
 
     /// Whole-count weights sum exactly as integers, so the f64 class and total
     /// weights equal the row-order f64 sums of the general constructor.
-    fn new_binary_counts(input: &DenseInput, mask: &Mask) -> Self {
+    fn new_binary_counts(input: &DenseInput, mask: &[usize]) -> Self {
         let labels = input.labels();
         let mut weights = Vec::with_capacity(mask.len());
         let mut positive = Vec::with_capacity(mask.len());
@@ -2299,7 +2299,7 @@ fn impurity(criterion: Criterion, class_weights: &[f64], total_weight: f64) -> f
 
 fn best_split(
     input: &DenseInput,
-    mask: &Mask,
+    mask: &[usize],
     feature: usize,
     target: &DenseDecisionSlice,
     split_cache: &DenseSplitCache,
@@ -2347,7 +2347,7 @@ fn best_split(
 
 fn best_split_exact(
     input: &DenseInput,
-    mask: &Mask,
+    mask: &[usize],
     feature: usize,
     target: &DenseDecisionSlice,
     monotonic_constraint: i8,
@@ -2501,7 +2501,7 @@ fn best_split_exact(
 /// which avoids materializing histogram statistics for all features.
 fn best_random_split(
     input: &DenseInput,
-    mask: &Mask,
+    mask: &[usize],
     feature: usize,
     target: &DenseDecisionSlice,
     monotonic_constraint: i8,
@@ -2522,7 +2522,7 @@ fn best_random_split(
 }
 
 fn best_random_split_generic(
-    input: &DenseInput, mask: &Mask, feature: usize, target: &DenseDecisionSlice,
+    input: &DenseInput, mask: &[usize], feature: usize, target: &DenseDecisionSlice,
     monotonic_constraint: i8, lower_bound: f64, upper_bound: f64, rng: &mut RfRng,
     split_cache: &DenseSplitCache,
 ) -> Option<(f64, bool, f64)> {
@@ -2614,7 +2614,7 @@ fn best_random_split_generic(
 
 fn best_random_split_binary(
     input: &DenseInput,
-    mask: &Mask,
+    mask: &[usize],
     feature: usize,
     target: &DenseDecisionSlice,
     monotonic_constraint: i8,
@@ -2681,7 +2681,7 @@ fn best_random_split_binary(
 
 #[allow(clippy::too_many_arguments)]
 fn best_random_split_binary_buffered<T: Copy + Into<f64>, const MISSING: bool>(
-    input: &DenseInput, mask: &Mask, feature: usize, target: &DenseDecisionSlice,
+    input: &DenseInput, mask: &[usize], feature: usize, target: &DenseDecisionSlice,
     monotonic_constraint: i8, lower_bound: f64, upper_bound: f64, rng: &mut RfRng,
     values: impl Fn(usize) -> T, workspace: &mut Vec<T>,
     split_cache: &DenseSplitCache,
@@ -2815,7 +2815,7 @@ fn best_random_split_binary_buffered<T: Copy + Into<f64>, const MISSING: bool>(
 
 /// Experimental one-pass statistics for a visited binned feature, never a global cache.
 fn best_random_split_binned_binary(
-    input: &DenseInput, mask: &Mask, feature: usize, target: &DenseDecisionSlice,
+    input: &DenseInput, mask: &[usize], feature: usize, target: &DenseDecisionSlice,
     monotonic_constraint: i8, lower_bound: f64, upper_bound: f64, rng: &mut RfRng,
     split_cache: &DenseSplitCache,
 ) -> Option<(f64, bool, f64)> {
@@ -3137,7 +3137,7 @@ pub struct PermutationImportance {
 }
 
 impl AccuracyDecreaseAggregator<DenseInput> for PermutationImportance {
-    fn new(input: &DenseInput, on: &Mask, n: usize) -> Self {
+    fn new(input: &DenseInput, on: &[usize], n: usize) -> Self {
         Self {
             direct: vec![None; n],
             drops: HashMap::new(),
@@ -3146,7 +3146,7 @@ impl AccuracyDecreaseAggregator<DenseInput> for PermutationImportance {
         }
     }
 
-    fn ingest(&mut self, permuted: Option<usize>, mask: &Mask, vote: &usize) {
+    fn ingest(&mut self, permuted: Option<usize>, mask: &[usize], vote: &usize) {
         if let Some(feature) = permuted {
             let difference = mask
                 .iter()
@@ -3239,7 +3239,7 @@ impl RfInput for DenseInput {
         self.ccp_alpha
     }
 
-    fn tree_input(&self, bag: &Mask) -> Option<Self> {
+    fn tree_input(&self, bag: &[usize]) -> Option<Self> {
         self.balanced_subsample
             .then(|| self.balanced_tree_view(bag))
     }
@@ -3285,11 +3285,11 @@ impl RfInput for DenseInput {
         self.columns
     }
 
-    fn decision_slice(&self, mask: &Mask) -> Self::DecisionSlice {
+    fn decision_slice(&self, mask: &[usize]) -> Self::DecisionSlice {
         DenseDecisionSlice::new(self, mask)
     }
 
-    fn can_split(&self, mask: &Mask) -> bool {
+    fn can_split(&self, mask: &[usize]) -> bool {
         mask.len() >= self.min_samples_split
             && (!self.extra_trees || mask.len() >= self.min_samples_leaf.saturating_mul(2))
             && !self.active_features.is_empty()
@@ -3308,7 +3308,7 @@ impl RfInput for DenseInput {
         }
     }
 
-    fn split_cache(&self, on: &Mask) -> Self::SplitCache {
+    fn split_cache(&self, on: &[usize]) -> Self::SplitCache {
         DenseSplitCache::new(
             ((!self.extra_trees) && self.histogram_bins.is_some())
                 .then(|| build_histograms(self, on)),
@@ -3318,9 +3318,9 @@ impl RfInput for DenseInput {
     fn split_cache_children(
         &self,
         parent_cache: Self::SplitCache,
-        _: &Mask,
-        left: &Mask,
-        right: &Mask,
+        _: &[usize],
+        left: &[usize],
+        right: &[usize],
     ) -> (Self::SplitCache, Self::SplitCache) {
         let Some(parent_histograms) = parent_cache.0 else {
             let constants = parent_cache.1.into_inner();
@@ -3345,7 +3345,7 @@ impl RfInput for DenseInput {
 
     fn new_split(
         &self,
-        mask: &Mask,
+        mask: &[usize],
         feature: Self::FeatureId,
         target: &Self::DecisionSlice,
         split_cache: &Self::SplitCache,
@@ -3356,7 +3356,7 @@ impl RfInput for DenseInput {
 
     fn new_split_with_bounds(
         &self,
-        mask: &Mask,
+        mask: &[usize],
         feature: Self::FeatureId,
         target: &Self::DecisionSlice,
         split_cache: &Self::SplitCache,
@@ -3387,7 +3387,7 @@ impl RfInput for DenseInput {
 
     fn split_iter<'a>(
         &'a self,
-        mask: &'a Mask,
+        mask: &'a [usize],
         feature: Self::FeatureId,
         pivot: &'a Self::Pivot,
         missing_left: bool,
