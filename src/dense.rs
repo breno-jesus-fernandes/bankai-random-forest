@@ -78,7 +78,15 @@ pub struct DenseInput {
     /// scaling), so weight sums are exact integers in any order.
     integral_weights: bool,
     /// Whole bootstrap counts standing in for `sample_weights` (4 bytes a row).
-    count_weights: Option<Arc<Vec<u32>>>,
+    count_weights: Option<CountWeights>,
+}
+
+/// Per-row bootstrap counts; with `label_bit`, each entry is `count << 1 | label`
+/// for a binary target, the packed form a whole-count binary node gathers.
+#[derive(Clone)]
+struct CountWeights {
+    counts: Arc<Vec<u32>>,
+    label_bit: bool,
 }
 
 #[derive(Clone)]
@@ -398,10 +406,17 @@ impl DenseInput {
     fn bootstrap_from_u32_counts(&self, keep_oob: bool, counts: Vec<u32>) -> (Mask, Mask, Self) {
         let (bag, oob) = self.bootstrap_masks(keep_oob, |row| counts[row] as usize);
         // Whole counts sum exactly, matching the f64 sum of the same weights.
-        let total_weight = counts.iter().map(|&n| u64::from(n)).sum::<u64>() as f64;
+        let total = counts.iter().map(|&n| u64::from(n)).sum::<u64>();
+        let label_bit = self.n_classes == 2 && total < 1u64 << 31;
+        let mut counts = counts;
+        if label_bit {
+            let labels = self.labels();
+            for (count, &label) in counts.iter_mut().zip(labels.iter()) { *count = *count << 1 | u32::from(label != 0); }
+        }
         let tree = Self {
-            sample_weights: None, count_weights: Some(Arc::new(counts)), integral_weights: true, total_weight,
-            min_leaf_weight: self.min_leaf_weight / self.total_weight * total_weight,
+            sample_weights: None, count_weights: Some(CountWeights { counts: Arc::new(counts), label_bit }),
+            integral_weights: true, total_weight: total as f64,
+            min_leaf_weight: self.min_leaf_weight / self.total_weight * total as f64,
             ..self.clone()
         };
         (bag, oob, tree)
@@ -1386,7 +1401,7 @@ impl DenseInput {
     }
 
     fn sample_weight(&self, row: usize) -> f64 {
-        if let Some(counts) = &self.count_weights { return f64::from(counts[row]); }
+        if let Some(weights) = &self.count_weights { return f64::from(weights.counts[row] >> u32::from(weights.label_bit)); }
         self.sample_weights
             .as_deref()
             .expect("prediction input cannot be used for training")[row]
@@ -2207,15 +2222,17 @@ impl DenseDecisionSlice {
     /// Whole-count weights sum exactly as integers, so the f64 class and total
     /// weights equal the row-order f64 sums of the general constructor.
     fn new_binary_counts(input: &DenseInput, mask: &[usize]) -> Self {
-        let labels = input.labels();
-        let mut packed = Vec::with_capacity(mask.len());
+        let packed: Vec<u32> = match &input.count_weights {
+            Some(CountWeights { counts, label_bit: true }) => mask.iter().map(|&row| counts[row]).collect(),
+            _ => {
+                let labels = input.labels();
+                mask.iter().map(|&row| (input.sample_weight(row) as u32) << 1 | u32::from(labels[row] != 0)).collect()
+            }
+        };
         let (mut total, mut ones) = (0u64, 0u64);
-        for &row in mask.iter() {
-            let weight = input.sample_weight(row) as u32;
-            let label = u32::from(labels[row] != 0);
-            packed.push(weight << 1 | label);
-            total += u64::from(weight);
-            ones += u64::from(weight * label);
+        for &entry in &packed {
+            total += u64::from(entry >> 1);
+            ones += u64::from((entry >> 1) * (entry & 1));
         }
         Self {
             labels: Vec::new(),
