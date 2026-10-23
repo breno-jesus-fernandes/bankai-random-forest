@@ -74,6 +74,9 @@ pub struct DenseInput {
     column_major: bool,
     extra_seed: u64,
     profile: Option<Arc<FitProfile>>,
+    /// Every training weight is a whole bootstrap count (no balanced or user
+    /// scaling), so weight sums are exact integers in any order.
+    integral_weights: bool,
 }
 
 #[derive(Clone)]
@@ -399,6 +402,7 @@ impl DenseInput {
         let tree = Self {
             sample_weights: Some(Arc::new(tree_weights)), total_weight,
             min_leaf_weight: self.min_leaf_weight / self.total_weight * total_weight,
+            integral_weights: !self.balanced_subsample && (0..self.rows).all(|row| count(row) <= u32::MAX as usize),
             balanced_subsample: false, ..self.clone()
         };
         (Mask::from_vec(bag), Mask::from_vec(oob), tree)
@@ -586,6 +590,7 @@ impl DenseInput {
             column_major: false,
             extra_seed: 6,
             profile: None,
+            integral_weights: false,
         })
     }
 
@@ -683,6 +688,7 @@ impl DenseInput {
             column_major: true,
             extra_seed: 6,
             profile: None,
+            integral_weights: false,
         })
     }
     /// Bin every column once: column-major codes plus per-column edges, the
@@ -750,6 +756,7 @@ impl DenseInput {
             column_major: true,
             extra_seed: 6,
             profile: None,
+            integral_weights: false,
         })
     }
 
@@ -913,6 +920,7 @@ impl DenseInput {
             column_major: false,
             extra_seed: 6,
             profile: None,
+            integral_weights: false,
         })
     }
 
@@ -966,6 +974,7 @@ impl DenseInput {
             column_major: false,
             extra_seed: 6,
             profile: None,
+            integral_weights: false,
         })
     }
 
@@ -1149,6 +1158,7 @@ impl DenseInput {
             column_major: false,
             extra_seed: 6,
             profile: None,
+            integral_weights: false,
         })
     }
 
@@ -1194,6 +1204,7 @@ impl DenseInput {
             column_major: false,
             extra_seed: 6,
             profile: None,
+            integral_weights: false,
         })
     }
 
@@ -2102,9 +2113,16 @@ impl VoteAggregator<DenseInput> for ClassVotes {
     }
 }
 
+/// Integral binary node: per-row weights and the positive-class share.
+struct BinaryCounts {
+    weights: Vec<u32>,
+    positive: Vec<u32>,
+}
+
 pub struct DenseDecisionSlice {
     labels: Vec<usize>,
     exact_binary_weights: Option<Vec<f64>>,
+    binary_counts: Option<BinaryCounts>,
     class_weights: Vec<f64>,
     total_weight: f64,
     criterion: Criterion,
@@ -2112,6 +2130,10 @@ pub struct DenseDecisionSlice {
 
 impl DenseDecisionSlice {
     fn new(input: &DenseInput, mask: &Mask) -> Self {
+        if input.integral_weights && input.extra_trees && input.n_classes == 2 && !input.has_missing_values
+            && matches!(input.values, DenseValues::Exact(_)) {
+            return Self::new_binary_counts(input, mask);
+        }
         let mut class_weights = vec![0.0; input.n_classes];
         let mut total_weight = 0.0;
         let mut exact_binary_weights = (input.extra_trees && input.n_classes == 2 && matches!(input.values, DenseValues::Exact(_)))
@@ -2131,8 +2153,34 @@ impl DenseDecisionSlice {
         Self {
             labels,
             exact_binary_weights,
+            binary_counts: None,
             class_weights,
             total_weight,
+            criterion: input.criterion,
+        }
+    }
+
+    /// Whole-count weights sum exactly as integers, so the f64 class and total
+    /// weights equal the row-order f64 sums of the general constructor.
+    fn new_binary_counts(input: &DenseInput, mask: &Mask) -> Self {
+        let labels = input.labels();
+        let mut weights = Vec::with_capacity(mask.len());
+        let mut positive = Vec::with_capacity(mask.len());
+        let (mut total, mut ones) = (0u64, 0u64);
+        for &row in mask.iter() {
+            let weight = input.sample_weight(row) as u32;
+            let share = if labels[row] == 0 { 0 } else { weight };
+            weights.push(weight);
+            positive.push(share);
+            total += u64::from(weight);
+            ones += u64::from(share);
+        }
+        Self {
+            labels: Vec::new(),
+            exact_binary_weights: None,
+            binary_counts: Some(BinaryCounts { weights, positive }),
+            class_weights: vec![(total - ones) as f64, ones as f64],
+            total_weight: total as f64,
             criterion: input.criterion,
         }
     }
@@ -2614,9 +2662,9 @@ fn best_random_split_binary_buffered<T: Copy + Into<f64>, const MISSING: bool>(
     let mut missing_weight = 0.0;
     let mut missing_class_0 = 0.0;
     let mut missing_class_1 = 0.0;
-    let weights = target.exact_binary_weights.as_ref().expect("exact binary node caches its weights");
     workspace.reserve(mask.len());
     if MISSING {
+        let weights = target.exact_binary_weights.as_ref().expect("exact binary node caches its weights");
         for ((&row, &label), &weight) in mask.iter().zip(&target.labels).zip(weights) {
             let stored = values(row);
             workspace.push(stored);
@@ -2656,7 +2704,22 @@ fn best_random_split_binary_buffered<T: Copy + Into<f64>, const MISSING: bool>(
     let mut low_weight = 0.0;
     let mut low_class_0 = 0.0;
     let mut low_class_1 = 0.0;
-    if MISSING {
+    if let (false, Some(counts)) = (MISSING, &target.binary_counts) {
+        // Integer sums of whole-count weights are exact, so they equal the f64
+        // row-order sums below bit for bit once converted.
+        let (mut low, mut ones) = (0u64, 0u64);
+        for ((&weight, &share), &stored) in counts.weights.iter().zip(&counts.positive).zip(workspace.iter()) {
+            let value: f64 = stored.into();
+            let is_low = value <= threshold;
+            low_count += usize::from(is_low);
+            low += if is_low { u64::from(weight) } else { 0 };
+            ones += if is_low { u64::from(share) } else { 0 };
+        }
+        low_weight = low as f64;
+        low_class_0 = (low - ones) as f64;
+        low_class_1 = ones as f64;
+    } else if MISSING {
+        let weights = target.exact_binary_weights.as_ref().expect("exact binary node caches its weights");
         for ((&weight, &label), &stored) in weights.iter().zip(&target.labels).zip(workspace.iter()) {
             let value: f64 = stored.into();
             if !value.is_nan() && value <= threshold {
@@ -2669,6 +2732,7 @@ fn best_random_split_binary_buffered<T: Copy + Into<f64>, const MISSING: bool>(
         // A uniform random threshold makes both comparisons unpredictable, so
         // select instead of branching. Adding 0.0 leaves every accumulator
         // bit-identical to the branching sums, in the same order.
+        let weights = target.exact_binary_weights.as_ref().expect("exact binary node caches its weights");
         for ((&weight, &label), &stored) in weights.iter().zip(&target.labels).zip(workspace.iter()) {
             let value: f64 = stored.into();
             let low = value <= threshold;
